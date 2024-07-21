@@ -14,42 +14,42 @@ Mikrotik routers are widely used in the networking industry for their robust fea
 - Router Management
 - Device grouping
 - Access Management
-   - groups
-   - Radius server
-   - Permissions
-   - Forceing and Automation of Permissions and Radius
+  - groups
+  - Radius server
+  - Permissions
+  - Forceing and Automation of Permissions and Radius
 - Monitoring and Reporting
-   - Radius logs
-   - Syslog
-   - Events
-   - Software logs
-   - Device Health history
-   - Device BW history
-   - Graphs
+  - Radius logs
+  - Syslog
+  - Events
+  - Software logs
+  - Device Health History
+  - Device BW history
+  - Graphs
 - Automation and Scripting
-   - Batch code Execution
-   - Schedule code Execution
-   - Backup Schedule
+  - Batch code Execution
+  - Schedule code Execution
+  - Backup Schedule
 - Snippets ( Batch configuration )
 - User Access Management
-   - Create/Delete Users
-   - Access Management
-   - Device Access and Permission Assignment
+  - Create/Delete Users
+  - Access Management
+  - Device Access and Permission Assignment
 - Auto Deploy On Routers
-   - Apply Radius configuration and Forceing
-   - Apply Syslog configuration and Forceing
-   - Apply User Groups and Forceing
+  - Apply Radius configuration and Forcing
+  - Apply Syslog configuration and Forcing
+  - Apply User Groups and Forcing
 - Activity Monitoring
 - NOC dashboard - Monitoring Wall (pro)
-- Radio Monitoring - Radio quality and conectivity (pro)
+- Radio Monitoring - Radio quality and connectivity (pro)
 - Firmware Management
-   - Internal Firmware Repository
-   - Automatic Firmware Download from Mikrotik website and store in Repo
-   - Firmware Update Schedule (pro)
-   - Firmware `safe update`
-      - with `safe update` Mikrowizard will take care of update dependency and  packages
-And Many more Features is comming :)
-
+  - Internal Firmware Repository
+  - Automatic Firmware Download from the Mikrotik website and store in Repo
+  - Firmware Update Schedule (pro)
+  - Firmware `safe update`
+    - with `safe update` Mikrowizard will take care of updating dependencies and  packages
+And Many More Features is coming :)
+ 
 ## License
 
 [AGPL](https://www.gnu.org/licenses/agpl-3.0.html)
@@ -70,5 +70,4 @@ To deploy this project run
 ```bash
   Installation script is under development :) 
 ```
-
 
