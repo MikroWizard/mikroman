@@ -1,19 +1,18 @@
 {
     "name": "python server config template - rename me",
 
-    "PYSRV_IS_PRODUCTION": "",
-
-    "PYSRV_DATABASE_HOST": "/app/data/mydb.sqlite",
-    "PYSRV_DATABASE_HOST_POSTGRESQL": "host.docker.internal",
-    "PYSRV_DATABASE_HOST_SQLITE": "/app/data/mydb.sqlite",
-    "PYSRV_DATABASE_PORT": "54320",
-    "PYSRV_DATABASE_NAME": "tmdb",
-    "PYSRV_DATABASE_USER": "tm",
-    "PYSRV_DATABASE_PASSWORD": "MY_PASSWORD",
-
+    "PYSRV_IS_PRODUCTION": "1",
+    "PYSRV_DATABASE_HOST": "127.0.0.1",
+    "PYSRV_DATABASE_HOST_POSTGRESQL": "127.0.0.1",
+    "PYSRV_DATABASE_PORT": "5432",
+    "PYSRV_DATABASE_NAME": "_YOUR_DATABASE_NAME_",
+    "PYSRV_DATABASE_USER": "_YOUR_DATABASE_USERNAME_",
+    "PYSRV_DATABASE_PASSWORD": "_YOUR_DATABASE_PASSWORD_",
+    "PYSRV_CRYPT_KEY": "_YOUR_CRYPT_KEY_",
+    "PYSRV_BACKUP_FOLDER":"/conf/backups/",
+    "PYSRV_FIRM_FOLDER":"/conf/firms/",
     "PYSRV_COOKIE_HTTPS_ONLY": false,
-    "PYSRV_REDIS_HOST": "host.docker.internal:6379",
+    "PYSRV_REDIS_HOST": "127.0.0.1:6379",
     "PYSRV_DOMAIN_NAME": "",
     "PYSRV_CORS_ALLOW_ORIGIN": "*"
 }
-
