@@ -65,9 +65,9 @@ Thanks to RESTPie3 from https://github.com/tomimick/restpie3
 
 ## Deployment
 
-To deploy this project run
+To deploy this project 
 
-```bash
-  Installation script is under development :) 
-```
+Please read the documntaion from MikroWizard.com
+
+https://mikrowizard.com/docs-category/geting-started/
 
