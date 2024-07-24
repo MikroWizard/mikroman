@@ -28,6 +28,7 @@ def set_get_install_date():
     if not install_date:
         install_date=datetime.datetime.now()
         db_sysconfig.set_sysconfig('install_date',install_date.strftime("%Y-%m-%d %H:%M:%S"))
+        install_date=install_date.strftime("%Y-%m-%d %H:%M:%S")
     
     return install_date
 
