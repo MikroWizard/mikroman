@@ -32,7 +32,6 @@ RUN set -ex \
 
 # install other py libs - not require compilation
 
-
 # copy source files
 COPY conf /app/conf
 COPY py /app/py
