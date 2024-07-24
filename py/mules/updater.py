@@ -85,12 +85,12 @@ def main():
             username = db_sysconfig.get_sysconfig('username')
         except:
             log.error("No username found")
-            time.sleep(sleep_time)
+            time.sleep(300)
             continue
         # util.send_mikrowizard_request(params)
         if not username or username.strip()=="":
             log.error("No username found")
-            time.sleep(sleep_time)
+            time.sleep(300)
             continue
         install_date=set_get_install_date()
         from _version import __version__
