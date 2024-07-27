@@ -9,7 +9,7 @@
 from peewee import *
 
 from libs.db.db_device import Devices
-from libs.db.db import User,BaseModel
+from libs.db.db import User,BaseModel,get_object_or_none
 from libs.db.db_permissions import Perms
 from libs.db.db_groups import DevGroups,DevGroupRel
 
@@ -51,14 +51,14 @@ class DevUserGroupPermRel(BaseModel):
     
     def delete_group(gid):
         #check if group exists
-        group = DevGroups.select().where(DevGroups.id == gid)
+        group = get_object_or_none(DevGroups, id=gid)
         if group:
             try:
                 #First delete records from DevGroupRel
                 delete=DevGroupRel.delete().where(DevGroupRel.group_id == gid).execute()
                 #delete group records from DevUserGroupPermRel
                 delete=DevUserGroupPermRel.delete().where(DevUserGroupPermRel.group_id == gid).execute()
-                delete=DevGroups.delete().where(DevGroups.id == gid).execute()
+                delete=group.delete_instance(recursive=True)
                 return True
             except Exception as e:
                 return False

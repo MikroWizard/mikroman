@@ -363,7 +363,7 @@ def grab_device_data(dev, q):
             "keys":keys
             }
             reddb=RedisDB(redopts)
-            if len(json.loads(dev.sensors))<len(keys) and dev.sensors!=json.dumps(keys):
+            if not dev.sensors or (len(json.loads(dev.sensors))<len(keys) and dev.sensors!=json.dumps(keys)):
                 log.info("updating keys for device {}".format(dev.id))
                 dev.sensors=json.dumps(keys)
                 reddb.dev_create_keys()
