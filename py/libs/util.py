@@ -599,7 +599,7 @@ def check_update(options,router=False):
         return False,False,False,False
 
 def log_alert(type,dev,massage):
-    log.error("Alert: {} {}".format(type,massage))
+    log.error("Alert: {} {} Device: {} ".format(type,massage,dev.ip))
 
 def backup_routers(dev,q):
     status=backup_router(dev)
@@ -607,7 +607,7 @@ def backup_routers(dev,q):
 
 def run_snippets(dev, snippet,q):
     result=run_snippet(dev, snippet)
-    q.put({"id": dev.id, "result":result})
+    q.put({"devid": dev.id,"devip": dev.ip,"devname": dev.name, "status":True if result else False , "result":result if result else 'Exec Failed'})
     return result
 
 def run_snippet(dev, snippet):
@@ -638,7 +638,8 @@ def run_snippet(dev, snippet):
             try:
                 ssh=SSH_Helper(options)
                 result=ssh.exec_command(snippet)
-                
+                if not result:
+                    result="executed successfully"
             except Exception as e:
                 log.error(e)
                 log_alert('ssh',dev,'During backup ssh error')
@@ -895,9 +896,6 @@ def download_firmware_to_repository(version,q,arch="all",all_package=False):
         log.error(links)
         firm=db_firmware.Firmware()
         for lnk in links:
-            log.error("oooooooooooooooooooooooooooooooooooooooooo")
-            log.error(lnk)
-            log.error("oooooooooooooooooooooooooooooooooooooooooo")
             if all_package and arch+"-allpackage" == lnk:
                 arch_togo=lnk
                 link=links[lnk]["link"]

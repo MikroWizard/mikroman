@@ -31,7 +31,7 @@ def scan_network():
     if not status:
         if start and end and port:
             db_syslog.add_syslog_event(get_myself(), "Scanner","start", get_ip(),get_agent(),json.dumps(input))
-            bgtasks.scan_with_ip(start=start,end=end,port=port,password=password,username=username)
+            bgtasks.scan_with_ip(start=start,end=end,port=port,password=password,username=username,user=get_myself())
             return buildResponse({'status': True},200)
         else:
             return buildResponse({'status': status},200)

@@ -48,10 +48,15 @@ def downloader_job_status():
 def firmware_service_status():
     return (Tasks.select().where(Tasks.signal == 150).get())
 
+def exec_snipet_status():
+    return (Tasks.select().where(Tasks.signal == 160).get())
+
 
 class TaskResults(BaseModel):
     task_type = TextField()
     result = DateTimeField()
+    info = TextField()
+    external_id = IntegerField()
     created = DateTimeField()
 
     class Meta:
@@ -60,8 +65,8 @@ class TaskResults(BaseModel):
         # whether the index is unique or not.
         db_table = 'task_results'
 
-def add_task_result(task_type,result):
-    tr = TaskResults(task_type=task_type, result=result)
+def add_task_result(task_type,result,info=None,eid=None):
+    tr = TaskResults(task_type=task_type, result=result,info=info,external_id=eid)
     tr.save()
 
 # --------------------------------------------------------------------------

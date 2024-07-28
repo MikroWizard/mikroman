@@ -46,6 +46,7 @@ def user_tasks_list():
         clauses.append(utaks.task_type == task_type)
     if not ISPRO:
         clauses.append(utaks.task_type != 'firmware')
+    clauses.append(utaks.task_type != 'snipet_exec')
     expr=""
     logs = []
     selector=[utaks.id,utaks.name,utaks.description,utaks.desc_cron,utaks.action,utaks.task_type,utaks.dev_ids,utaks.snippetid,utaks.data,utaks.cron,utaks.selection_type,utaks.created]
@@ -108,19 +109,18 @@ def user_tasks_create():
         if len(members):
             db_user_tasks.add_member_to_task(task.id, members, selection_type)
         taskid=task.id
-        if task_type=="backup":
-            crontab = CronTab(user=True)
-            directory=Path(app.root_path).parent.absolute()
-            command = "python3 {}/task_run.py {}".format(directory,taskid)
-            comment = "MikroWizard task #" + "taskid:{};".format(taskid)
+        crontab = CronTab(user=True)
+        directory=Path(app.root_path).parent.absolute()
+        command = "python3 {}/task_run.py {}".format(directory,taskid)
+        comment = "MikroWizard task #" + "taskid:{};".format(taskid)
+        jobs = crontab.find_comment(comment)
+        if len(list(jobs)) > 0:
             jobs = crontab.find_comment(comment)
-            if len(list(jobs)) > 0:
-                jobs = crontab.find_comment(comment)
-                crontab.remove(jobs)
-                crontab.write()
-            job = crontab.new(command=command,comment=comment)
-            job.setall(cron)
+            crontab.remove(jobs)
             crontab.write()
+        job = crontab.new(command=command,comment=comment)
+        job.setall(cron)
+        crontab.write()
         db_syslog.add_syslog_event(get_myself(), "Task","Create", get_ip(),get_agent(),json.dumps(input))
         return buildResponse([{'status': 'success',"taskid":taskid}],200)
     except Exception as e:

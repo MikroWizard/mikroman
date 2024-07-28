@@ -6,7 +6,7 @@
 # Author: sepehr.ha@gmail.com thanks to Tomi.Mickelsson@iki.fi
 
 from uwsgidecorators import spool
-
+from playhouse.shortcuts import model_to_dict
 from libs import util
 import time
 from libs.db import db_tasks,db_device,db_events,db_user_group_perm,db_device
@@ -20,6 +20,7 @@ import socket
 from libs.check_routeros.routeros_check.resource import RouterOSCheckResource
 from typing import Dict
 import json
+import datetime
 
 sensor_pile = queue.LifoQueue()
 other_sensor_pile = queue.LifoQueue()
@@ -27,7 +28,9 @@ other_sensor_pile = queue.LifoQueue()
 import logging
 log = logging.getLogger("bgtasks")
 
-
+def serialize_datetime(obj): 
+    if isinstance(obj, datetime.datetime): 
+        return obj.isoformat() 
 
 @spool(pass_arguments=True)
 def check_devices_for_update(*args, **kwargs):
@@ -267,6 +270,11 @@ def scan_with_ip(*args, **kwargs):
         mikrotiks=[]
         scan_results=[]
         dev_number=0
+        info={
+            'user':kwargs.get('user','Unknown'),
+            'start_ip':start_ip,
+            'end_ip':end_ip
+        }
         for ip_int in range(int(start_ip), int(end_ip)):
             ip=str(ipaddress.IPv4Address(ip_int))
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -358,7 +366,7 @@ def scan_with_ip(*args, **kwargs):
                     continue
             sock.close()
         try:
-            db_tasks.add_task_result('ip-scan', json.dumps(scan_results))
+            db_tasks.add_task_result('ip-scan', json.dumps(scan_results),json.dumps(info))
         except:
             pass
         #ugly hack to reset sequnce number if device id
@@ -382,3 +390,62 @@ def scan_with_ip(*args, **kwargs):
         task.status=0
         task.save()
         return True
+    
+    
+    
+    
+    
+@spool(pass_arguments=True)
+def exec_snipet(*args, **kwargs):
+    task=db_tasks.exec_snipet_status()
+    if not task.status:
+        task.status=1
+        task.save()
+        default_ip=kwargs.get('default_ip',False)
+        try:
+            if kwargs.get('devices',False) and kwargs.get('task',False):
+                devids=kwargs.get('devices',False)
+                devs=False
+                uid=kwargs.get('uid',False)
+                utask=kwargs.get('task',False)
+                taskdata=json.loads(utask.data)
+                if "0" == devids:
+                    devs=list(db_user_group_perm.DevUserGroupPermRel.get_user_devices(uid))
+                else:
+                    devids=devids
+                    devs=list(db_user_group_perm.DevUserGroupPermRel.get_user_devices_by_ids(uid,devids))
+                num_threads = len(devs)
+                q = queue.Queue()
+                threads = []
+                log.error(devs)
+                for dev in devs:
+                    peer_ip=dev.peer_ip if dev.peer_ip else default_ip
+                    if not peer_ip and '[mikrowizard]' in taskdata['snippet']['code']:
+                        log.error("no peer ip")
+                        num_threads=num_threads-1
+                        continue
+                    snipet_code=taskdata['snippet']['code']
+                    if '[mikrowizard]' in taskdata['snippet']['code']:
+                        snipet_code=snipet_code.replace('[mikrowizard]', peer_ip)
+                    t = Thread(target=util.run_snippets, args=(dev, snipet_code, q))
+                    t.start()
+                    threads.append(t)
+                for t in threads:
+                    t.join()
+                res=[]
+                for _ in range(num_threads):
+                    qres=q.get()
+                    res.append(qres)
+                try:
+                    db_tasks.add_task_result('snipet_exec', json.dumps(res),json.dumps(model_to_dict(utask),default=serialize_datetime),utask.id)
+                except Exception as e:
+                    log.error(e)
+                    pass
+        except Exception as e:
+            log.error(e)
+            task.status=0
+            task.save()
+            return False
+    task.status=0
+    task.save()
+    return False
