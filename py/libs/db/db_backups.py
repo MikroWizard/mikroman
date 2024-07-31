@@ -36,9 +36,7 @@ def query_backup_jobs(page=0, limit=1000, search=None , devid=False):
         search = "%"+search+"%"
         q = q.where(Backups.dir ** search)
     if devid:
-        q = q.where(Backups.devid == devid) 
-    start_time=datetime.datetime.now()-datetime.timedelta(days=3)
-    q = q.where(Backups.created >= start_time)
+        q = q.where(Backups.devid == devid)
     q = q.paginate(page, limit).order_by(Backups.id.desc())
     return q
 
