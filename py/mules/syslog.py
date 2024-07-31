@@ -118,6 +118,8 @@ class SyslogUDPHandler(socketserver.BaseRequestHandler):
                     db_AA.Account.add_log(dev.id,  info[0], info[1], info[3],message,ctype, address[0], info[5])
                 elif "rebooted" in message:
                     db_events.state_event(dev.id, "syslog", "Router Rebooted","info",1,info[0])
+                elif "resetting system configuration":
+                    db_events.state_event(dev.id, "syslog", "Router reset","info",1,info[0])
                 else:
                     regex = r"system,info mikrowizard\d+: (.*) (changed|added|removed|unscheduled) by (.*)"
                     info=self.extract_data_from_regex(regex,message)
