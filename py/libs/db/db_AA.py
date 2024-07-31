@@ -78,12 +78,8 @@ class Auth(BaseModel):
                         auth=auth.where(Auth.started > timestamp-2,Auth.started < timestamp+2)
                         time.sleep(0.3)
                         count+=1
-                        log.error(count)
                 else:
                     auth=False
-            log.error(auth)
-            if auth:
-                log.error(list(auth))
             if auth and len(list(auth))>0:
                 auth=list(auth)
                 for a in auth:

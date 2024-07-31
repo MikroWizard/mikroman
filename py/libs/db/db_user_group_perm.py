@@ -31,7 +31,7 @@ class DevUserGroupPermRel(BaseModel):
     def __repr__(self):
         return "DevUserGroupPermRel: user_id: %s, group_id: %s, perm_id: %s" % (self.user_id, self.group_id, self.perm_id)
 
-    def get_user_devices(uid,group_id):
+    def get_user_devices(uid,group_id=False):
         perms=list(DevUserGroupPermRel.select().where(DevUserGroupPermRel.user_id == uid))
         for perm in perms:
             if group_id==1 or (perm.group_id.id == 1 and not group_id):

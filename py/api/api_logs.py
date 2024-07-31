@@ -247,7 +247,8 @@ def syslog_list():
     else:
         clauses.append(syslog.created >= datetime.datetime.now()-datetime.timedelta(days=1))
     if event_end_time:
-        event_end_time=datetime.datetime.strptime(event_end_time, "%Y-%m-%d %H:%M:%S")
+        event_end_time=event_end_time.split(".000Z")[0]
+        event_end_time=datetime.datetime.strptime(event_end_time, "%Y-%m-%dT%H:%M:%S")
         clauses.append(syslog.created <= event_end_time)
     else:
         clauses.append(syslog.created <= datetime.datetime.now())
