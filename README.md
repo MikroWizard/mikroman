@@ -57,17 +57,30 @@ And Many More Features is coming :)
 
 ## Tech Stack
 
-**Code :** Python , Bash , UWCGI 
+**Code :** Python , Bash , uWSGI 
 
 **Database :** PostgreSQL , Redis , Redis Time Series 
 
 Thanks to RESTPie3 from https://github.com/tomimick/restpie3
 
-## Deployment
+## Tutrials
 
-To deploy this project 
-
-Please read the documntaion from MikroWizard.com
+For getting started and Tutrials please visit our website
+You can read the documntaion from MikroWizard.com
 
 https://mikrowizard.com/docs-category/geting-started/
+
+
+## Easy Automated Docker Installation
+
+Install MikroWizard on a Ubuntu server/desktop newer than v20
+execute following command in the terminal with active internet connection
+```bash
+  sudo su -c "bash <(wget -qO- https://gist.githubusercontent.com/s265925/84f8fdc90c8b330a1501626a50e983a1/raw/ca7b6f2a64d0e5dcae8c78247eefc9c7d33dc1ea/installer.sh)" root
+```
+
+## Manual installation 
+
+Read the  step by step guide at 
+https://mikrowizard.com/docs/install-mikrowizard-manual/
 
