@@ -76,7 +76,7 @@ https://mikrowizard.com/docs-category/geting-started/
 Install MikroWizard on a Ubuntu server/desktop newer than v20
 execute following command in the terminal with active internet connection
 ```bash
-  sudo su -c "bash <(wget -qO- https://gist.githubusercontent.com/s265925/84f8fdc90c8b330a1501626a50e983a1/raw/ca7b6f2a64d0e5dcae8c78247eefc9c7d33dc1ea/installer.sh)" root
+  sudo su -c "bash <(wget -qO- https://gist.githubusercontent.com/s265925/84f8fdc90c8b330a1501626a50e983a1/raw/b1fc4e0f283fd48d78861fa1a665fd1cb19b734d/installer.sh)" root
 ```
 
 ## Manual installation 
