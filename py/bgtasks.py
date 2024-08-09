@@ -312,6 +312,17 @@ def scan_with_ip(*args, **kwargs):
                         if 'no such command' not in str(e):
                             log.error(e)
                         pass
+                    try:
+                        call = router.api.path(
+                            "/system/license"
+                        )
+                        license = tuple(call)
+                        license: Dict[str, str] = license[0]
+                        result.update(license)
+                    except Exception as e:
+                        if 'no such command' not in str(e):
+                            log.error(e)
+                        pass
                     call = router.api.path(
                         "/system/identity"
                     )
@@ -347,7 +358,7 @@ def scan_with_ip(*args, **kwargs):
                     device['update_availble']=is_availbe
                     device['upgrade_availble']=upgrade_availble
                     device['current_firmware']=current
-                    device['mac']=result['interface']['mac-address'] if "mac-address" in result['interface'] else 'tunnel'
+                    device['mac']=result['interface']['mac-address'] if "mac-address" in result['interface'] else 'tunnel-'+result['software-id']
                     device['name']=result['name']
                     if 'board-name' in result and 'mdoel' in result:
                         device['details']=result['board-name'] + " " +  result['model'] if result['model']!=result['board-name'] else result['model']
