@@ -299,6 +299,8 @@ def grab_device_data(dev, q):
                         if d['name'] in excluded_keys:
                             continue
                         health_vals[d['name']]=d['value']
+                elif result['board-name']=='x86':
+                    health_vals={}
                 else:
                     health_vals: Dict[str, str] = health[0]
                 result.update(health_vals)
