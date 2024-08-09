@@ -233,13 +233,17 @@ def grab_device_data(dev, q):
             )
             results = tuple(call)
             result: Dict[str, str] = results[0]
-            call = router.api.path(
-              "/system/routerboard"
-            )
-            routerboard = tuple(call)
-            routerboard: Dict[str, str] = routerboard[0]
-            result.update(routerboard)
-
+            try:
+                call = router.api.path(
+                "/system/routerboard"
+                )
+                routerboard = tuple(call)
+                routerboard: Dict[str, str] = routerboard[0]
+                result.update(routerboard)
+            except Exception as e:
+                if 'no such command' not in str(e):
+                    log.error(e)
+                pass
             call = router.api.path(
               "/system/health"
             )
@@ -282,7 +286,7 @@ def grab_device_data(dev, q):
             keys=["free-memory","cpu-load","free-hdd-space"]
             if len(health):
                 #since routeros v7 they changed health res from api
-                excluded_keys=['cpu-overtemp-check','active-fan','fan-mode','heater-control','psu2-state','cpu-overtemp-startup-delay','fan-on-threshold','heater-threshold','use-fan','cpu-overtemp-threshold','fan-switch','psu1-state']
+                excluded_keys=['cpu-overtemp-check','active-fan','fan-mode','heater-control','psu2-state','cpu-overtemp-startup-delay','fan-on-threshold','heater-threshold','use-fan','cpu-overtemp-threshold','fan-switch','psu1-state','state','state-after-reboot']
                 if 'type' in health[0]:
                     health_vals={}
                     for d in health:
@@ -311,7 +315,7 @@ def grab_device_data(dev, q):
         # keys.remove('fan-on-threshold')
         try:
             # arch=result['architecture-name']
-            if result["current-firmware"]==result["upgrade-firmware"]:
+            if result['board-name']!='x86' and result["current-firmware"]==result["upgrade-firmware"]:
                 dev.upgrade_availble=True
             force_syslog=True if db_sysconfig.get_sysconfig('force_syslog')=="True" else False
             force_radius=True if db_sysconfig.get_sysconfig('force_radius')=="True" else False
@@ -577,17 +581,20 @@ def check_update(options,router=False):
         results = tuple(call)
         result: Dict[str, str] = results[0]
         arch=result['architecture-name']
-
-        call = router.api.path(
-            "/system/routerboard"
-        )
-        
-        routerboard = tuple(call)
-        routerboard: Dict[str, str] = routerboard[0]
-        result.update(routerboard)
-
+        try:
+            call = router.api.path(
+                "/system/routerboard"
+            )
+            
+            routerboard = tuple(call)
+            routerboard: Dict[str, str] = routerboard[0]
+            result.update(routerboard)
+        except Exception as e:
+            if 'no such command' not in str(e):
+                log.error(e)
+            pass
         upgrade=False
-        if result['current-firmware']!= result['upgrade-firmware']:
+        if result['board-name']!='x86' and result['current-firmware']!= result['upgrade-firmware'] and result['board-name']!='x86':
             upgrade=True
         if _latest_version and _installed_version < _latest_version:
             return True, _installed_version,arch,upgrade

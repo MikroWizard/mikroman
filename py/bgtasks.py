@@ -301,14 +301,17 @@ def scan_with_ip(*args, **kwargs):
                     )
                     results = tuple(call)
                     result: Dict[str, str] = results[0]
-
-                    call = router.api.path(
-                        "/system/routerboard"
-                    )
-                    routerboard = tuple(call)
-                    routerboard: Dict[str, str] = routerboard[0]
-                    result.update(routerboard)
-
+                    try:
+                        call = router.api.path(
+                            "/system/routerboard"
+                        )
+                        routerboard = tuple(call)
+                        routerboard: Dict[str, str] = routerboard[0]
+                        result.update(routerboard)
+                    except Exception as e:
+                        if 'no such command' not in str(e):
+                            log.error(e)
+                        pass
                     call = router.api.path(
                         "/system/identity"
                     )
@@ -346,7 +349,12 @@ def scan_with_ip(*args, **kwargs):
                     device['current_firmware']=current
                     device['mac']=result['interface']['mac-address'] if "mac-address" in result['interface'] else 'tunnel'
                     device['name']=result['name']
-                    device['details']=result['board-name'] + " " +  result['model'] if result['model']!=result['board-name'] else result['model']
+                    if 'board-name' in result and 'mdoel' in result:
+                        device['details']=result['board-name'] + " " +  result['model'] if result['model']!=result['board-name'] else result['model']
+                    elif 'board-name' in result:
+                        device['details']=result['board-name']
+                    else:
+                        device['details']='x86/64'
                     device['uptime']=result['uptime']
                     device['license']=""
                     device['interface']=result['interface']['name']
