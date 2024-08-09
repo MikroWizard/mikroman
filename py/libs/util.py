@@ -5,6 +5,7 @@
 # MikroWizard.com , Mikrotik router management solution
 # Author: sepehr.ha@gmail.com
 
+from logging.config import IDENTIFIER
 import pytz
 import datetime
 import time
@@ -705,7 +706,10 @@ def backup_router(dev):
 def store_config(dev,configs):
     dir=config.BACKUP_DIR
     #add device mac and curent date to dir
-    dir=dir+dev.mac+"/"+datetime.datetime.now().strftime("%Y-%m-%d")+"/"
+    identifier=dev.mac
+    if identifier=='tunnel':
+        identifier=identifier+"_devid_"+(str(dev.id))
+    dir=dir+identifier+"/"+datetime.datetime.now().strftime("%Y-%m-%d")+"/"
     filename=datetime.datetime.now().strftime("%H-%M-%S")+".txt"
     filedir=dir+filename
     try:

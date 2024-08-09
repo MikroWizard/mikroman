@@ -18,7 +18,7 @@ from libs.db.db_device import Devices,EXCLUDED,database
 import ipaddress
 import socket
 from libs.check_routeros.routeros_check.resource import RouterOSCheckResource
-from typing import Dict
+from typing import Dict 
 import json
 import datetime
 
@@ -344,7 +344,7 @@ def scan_with_ip(*args, **kwargs):
                     device['update_availble']=is_availbe
                     device['upgrade_availble']=upgrade_availble
                     device['current_firmware']=current
-                    device['mac']=result['interface']['mac-address']
+                    device['mac']=result['interface']['mac-address'] if "mac-address" in result['interface'] else 'tunnel'
                     device['name']=result['name']
                     device['details']=result['board-name'] + " " +  result['model'] if result['model']!=result['board-name'] else result['model']
                     device['uptime']=result['uptime']
