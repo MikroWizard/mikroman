@@ -358,7 +358,13 @@ def scan_with_ip(*args, **kwargs):
                     device['update_availble']=is_availbe
                     device['upgrade_availble']=upgrade_availble
                     device['current_firmware']=current
-                    device['mac']=result['interface']['mac-address'] if "mac-address" in result['interface'] else 'tunnel-'+result['software-id']
+                    if 'software-id' in result:
+                        unique_identifire=result['software-id']
+                    elif 'system-id' in result:
+                        unique_identifire=result['system-id']
+                    else:
+                        unique_identifire=ip
+                    device['mac']=result['interface']['mac-address'] if "mac-address" in result['interface'] else 'tunnel-'+unique_identifire
                     device['name']=result['name']
                     if 'board-name' in result and 'mdoel' in result:
                         device['details']=result['board-name'] + " " +  result['model'] if result['model']!=result['board-name'] else result['model']
