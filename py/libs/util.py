@@ -317,8 +317,13 @@ def grab_device_data(dev, q):
         # keys.remove('fan-on-threshold')
         try:
             # arch=result['architecture-name']
-            if result['board-name']!='x86' and result["current-firmware"]==result["upgrade-firmware"]:
-                dev.upgrade_availble=True
+            try:
+                is_availbe , current , arch , upgrade_availble = check_update(options)
+                dev.update_availble=is_availbe
+                dev.upgrade_availble=upgrade_availble
+                dev.current_firmware=current
+            except:
+                pass
             force_syslog=True if db_sysconfig.get_sysconfig('force_syslog')=="True" else False
             force_radius=True if db_sysconfig.get_sysconfig('force_radius')=="True" else False
             if force_radius:
