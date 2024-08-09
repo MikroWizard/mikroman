@@ -5,7 +5,6 @@
 # MikroWizard.com , Mikrotik router management solution
 # Author: sepehr.ha@gmail.com
 
-from logging.config import IDENTIFIER
 import pytz
 import datetime
 import time
