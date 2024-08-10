@@ -74,6 +74,12 @@ def extract_zip_reload(filename,dst):
 
 def main():
     while True:
+        try:
+            from libs import utilpro
+            ISPRO=True
+        except ImportError:
+            ISPRO=False
+            pass
         next_hour = (time.time() // 3600 + 1) * 3600
         sleep_time = next_hour - time.time()
         # Code to be executed every hour
@@ -101,7 +107,8 @@ def main():
         params={
             "serial_number": hwid,
             "username": username.strip(),
-            "version": __version__
+            "version": __version__,
+            "ISPRO":ISPRO
         }
         res=False
         url="http://mikrowizard.com/wp-json/mikrowizard/v1/get_update"
