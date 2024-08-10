@@ -111,7 +111,7 @@ def main():
             "ISPRO":ISPRO
         }
         res=False
-        url="http://mikrowizard.com/wp-json/mikrowizard/v1/get_update"
+        url="https://mikrowizard.com/wp-json/mikrowizard/v1/get_update"
         # send post request to server mikrowizard.com with params in json
         try:
             response = requests.post(url, json=params)
@@ -142,7 +142,7 @@ def main():
             extract_zip_reload("/app/"+res['filename'],"/app/")
             time.sleep(sleep_time)
             continue
-        download_url="http://mikrowizard.com/wp-json/mikrowizard/v1/download_update"
+        download_url="https://mikrowizard.com/wp-json/mikrowizard/v1/download_update"
         # send post request to server mikrowizard.com with params in json
         r = requests.post(download_url,json=params,stream=True)
         if "invalid" in r.text or r.text=='false':
