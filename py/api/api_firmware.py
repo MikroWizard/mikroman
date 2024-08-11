@@ -135,7 +135,6 @@ def get_firmware(firmid):
     #     return buildResponse({'result':'failed', 'err':"Device not found"}, 200)
 
     if firm:
-        log.error(dev_ip)
         data={
             "devip":dev_ip,
             # "devid":dev.id,

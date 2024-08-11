@@ -898,7 +898,8 @@ def extract_zip (file,path):
         log.error(e)
         
 def download_firmware_to_repository(version,q,arch="all",all_package=False):
-    repository='/app/firms/'
+    #repository='/app/firms/'
+    repository=config.FIRM_DIR
     #create direcorty version in repository if not exist
     path=repository+version+"/"
     os.makedirs(path, exist_ok=True)
@@ -910,7 +911,6 @@ def download_firmware_to_repository(version,q,arch="all",all_package=False):
         links=get_mikrotik_download_links(version)
     if links:
         links=links[version]
-        log.error(links)
         firm=db_firmware.Firmware()
         for lnk in links:
             if all_package and arch+"-allpackage" == lnk:
@@ -921,7 +921,6 @@ def download_firmware_to_repository(version,q,arch="all",all_package=False):
                 log.error(link)
                 done=web2file(link, file, sha256=sha256)
                 files=extract_zip(file, path)
-                log.error(files)
                 try:
                     if done and len(files)>0:
                         for f in files:
@@ -938,8 +937,6 @@ def download_firmware_to_repository(version,q,arch="all",all_package=False):
             if arch!="all" and arch==lnk:
                 arch_togo=lnk
                 link=links[lnk]["link"]
-                log.error(arch)
-                log.error(link)
                 sha256=links[lnk]["sha"]
                 file=path+"{}.npk".format(arch)
                 done=web2file(link, file,sha256=sha256)
@@ -1021,6 +1018,7 @@ def update_device(dev,q):
     else:
         q.put({"id": dev.id})
     if firm and firm.architecture == arch:
+        download_firmware_to_repository(str(ver_to_install), False,arch=arch,all_package=False)
         dev.failed_attempt=dev.failed_attempt+1
         if dev.failed_attempt > 3:
             db_events.firmware_event(dev.id,"updater","Update Failed","Critical",0,"Unable to Update device")
