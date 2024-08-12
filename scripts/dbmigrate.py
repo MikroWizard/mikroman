@@ -4,10 +4,11 @@
 # dbmigrate.py: migrate the local database
 #   - run either on dev machine or at server
 #
-# Author: Tomi.Mickelsson@iki.fi
+# Author: Tomi.Mickelsson@iki.fi & Edited by sepehr.ha@gmail.com
 
 import os
 import config
+from urllib.parse import quote
 
 if config.DATABASE_HOST.startswith("/"):
     # sqlite
@@ -16,12 +17,12 @@ if config.DATABASE_HOST.startswith("/"):
     cmd = "pw_migrate migrate --directory=/app/migrations_sqlite --database=sqlite:/data/mydb.sqlite"
 else:
     # postgresql
-    cmd = "pw_migrate migrate --database=postgresql://{}:{}@{}:{}/{}".format(
-        config.DATABASE_USER,
-        config.DATABASE_PASSWORD,
+    cmd = "pw_migrate migrate --database='postgresql://{}:{}/{}?user={}&password={}'".format(
         config.DATABASE_HOST,
         config.DATABASE_PORT,
-        config.DATABASE_NAME)
+        config.DATABASE_NAME,
+        config.DATABASE_USER,
+        quote(config.DATABASE_PASSWORD))
 
 print(cmd)
 
