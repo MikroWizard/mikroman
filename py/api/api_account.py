@@ -121,7 +121,9 @@ def user_delete():
         u = db.get_user(uid)
     except:
         u=False
-
+    if str(u.id) == "37cc36e0-afec-4545-9219-94655805868b" or str(u.username)=='system':
+        resp={"status":"failed","err":"Cannot delete admin user"}
+        return buildResponse(resp, 200)
     if not u:
         msg = "User not found: {}".format(uid)
         resp={"status":"failed","err":msg}
