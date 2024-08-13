@@ -37,3 +37,15 @@ def scan_network():
             return buildResponse({'status': status},200)
     else:
         return buildResponse({'status': status},200)
+
+@app.route('/api/scanner/results', methods = ['POST'])
+@login_required(role='admin',perm={'device':'full'})
+def scan_resutls():
+    """Do scan requested network for given ip range to find mikrotik devices"""
+    input = request.json
+    tasks=db_tasks.TaskResults
+    #Get tasks that is task_type is ip-scan
+    tasks=tasks.select().where(tasks.task_type=='ip-scan')
+    tasks=list(tasks.dicts())
+    #Get task results
+    return buildResponse({'status': True,'data':tasks},200)

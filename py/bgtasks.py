@@ -262,6 +262,15 @@ def scan_with_ip(*args, **kwargs):
             task.status=0
             task.save()
             return True
+        now=datetime.datetime.now(datetime.timezone.utc)
+        #datetime to string fomat %Y-%m-%dT%H:%M:%S
+        now=now.strftime("%Y-%m-%dT%H:%M:%S")
+        info={
+            'username':kwargs.get('username','Unknown'),
+            'start_ip':start_ip,
+            'end_ip':end_ip,
+            'created':now
+        }
         start_ip = ipaddress.IPv4Address(start_ip)
         end_ip = ipaddress.IPv4Address(end_ip)
         scan_port=kwargs.get('port',False)
@@ -270,11 +279,9 @@ def scan_with_ip(*args, **kwargs):
         mikrotiks=[]
         scan_results=[]
         dev_number=0
-        info={
-            'user':kwargs.get('user','Unknown'),
-            'start_ip':start_ip,
-            'end_ip':end_ip
-        }
+
+ 
+        
         for ip_int in range(int(start_ip), int(end_ip)):
             ip=str(ipaddress.IPv4Address(ip_int))
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -389,9 +396,15 @@ def scan_with_ip(*args, **kwargs):
                     dev_number+=1
                     log.error(e)
                     continue
+            else:
+                scan_results.append({})
+                scan_results[dev_number]['ip']=ip
+                scan_results[dev_number]['added']=False
+                scan_results[dev_number]['faileres']="Not MikroTik or Device/Api Port not accessible"
+                dev_number+=1
             sock.close()
         try:
-            db_tasks.add_task_result('ip-scan', json.dumps(scan_results),json.dumps(info))
+            db_tasks.add_task_result('ip-scan', json.dumps(scan_results),json.dumps(info,default=serialize_datetime))
         except:
             pass
         #ugly hack to reset sequnce number if device id
@@ -426,6 +439,7 @@ def exec_snipet(*args, **kwargs):
     if not task.status:
         task.status=1
         task.save()
+        now=datetime.datetime.now()
         default_ip=kwargs.get('default_ip',False)
         try:
             if kwargs.get('devices',False) and kwargs.get('task',False):
