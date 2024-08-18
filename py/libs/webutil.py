@@ -82,9 +82,9 @@ def get_ip():
 def buildResponse(data,httpcode=200 ,error=False):
     """Builds a JSON response from data."""
     res={}
-    if error:
-        res["err"]=error
     res["result"]=data
+    if error:
+        res["result"]["err"]=error
 
     return jsonify(res), httpcode
 # --------------------------------------------------------------------------
