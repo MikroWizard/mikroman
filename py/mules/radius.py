@@ -26,6 +26,12 @@ try:
     asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 except:
     pass
+try:
+    from libs import utilpro
+    ISPRO=True
+except ImportError:
+    ISPRO=False
+    pass
 
 log = logging.getLogger("Radius")
 
@@ -103,17 +109,17 @@ class RadServer(ServerAsync):
             if not dev:
                 self.send_auth_reject(protocol,pkt,addr)
                 return
+      
             u = db.get_user_by_username(username)
-            if not u:
+            if not u or u.role=='disabled':
                     self.send_auth_reject(protocol,pkt,addr)
                     db_AA.Auth.add_log(dev.id, 'failed',  username , userip , by=None,sessionid=None,timestamp=tz,message="User Not Exist")
                     return
             else:
                 #get user permision related to device
-                
                 if not dev:
                     self.send_auth_reject(protocol, pkt, addr)
-                    db_AA.Auth.add_log(dev.id, 'failed', username, userip, by=None, sessionid=None, timestamp=tz, message="Device Not Exist")
+                    db_AA.Auth.add_log(dev.id, 'failed', u.username, userip, by=None, sessionid=None, timestamp=tz, message="Device Not Exist")
                     return
                 force_perms=True if db_sysconfig.get_sysconfig('force_perms')=="True" else False
                 if force_perms:
@@ -128,9 +134,16 @@ class RadServer(ServerAsync):
                             res2=FourcePermToRouter(dev,perm)
                         if not res2:
                             self.send_auth_reject(protocol,pkt,addr)
-                            db_AA.Auth.add_log(dev.id, 'failed',  username , userip , by=None,sessionid=None,timestamp=tz,message="Unable to verify group")
+                            db_AA.Auth.add_log(dev.id, 'failed',  u.username , userip , by=None,sessionid=None,timestamp=tz,message="Unable to verify group")
                             return
                 nthash=u.hash
+                if(ISPRO):
+                    nthash = utilpro.GetNThash(u)
+                    respro=utilpro.verfyRadius(u,userip)
+                    if not respro:
+                        db_AA.Auth.add_log(dev.id, 'failed',  u.username , userip , by=None,sessionid=None,timestamp=tz,message="IP not allowed: {}".format(userip))
+                        self.send_auth_reject(protocol, pkt, addr)
+                        return
                 if force_perms:
                     reply=self.verifyMsChapV2(pkt,"password",perm[0].perm_id.name,nthash)
                 else:
@@ -138,7 +151,7 @@ class RadServer(ServerAsync):
                 if reply:
                     protocol.send_response(reply, addr)
                     return
-                db_AA.Auth.add_log(dev.id, 'failed',  username , userip , by=None,sessionid=None,timestamp=tz,message="Wrong Password")
+                db_AA.Auth.add_log(dev.id, 'failed',  u.username , userip , by=None,sessionid=None,timestamp=tz,message="Wrong Password")
                 self.send_auth_reject(protocol,pkt,addr)
         except Exception as e:
             print(e)

@@ -92,9 +92,10 @@ def get_task_devices(task,return_devs=True):
             try:
                 group_ids.append(mem.group_id)
             except DoesNotExist as err:
+                log.error(err)
                 pass
         if return_devs:
-            devs=get_devs_of_groups(group_ids) 
+            devs=get_devs_of_groups(group_ids)
         else:
             devs=group_ids
     else:

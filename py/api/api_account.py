@@ -11,7 +11,7 @@ from libs.util import ISPRO
 from libs.db import db,db_permissions,db_user_group_perm,db_groups,db_sysconfig,db_syslog
 
 import json
-from libs import webutil,account
+from libs import utilpro, webutil,account
 from libs.webutil import app, login_required, get_myself , buildResponse
 from libs.mschap3.mschap import nt_password_hash
 
@@ -29,19 +29,18 @@ def login():
     password = input.get('password')
 
     if not username or not password:
-        return webutil.warn_reply("Missing input")
+        return buildResponse({"status":"failed", "err":"Wrong user/pass"}, 200)
 
     u = db.get_user_by_username(username)
-    if not u or not account.check_password(u.password, password):
+    if not u or not account.check_password(u.password, password) or u.role=='disabled':
         # error
         try:
-            db_syslog.add_syslog_event(u.id, "User login","Failed login",webutil.get_ip(),webutil.get_agent(),json.dumps({"username":username}))
+            db_syslog.add_syslog_event(u.id, "User login","Failed login",webutil.get_ip(),webutil.get_agent(),json.dumps({"username":username,'reason':'wrong password'}))
         except:
             pass
-        return webutil.warn_reply("Invalid login credentials")
+        return buildResponse({"status":"failed", "err":"Wrong user/pass"}, 200)
     else:
         # success
-        account.build_session(u, is_permanent=input.get('remember', True))
         tz=db_sysconfig.get_sysconfig('timezone')
         # log.info("LOGIN OK agent={}".format(webutil.get_agent()))
         res={
@@ -56,6 +55,11 @@ def login():
             "tz":tz,
             "perms":json.loads(u.adminperms)
         }
+        if ISPRO:
+            prores=utilpro.do_login(res,input)
+            if prores:
+                return buildResponse(prores, 200)
+        account.build_session(u, is_permanent=input.get('remember', True))
         db_syslog.add_syslog_event(u.id, "User login","Successful login",webutil.get_ip(),webutil.get_agent(),json.dumps({"username":username}))
         return buildResponse(res, 200)
 
@@ -248,7 +252,7 @@ def user_edit():
     if lname:
         u.last_name = lname
 
-    if role:
+    if role and str(u.id) != "37cc36e0-afec-4545-9219-94655805868b":
         u.role = role
     if adminperms and str(u.id) != "37cc36e0-afec-4545-9219-94655805868b":
         u.adminperms= json.dumps(adminperms)

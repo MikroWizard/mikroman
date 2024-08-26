@@ -77,7 +77,10 @@ def get_editform():
         if not dev:        
             return buildResponse({'status': 'failed'}, 200, error="Wrong Data")
         res['user_name']=util.decrypt_data(dev['user_name'])
-        res['password']=util.decrypt_data(dev['password'])
+        if ISPRO:
+            res['password']="Password is Hidden"    
+        else:
+            res['password']=util.decrypt_data(dev['password'])
         res['ip']=dev['ip']
         res['peer_ip']=dev['peer_ip']
         res['name']=dev['name']

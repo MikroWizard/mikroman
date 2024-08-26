@@ -77,16 +77,6 @@ if __name__ == '__main__':
     
     devices=[]
     devices=db_user_tasks.get_task_devices(utask)
-    # if task.selection_type == "devices":
-    #     devids=task.dev_ids.split(",")
-    #     devices=list(db_device.get_devices_by_id2(devids))
-    # else:
-    #     for group in task.dev_groups.split(","):
-    #         if not group.isdigit():
-    #             continue
-    #         devices=db_groups.devs2(group)
-    
-    # task=utaks.select().where(utaks.id == taksid).get()
     if utask.task_type == "backup":
         log.error("TASK TYPE BACKUP")
         res=backup_devs(devices=devices)
@@ -102,6 +92,10 @@ if __name__ == '__main__':
         if not ISPRO:
             exit()
         res=utilpro.run_firmware_task(utask)
-
+    elif utask.task_type == "vault":
+        log.error("vault")
+        if not ISPRO:
+            exit()
+        res=utilpro.run_vault_task(utask)
     #log.error(res)
     #[{'id': 3, 'state': False}, {'id': 1, 'state': False}, {'id': 2, 'state': True}]

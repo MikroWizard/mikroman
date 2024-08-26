@@ -45,7 +45,7 @@ def scan_resutls():
     input = request.json
     tasks=db_tasks.TaskResults
     #Get tasks that is task_type is ip-scan
-    tasks=tasks.select().where(tasks.task_type=='ip-scan')
+    tasks=tasks.select().where(tasks.task_type=='ip-scan').order_by(tasks.id.desc())
     tasks=list(tasks.dicts())
     #Get task results
     return buildResponse({'status': True,'data':tasks},200)

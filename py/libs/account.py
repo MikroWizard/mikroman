@@ -6,7 +6,6 @@
 # Author: Tomi.Mickelsson@iki.fi modified by sepehr.ha@gmail.com
 
 import re
-from shutil import ExecError
 from flask import session
 from passlib.context import CryptContext
 import json
@@ -25,7 +24,6 @@ def build_session(user_obj, is_permanent=True):
 
     assert user_obj
     assert user_obj.id
-    log.error(session)
     # make sure session is empty
     session.clear()
     session['userid'] = user_obj.id

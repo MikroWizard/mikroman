@@ -1106,13 +1106,17 @@ def sizeof_fmt(num, suffix="B"):
         num /= 1024.0
     return f"{num:.1f}Yi{suffix}"
 
-def get_local_users(opts):
+def get_local_users(opts,router=False,full=False):
     try:
-        router=RouterOSCheckResource(opts)
+        if not router:
+            router=RouterOSCheckResource(opts)
         call = router.api.path(
             "/user"
         )
-        results=[a['name'] for a in  tuple(call)]
+        if not full:
+            results=[a['name'] for a in  tuple(call)]
+        else:
+            results=tuple(call)
         return results
     except Exception as e:
         log.error(e)

@@ -21,6 +21,12 @@ from libs.check_routeros.routeros_check.resource import RouterOSCheckResource
 from typing import Dict 
 import json
 import datetime
+try:
+    from libs import utilpro
+    ISPRO=True
+except ImportError:
+    ISPRO=False
+    pass
 
 sensor_pile = queue.LifoQueue()
 other_sensor_pile = queue.LifoQueue()
@@ -429,10 +435,6 @@ def scan_with_ip(*args, **kwargs):
         task.save()
         return True
     
-    
-    
-    
-    
 @spool(pass_arguments=True)
 def exec_snipet(*args, **kwargs):
     task=db_tasks.exec_snipet_status()
@@ -480,6 +482,25 @@ def exec_snipet(*args, **kwargs):
                 except Exception as e:
                     log.error(e)
                     pass
+        except Exception as e:
+            log.error(e)
+            task.status=0
+            task.save()
+            return False
+    task.status=0
+    task.save()
+    return False
+
+@spool(pass_arguments=True)
+def exec_vault(*args, **kwargs):
+    Tasks=db_tasks.Tasks
+    task=Tasks.select().where(Tasks.signal == 170).get()
+    if not task.status:
+        try:
+            task.status=1
+            task.save()
+            utask=kwargs.get('utask',False)
+            res=utilpro.run_vault_task(utask)
         except Exception as e:
             log.error(e)
             task.status=0

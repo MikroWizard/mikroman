@@ -46,6 +46,7 @@ def user_tasks_list():
         clauses.append(utaks.task_type == task_type)
     if not ISPRO:
         clauses.append(utaks.task_type != 'firmware')
+    clauses.append(utaks.task_type != 'vault')
     clauses.append(utaks.task_type != 'snipet_exec')
     expr=""
     logs = []
@@ -89,7 +90,7 @@ def user_tasks_create():
     data={
         'name':name,
         'description':description,
-        'snippetid':int(snippetid) if snippetid else 0,
+        'snippetid':int(snippetid) if snippetid else None,
         'cron':cron,
         'desc_cron': get_description(cron),
         'action': action,
@@ -163,7 +164,7 @@ def user_tasks_edit():
     data={
         'name':name,
         'description':description,
-        'snippetid':int(snippetid) if snippetid else 0,
+        'snippetid':int(snippetid) if snippetid else None,
         'cron':cron,
         'desc_cron': get_description(cron),
         'action': action,

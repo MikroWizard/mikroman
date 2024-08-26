@@ -17,6 +17,20 @@ import hashlib
 import zipfile
 import subprocess
 log = logging.getLogger("Updater_mule")
+import pip
+
+def import_or_install(package):
+    try:
+        __import__(package)
+    except ImportError:
+        pip.main(['install', package])
+
+def install_package(package):
+    try:
+        pip.main(['install', package])
+    except Exception as e:
+        log.error(e)
+
 
 def set_get_install_date():
     
@@ -66,8 +80,27 @@ def extract_zip_reload(filename,dst):
     (output, err) = p.communicate()  
     #This makes the wait possible
     p_status = p.wait()
-    #touch server reload file /app/reload
+    #install requirments
+    try:
+        from libs import utilpro
+        ISPRO=True
+        proreqs="/app/py/pro-reqs.txt"
+        with open(proreqs, "r") as f:
+            for line in f:
+                import_or_install(line.strip())
+                log.info("Installed {}".format(line.strip()))
+                time.sleep(1)
+    except ImportError:
+        pass
+    reqs="/app/reqs.txt"
+    with open(reqs, "r") as f:
+        for line in f:
+            try:
+                install_package(line.strip())
+            except:
+                pass
     os.remove(filename)
+    #touch server reload file /app/reload
     Path('/app/reload').touch()
 
 

@@ -107,6 +107,11 @@ def devs2(groupid):
             .order_by(Devices.name))
 def get_devs_of_groups(group_ids):
     try:
+        group_ids=[group.id for group in group_ids]
+        if 1 in group_ids:
+            return list(Devices
+                .select()
+            .order_by(Devices.name))
         return list(Devices
             .select()
             .join(DevGroupRel, on=DevGroupRel.device_id)
