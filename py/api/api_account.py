@@ -21,6 +21,8 @@ except ImportError:
     ISPRO=False
     pass
 import logging
+import random
+
 log = logging.getLogger("api")
 
 @app.route('/api/login', methods = ['POST'])
@@ -67,6 +69,84 @@ def login():
         account.build_session(u, is_permanent=input.get('remember', True))
         db_syslog.add_syslog_event(u.id, "User login","Successful login",webutil.get_ip(),webutil.get_agent(),json.dumps({"username":username}))
         return buildResponse(res, 200)
+
+
+@app.route('/api/single-signon/user/create', methods = ['POST'])
+def create_login_for_single_singon_user():
+    """Create new while user perform using social login. """
+    
+    input = request.json or {}
+    username  = input.get('username')
+    # passwd = input.get('password') #Generate random password
+    passwd = account.generate_random_password()
+    email  = input.get('email') # Take from request
+    fname  = input.get('first_name') # Take from request
+    lname  = input.get('last_name') # Take from request
+    role   = input.get('role', 'user') 
+    company  = input.get('company') #Default NULL
+    adminperms = input.get('adminperms',[])
+    userperms = input.get('userperms',[])
+
+    if not username or not passwd or not fname or not lname or not role:
+        resp={"status":"failed","err":"invalid data"}
+        return buildResponse(resp, 200)
+
+    u = db.get_user_by_email(email)
+    
+    if not u:
+        err = account.check_password_validity(passwd)
+        if err:
+            err = "Invalid password : {}".format(err)
+            resp={"status":"failed","err":err}
+            return buildResponse(resp, 200)
+        newpass = account.hash_password(passwd)
+        nthashhex=''.join(list("{:02x}".format(ord(c)) for c in nt_password_hash(passwd)))
+        # create new user
+        u = db.User()
+        u.username = username
+        u.company = company
+        u.first_name = fname
+        u.last_name = lname
+        u.password = newpass
+        u.email= email
+        u.adminperms= json.dumps(adminperms)
+        u.hash = nthashhex
+        u.tags = []
+        u.role = role # set default to what makes sense to your app
+        u.save(force_insert=True)
+        account.new_signup_steps(u)
+        #Send email with new generated password
+        account.send_password_email(email,fname,passwd)
+
+        for perm in userperms:
+            db_user_group_perm.DevUserGroupPermRel.create_user_group_perm(u.id, int(perm['group_id']), int(perm['perm_id']))
+        
+        db_syslog.add_syslog_event(u.id, "User Managment","Create", webutil.get_ip(),webutil.get_agent(),json.dumps(input))
+        # db_syslog.add_syslog_event(webutil.get_myself(), "User Managment","Create", webutil.get_ip(),webutil.get_agent(),json.dumps(input))<=======
+    
+    # success
+    tz=db_sysconfig.get_sysconfig('timezone')
+    # log.info("LOGIN OK agent={}".format(webutil.get_agent()))
+    res={
+        "username":u.username,
+        "name":u.username,
+        "partner_id":u.id,
+        "uid":u.id,
+        "first_name":u.first_name,
+        "last_name":u.last_name,
+        "role":u.role,
+        "tags":u.tags,
+        "tz":tz,
+        "perms":json.loads(u.adminperms)
+    }
+    if ISPRO:
+        prores=utilpro.do_login(res,input)
+        if prores:
+            return buildResponse(prores, 200)
+    account.build_session(u, is_permanent=input.get('remember', True))
+    db_syslog.add_syslog_event(u.id, "User login","Successful login",webutil.get_ip(),webutil.get_agent(),json.dumps({"username":username}))
+    return buildResponse(res, 200)
+    
 
 @app.route('/api/user/create', methods = ['POST'])
 @login_required(role='admin',perm={'users':'write'})
@@ -299,7 +379,10 @@ def perms():
 
     reply = db_permissions.query_perms(page, size, search).dicts()
     for rep in reply:
-        rep["perms"]=json.loads(rep["perms"])
+        if "adminperms" in rep and rep["adminperms"]:
+            rep["adminperms"] = json.loads(rep["adminperms"])
+        else:
+            rep["adminperms"] = {}
     return buildResponse(reply, 200)
 
 @app.route('/api/perms/create' ,methods=['POST'])

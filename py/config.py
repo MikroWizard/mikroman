@@ -20,11 +20,12 @@ for k, v in os.environ.items():
         srvconf[k] = v
 
 # grand switch to production!
-IS_PRODUCTION = bool(srvconf['PYSRV_IS_PRODUCTION'] or False)
-
+# IS_PRODUCTION = bool(srvconf['PYSRV_IS_PRODUCTION'] or False)
+IS_PRODUCTION = False
 # local dev flag
-IS_LOCAL_DEV = os.environ.get("FLASK_ENV") == "development" and not IS_PRODUCTION
-# IS_LOCAL_DEV = False
+# IS_LOCAL_DEV = os.environ.get("FLASK_ENV") == "development" and not IS_PRODUCTION
+
+IS_LOCAL_DEV = True
 
 print("\nCONFIG: prod={},localdev={} ({})\n".format(
     IS_PRODUCTION, IS_LOCAL_DEV, srvconf["name"]))
@@ -39,6 +40,19 @@ CRYPT_KEY = srvconf['PYSRV_CRYPT_KEY']
 BACKUP_DIR = srvconf['PYSRV_BACKUP_FOLDER']
 FIRM_DIR = srvconf['PYSRV_FIRM_FOLDER']
 IS_SQLITE = DATABASE_HOST.startswith("/")
+
+# mail server 
+SMTP_EMAIL = srvconf['PYSRV_SMTP_EMAIL']
+SMTP_PASSWORD = srvconf['PYSRV_SMTP_PASSWORD']
+SMTP_SERVER = srvconf['PYSRV_SMTP_SERVER']
+SMTP_PORT = srvconf['PYSRV_SMTP_PORT']
+
+# for MQTT
+MQTT_BROKER = srvconf["PYSRV_MQTT_BROKER"]
+MQTT_PORT = srvconf["PYSRV_MQTT_PORT"]
+MQTT_PATH  = srvconf["PYSRV_MQTT_PATH"]
+MQTT_USERNAME  = srvconf["PYSRV_MQTT_USERNAME"]
+MQTT_PASSWORD = srvconf["PYSRV_MQTT_PASSWORD"]
 
 # Flask + session config
 # http://flask.pocoo.org/docs/1.0/config/

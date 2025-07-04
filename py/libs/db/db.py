@@ -50,7 +50,7 @@ class BaseModel(Model):
 
 def get_object_or_404(model, **kwargs):
     """Retrieve a single object or abort with 404."""
-
+    print(f"Looking for user with ID: {kwargs}")
     try:
         return model.get(**kwargs)
     except model.DoesNotExist:
@@ -145,7 +145,26 @@ def get_user_by_username(username):
     except IndexError:
         return None
 
+def get_user_by_email(email):
+    """Return user object or None"""
 
+    if not email:
+        return None
+
+    try:
+        # return User.select().where(User.username == username).get()
+        # case insensitive query
+        if config.IS_SQLITE:
+            sql = "SELECT * FROM users where email = ? LIMIT 1"
+            args = email.lower()
+        else:
+            sql = "SELECT * FROM users where LOWER(email) = LOWER(%s) LIMIT 1"
+            args = (email,)
+        return list(User.raw(sql, args))[0]
+
+    except IndexError:
+        return None
+    
 def query_users(page=0, limit=1000, search=None):
     """Return list of users. Desc order"""
 

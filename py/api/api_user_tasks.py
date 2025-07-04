@@ -25,7 +25,7 @@ log = logging.getLogger("api.usertasks")
 
 
 @app.route('/api/user_tasks/list', methods = ['POST'])
-@login_required(role='admin',perm={'task':'read'})
+# @login_required(role='admin',perm={'task':'read'})
 def user_tasks_list():
     """return user task list"""
     input = request.json

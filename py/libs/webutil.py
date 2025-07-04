@@ -11,6 +11,7 @@ import functools
 from flask import Flask, request, session, g, jsonify
 from flask_session import Session
 from flask.json.provider import DefaultJSONProvider
+from flask_cors import CORS
 
 from libs.db import db
 import config
@@ -23,6 +24,10 @@ log = logging.getLogger("webutil")
 # create and configure the Flask app
 app = Flask(__name__, static_folder=None, template_folder="../templates")
 app.config.update(config.flask_config)
+
+# Completely open CORS: allow all origins, all methods, all headers
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True)
+
 Session(app)
 
 
@@ -154,11 +159,11 @@ def after_request(response):
             request.method, request.url))
 
     # set CORS headers
-    response.headers['Access-Control-Allow-Origin'] = config.CORS_ALLOW_ORIGIN
-    response.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,DELETE,OPTIONS'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
-    response.headers['Access-Control-Allow-Credentials'] = 'true'
-#     response.headers['Access-Control-Expose-Headers'] = 'Access-Control-Allow-Origin'
+#     response.headers['Access-Control-Allow-Origin'] = config.CORS_ALLOW_ORIGIN
+#     response.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,DELETE,OPTIONS'
+#     response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+#     response.headers['Access-Control-Allow-Credentials'] = 'true'
+# #     response.headers['Access-Control-Expose-Headers'] = 'Access-Control-Allow-Origin'
 
     return response
 

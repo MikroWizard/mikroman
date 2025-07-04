@@ -1,18 +1,28 @@
 {
     "name": "python server config template - rename me",
 
-    "PYSRV_IS_PRODUCTION": "1",
+    "PYSRV_IS_PRODUCTION": "0",
     "PYSRV_DATABASE_HOST": "127.0.0.1",
     "PYSRV_DATABASE_HOST_POSTGRESQL": "127.0.0.1",
     "PYSRV_DATABASE_PORT": "5432",
-    "PYSRV_DATABASE_NAME": "_YOUR_DATABASE_NAME_",
-    "PYSRV_DATABASE_USER": "_YOUR_DATABASE_USERNAME_",
-    "PYSRV_DATABASE_PASSWORD": "_YOUR_DATABASE_PASSWORD_",
-    "PYSRV_CRYPT_KEY": "_YOUR_CRYPT_KEY_",
+    "PYSRV_DATABASE_NAME": "CircleProtect",
+    "PYSRV_DATABASE_USER": "circleprotect",
+    "PYSRV_DATABASE_PASSWORD": "Demo123!@#",
+    "PYSRV_CRYPT_KEY": "Demo123!@#",
     "PYSRV_BACKUP_FOLDER":"/conf/backups/",
     "PYSRV_FIRM_FOLDER":"/conf/firms/",
     "PYSRV_COOKIE_HTTPS_ONLY": false,
     "PYSRV_REDIS_HOST": "127.0.0.1:6379",
     "PYSRV_DOMAIN_NAME": "",
-    "PYSRV_CORS_ALLOW_ORIGIN": "*"
+    "PYSRV_CORS_ALLOW_ORIGIN": "*",
+    "PYSRV_SMTP_EMAIL": "shreehariji.test@gmail.com",
+    "PYSRV_SMTP_PASSWORD": "gqnz pldl dfgl tokh",
+    "PYSRV_SMTP_SERVER": "smtp.gmail.com",
+    "PYSRV_SMTP_PORT": 465,
+    "PYSRV_MQTT_BROKER":"xmpp.networklab.ca",
+    "PYSRV_MQTT_PORT" :5281,
+    "PYSRV_MQTT_PATH":"/mqtt",
+    "PYSRV_MQTT_USERNAME":"divyeshsavaliya@networklab.ca",
+    "PYSRV_MQTT_PASSWORD": "L2dkIeorQ9$fjskE17"
+
 }

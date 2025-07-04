@@ -15,6 +15,7 @@ from api import api_logs
 from api import api_scanner
 from api import api_backups
 from api import api_snippet
+from api import api_agent_task
 try:
     from api import api_pro_api
     from api import api_pro_api2
@@ -27,6 +28,7 @@ log = logging.getLogger("main")
 log.info("Running! http://localhost:8100")
 
 from libs.webutil import app
+app.register_blueprint(api_agent_task.bp) 
 if app.testing:
     import werkzeug.debug
     app.wsgi_app = werkzeug.debug.DebuggedApplication(app.wsgi_app, True)

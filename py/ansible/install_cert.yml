@@ -1,0 +1,9 @@
+- name: Install certificate on router
+  hosts: all
+  become: false
+  gather_facts: false
+  tasks:
+    - name: Copy certificate to target path
+      copy:
+        src: "{{ local_cert_path }}"
+        dest: "{{ remote_cert_path }}"
