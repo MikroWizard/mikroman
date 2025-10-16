@@ -12,7 +12,6 @@ import time
 import asyncio
 
 import logging
-import traceback
 from pyrad.dictionary import Dictionary
 from pyrad.server_async import ServerAsync
 from pyrad.packet import AccessAccept,AccessReject
@@ -55,39 +54,46 @@ class RadServer(ServerAsync):
         nt_response = ms_chap_response[26:50]
         peer_challenge = ms_chap_response[2:18]
         _user_name = pkt.get(1)[0]
-        nt_resp = mschap.generate_nt_response_mschap2(
-            authenticator_challenge,
-            peer_challenge,
-            _user_name,
-            userpwd,
-            nthash
-        )
-        if nt_resp == nt_response:
-            auth_resp = mschap.generate_authenticator_response(
-                userpwd,
-                nt_response,
-                peer_challenge,
+        try:
+            nt_resp = mschap.generate_nt_response_mschap2(
                 authenticator_challenge,
+                peer_challenge,
                 _user_name,
+                userpwd,
                 nthash
             )
-            mppeSendKey, mppeRecvKey = mppe.mppe_chap2_gen_keys(userpwd, nt_response,nthash)
+            if nt_resp == nt_response:
+                auth_resp = mschap.generate_authenticator_response(
+                    userpwd,
+                    nt_response,
+                    peer_challenge,
+                    authenticator_challenge,
+                    _user_name,
+                    nthash
+                )
+                mppeSendKey, mppeRecvKey = mppe.mppe_chap2_gen_keys(userpwd, nt_response,nthash)
 
-            if group:
-                reply = self.CreateReplyPacket(pkt, **{
-                    "MS-CHAP2-Success": auth_resp.encode(),
-                    "Mikrotik-Group": group,
-                })
+                if group:
+                    reply = self.CreateReplyPacket(pkt, **{
+                        "MS-CHAP2-Success": auth_resp.encode(),
+                        "Mikrotik-Group": group,
+                    })
+                else:
+                    reply = self.CreateReplyPacket(pkt, **{
+                        "MS-CHAP2-Success": auth_resp.encode(),
+                    })
+                reply.code = AccessAccept
+                return reply
+            
             else:
-                reply = self.CreateReplyPacket(pkt, **{
-                    "MS-CHAP2-Success": auth_resp.encode(),
-                })
-            reply.code = AccessAccept
-            return reply
-        
-        else:
-            return False
-        
+                return False
+        finally:
+            # Clear sensitive variables from memory
+            if 'mppeSendKey' in locals():
+                del mppeSendKey
+            if 'mppeRecvKey' in locals():
+                del mppeRecvKey
+
     def send_auth_reject(self,protocol,pkt,addr):
         reply = self.CreateReplyPacket(pkt, **{
         })
@@ -136,10 +142,10 @@ class RadServer(ServerAsync):
                             self.send_auth_reject(protocol,pkt,addr)
                             db_AA.Auth.add_log(dev.id, 'failed',  u.username , userip , by=None,sessionid=None,timestamp=tz,message="Unable to verify group")
                             return
-                nthash=u.hash
+                nthash=u.hash 
                 if(ISPRO):
-                    nthash = utilpro.GetNThash(u)
-                    respro=utilpro.verfyRadius(u,userip)
+                    is_proxy,nthash = utilpro.GetNThash(u)
+                    userip,respro=utilpro.verfyRadius(u,userip,is_proxy)
                     if not respro:
                         db_AA.Auth.add_log(dev.id, 'failed',  u.username , userip , by=None,sessionid=None,timestamp=tz,message="IP not allowed: {}".format(userip))
                         self.send_auth_reject(protocol, pkt, addr)
@@ -149,12 +155,15 @@ class RadServer(ServerAsync):
                 else:
                     reply=self.verifyMsChapV2(pkt,"password",False,nthash)
                 if reply:
+                    if reply.code==AccessAccept and is_proxy:
+                        log.info("web-proxy User %s logged in from %s" % (u.username, userip))
+                        db_AA.Auth.add_log(dev.id, 'proxy', u.username, userip, by="proxy", sessionid=None, timestamp=tz,message="proxy login")
                     protocol.send_response(reply, addr)
-                    return
+                    return True
                 db_AA.Auth.add_log(dev.id, 'failed',  u.username , userip , by=None,sessionid=None,timestamp=tz,message="Wrong Password")
                 self.send_auth_reject(protocol,pkt,addr)
         except Exception as e:
-            print(e)
+            log.error("Auth error: %s", str(e))
             self.send_auth_reject(protocol,pkt,addr)
             #log failed attempts
 
@@ -162,6 +171,8 @@ class RadServer(ServerAsync):
 
     def handle_acct_packet(self, protocol, pkt, addr):
         try:
+            # for attr in pkt.keys():
+            #     log.error("%s: %s" % (attr, pkt[attr]))
             ts = int(time.time())
             dev_ip=pkt['NAS-IP-Address'][0]
             dev=db_device.query_device_by_ip(dev_ip)
@@ -170,8 +181,10 @@ class RadServer(ServerAsync):
             userip=pkt['Calling-Station-Id'][0]
             sessionid=pkt['Acct-Session-Id'][0]
             if type == 'Start':
+                log.info("User %s logged in from %s" % (user, userip))
                 db_AA.Auth.add_log(dev.id, 'loggedin', user , userip , None,timestamp=ts,sessionid=sessionid)
             elif type == 'Stop':
+                log.info("User %s logged out from %s" % (user, userip))
                 db_AA.Auth.add_log(dev.id, 'loggedout', user , userip , None,timestamp=ts,sessionid=sessionid)
         except Exception as e:
             log.error("Error in accounting: ")
@@ -209,15 +222,17 @@ class RadServer(ServerAsync):
 
 
 def main():
-    # create server and read dictionary
-    loop = asyncio.get_event_loop()
-    server = RadServer(loop=loop, dictionary=Dictionary('py/libs/raddic/dictionary'))
-    secret = db_sysconfig.get_sysconfig('rad_secret')
-    server.hosts["0.0.0.0"] = RemoteHost("0.0.0.0",
-                                           secret.encode(),
-                                           "localhost")
-
+    loop = None
+    server = None
+    
     try:
+        # create server and read dictionary
+        loop = asyncio.get_event_loop()
+        server = RadServer(loop=loop, dictionary=Dictionary('py/libs/raddic/dictionary'))
+        secret = db_sysconfig.get_sysconfig('rad_secret')
+        server.hosts["0.0.0.0"] = RemoteHost("0.0.0.0",
+                                               secret.encode(),
+                                               "localhost")
 
         # Initialize transports
         loop.run_until_complete(
@@ -229,21 +244,27 @@ def main():
         try:
             # start server
             loop.run_forever()
-        except KeyboardInterrupt as k:
+        except KeyboardInterrupt:
             pass
 
-        # Close transports
-        loop.run_until_complete(asyncio.ensure_future(
-            server.deinitialize_transports()))
-
     except Exception as exc:
-        log.error('Error: ', exc)
-        log.error('\n'.join(traceback.format_exc().splitlines()))
-        # Close transports
-        loop.run_until_complete(asyncio.ensure_future(
-            server.deinitialize_transports()))
-
-    loop.close()
+        log.error('Error: %s', exc)
+    
+    finally:
+        # Ensure cleanup always happens
+        if server:
+            try:
+                if loop and not loop.is_closed():
+                    loop.run_until_complete(asyncio.ensure_future(
+                        server.deinitialize_transports()))
+            except Exception as cleanup_exc:
+                log.error('Cleanup error: %s', cleanup_exc)
+        
+        if loop and not loop.is_closed():
+            try:
+                loop.close()
+            except Exception:
+                pass
 
     
 if __name__ == '__main__':

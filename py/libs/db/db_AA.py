@@ -42,6 +42,10 @@ class Auth(BaseModel):
         db_table = 'auth'
 
     def add_log(devid,type,username,ip,by,sessionid=False,timestamp=False,message=None):
+        if by=='proxy':
+            event=Auth(devid=devid,ltype='loggedin',username=username.strip(),ip=ip.strip(),by='Web-Proxy',started=timestamp,ended=timestamp,sessionid='sessionid'+str(timestamp),message='proxy')
+            event.save()
+            return True
         if type=='failed':
             rand=''.join(random.choice(string.ascii_lowercase + string.digits) for _ in range(8))
             auth=Auth.select().where(Auth.ltype==type, Auth.username==username.strip())
@@ -67,7 +71,9 @@ class Auth(BaseModel):
                 event=Auth(devid=int(devid), ltype=type, username=username.strip(), ip=ip.strip(), by=by,started=timestamp, ended=timestamp, message=message)
                 event.save()
         elif type=='loggedin':
-            auth=Auth.select().where(Auth.devid==devid, Auth.ltype==type, Auth.username==username.strip())
+            auth=Auth.select().where(Auth.devid==devid, Auth.ltype==type, Auth.username==username.strip(),Auth.by!='Web-Proxy')
+            if message=='radius' and not sessionid:
+                return
             if sessionid:
                 auth=auth.where(Auth.sessionid==sessionid)
             else:
@@ -136,4 +142,4 @@ if __name__ == '__main__':
     # quick adhoc tests
     logging.basicConfig(level=logging.DEBUG)
 
- 
+
