@@ -35,7 +35,6 @@ real-server-config.json
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
-
 # Installer logs
 pip-log.txt
 pip-delete-this-directory.txt
@@ -167,9 +166,16 @@ cython_debug/
 
 *pro_api*
 *pro.py
+*pro2.py
 *pro-reqs.txt
 *update_gen.sh
 *.zip
 back/
 license*
 public_key.pem
+*pro-build*
+*.tar.gz
+dist*
+.pyarmor*
+cloner_run.py
+api_proxy.py

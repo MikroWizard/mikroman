@@ -166,3 +166,7 @@ cython_debug/
 **/*pro.py
 **/*pro*
 **/*utilpro.py
+**/public_key.pem
+**/license_helper.py
+**/license.lic
+**/api_proxy.py
