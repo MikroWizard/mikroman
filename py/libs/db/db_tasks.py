@@ -13,17 +13,21 @@ import logging
 log = logging.getLogger("db_tasks")
 
 class Tasks(BaseModel):
-    signal = TextField()
+    signal = IntegerField()
     starttime = DateTimeField()
     endtime = DateTimeField()
     status = BooleanField()
     action = TextField()
     name = TextField()
+    task_id = TextField(null=True)
     class Meta:
         # `indexes` is a tuple of 2-tuples, where the 2-tuples are
         # a tuple of column names to index and a boolean indicating
         # whether the index is unique or not.
         db_table = 'tasks'
+        indexes = (
+            (('signal', 'task_id'), True),
+        )
 
 #Get groups of device
 def update_check_status():
@@ -59,6 +63,25 @@ def get_task_by_signal(signal):
 
 def get_all():
     return (Tasks.select())
+
+def create_bulk_add_task(task_id):
+    import datetime
+    task = Tasks.create(
+        signal=180,
+        task_id=task_id,
+        starttime=datetime.datetime.now(),
+        endtime=datetime.datetime.now(),
+        status=False,
+        action='None',
+        name='Bulk Add'
+    )
+    return task
+
+def get_bulk_add_task(task_id):
+    try:
+        return Tasks.select().where((Tasks.signal == 180) & (Tasks.task_id == task_id)).get()
+    except:
+        return None
 
 class TaskResults(BaseModel):
     task_type = TextField()

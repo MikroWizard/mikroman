@@ -42,6 +42,7 @@ class Devices(BaseModel):
     status = TextField()
     firmware_to_install = TextField()
     syslog_configured = BooleanField()
+    upgrade_device = BooleanField()
     
     class Meta:
         db_table = 'devices'

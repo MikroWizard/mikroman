@@ -11,7 +11,7 @@ import time
 import uuid
 import socket
 import config
-from libs.db import db_sysconfig,db_firmware,db_backups,db_events
+from libs.db import db_sysconfig,db_backups,db_events
 from cryptography.fernet import Fernet 
 from libs.check_routeros.routeros_check.resource import RouterOSCheckResource
 from libs.check_routeros.routeros_check.helper import  RouterOSVersion
@@ -22,18 +22,16 @@ import logging
 from libs.red import RedisDB
 from libs.ssh_helper import SSH_Helper
 import os
-from bs4 import BeautifulSoup
-import urllib.request
-import hashlib
 import netifaces
+
 log = logging.getLogger("util")
 try:
     from libs import utilpro
+    from libs import neighbour_pro as neighbour
     ISPRO=True
 except ImportError:
     ISPRO=False
     pass
-import zipfile
 # --------------------------------------------------------------------------
 # date related common methods
 
@@ -236,11 +234,7 @@ def grab_device_data(dev, q):
             name = tuple(call)
             name: Dict[str, str] = name[0]
             result.update(name)
-            wireless_keys,wireless_data=[],[]
-            if ISPRO:
-                wireless_keys,wireless_data=utilpro.wireless_actions(router,dev,events)
             try:
-                
                 call = router.api.path(
                     "/interface/wireless"
                 )
@@ -331,6 +325,7 @@ def grab_device_data(dev, q):
 
             interfaces=get_network_data(router)
             interfaces_keys=interfaces.keys()
+
             data={}
             for key in keys:
                 if key in result:
@@ -343,7 +338,19 @@ def grab_device_data(dev, q):
                 data["tx-"+intkeys]=interfaces[intkeys]['tx-bits-per-second']
                 data["rxp-"+intkeys]=interfaces[intkeys]['rx-packets-per-second']
                 data["txp-"+intkeys]=interfaces[intkeys]['tx-packets-per-second']
-            
+            wireless_keys,wireless_data=[],[]
+            neighbours=[]
+            if ISPRO:
+                try:
+                   neighbour.get_neighbors(router,result,interfaces,dev.id)
+                #show traceback of error
+                except Exception as e:
+                    #show traceback
+                    log.error(f"Error: {e}")
+                try:
+                    wireless_keys,wireless_data=utilpro.wireless_actions(router,dev,events)
+                except Exception as e:
+                    log.error(e)
             if len(wireless_keys)>0:
                 keys.extend(wireless_keys)
             data.update(wireless_data)
@@ -594,7 +601,7 @@ def log_alert(type,dev,massage):
 
 def backup_routers(dev,q):
     status=backup_router(dev)
-    q.put({"id": dev.id,"state":status})
+    q.put({"id": dev.id,"devip":dev.ip,"state":status})
 
 def run_snippets(dev, snippet,q):
     result=run_snippet(dev, snippet)
