@@ -122,8 +122,7 @@ def save_editform():
 @app.route('/api/devgroup/list', methods = ['POST'])
 @login_required(role='admin',perm={'device_group':'read'})
 def list_devgroups():
-    """return dev groups"""
-    # build HTML of the method list
+    """return dev groups with assigned users and permissions"""
     devs = []
     uid=session.get("userid") or False    
     try:
@@ -132,6 +131,25 @@ def list_devgroups():
         if str(uid) == "37cc36e0-afec-4545-9219-94655805868b":
             group_ids=False
         devs=list(db_groups.query_groups_api(group_ids))
+        
+        # Add assigned users and permissions for each group
+        for group in devs:
+            group_id = group['id']
+            # Get users and permissions for this group
+            user_perms = (db_user_group_perm.DevUserGroupPermRel
+                         .select(db_user_group_perm.DevUserGroupPermRel.id,
+                                db_user_group_perm.DevUserGroupPermRel.user_id,
+                                db_user_group_perm.DevUserGroupPermRel.perm_id,
+                                db_user_group_perm.User.username,
+                                db_user_group_perm.User.first_name,
+                                db_user_group_perm.User.last_name,
+                                db_user_group_perm.Perms.name.alias('perm_name'))
+                         .join(db_user_group_perm.User)
+                         .switch(db_user_group_perm.DevUserGroupPermRel)
+                         .join(db_user_group_perm.Perms)
+                         .where(db_user_group_perm.DevUserGroupPermRel.group_id == group_id)
+                         .dicts())
+            group['assigned_users'] = list(user_perms)
     except Exception as e:
         return buildResponse({'result':'failed','err':str(e)},200)
     return buildResponse(devs,200)

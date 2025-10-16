@@ -8,7 +8,7 @@
 from flask import request, jsonify,session,send_file
 from playhouse.shortcuts import model_to_dict
 import datetime
-from libs.db import db_tasks,db_sysconfig,db_firmware,db_syslog
+from libs.db import db_tasks,db_sysconfig,db_firmware,db_syslog,db_groups,db_user_group_perm
 from libs import util,firm_lib
 from libs.webutil import app, login_required, get_myself,buildResponse,get_myself,get_ip,get_agent
 import bgtasks
@@ -57,7 +57,25 @@ def update_device():
         return buildResponse({'result':'failed','err':"No User"}, 200)
     if not status:
         db_syslog.add_syslog_event(get_myself(), "Firmware","update", get_ip(),get_agent(),json.dumps(input))
-        bgtasks.update_device(devices=devids,uid=uid)
+        bgtasks.update_device(devices=devids,uid=uid,task="update")
+        res={'status': True}
+    else:
+        res={'status': status}
+    return buildResponse(res,200)
+
+@app.route('/api/firmware/upgrade_firmware', methods = ['POST'])
+@login_required(role='admin',perm={'device':'full'})
+def upgrade_firmware():
+    """Update devices"""
+    status=db_tasks.update_job_status().status
+    input=request.json
+    devids=input.get('devids',"0")
+    uid = session.get("userid") or False
+    if not uid:
+        return buildResponse({'result':'failed','err':"No User"}, 200)
+    if not status:
+        db_syslog.add_syslog_event(get_myself(), "Firmware","Upgrade", get_ip(),get_agent(),json.dumps(input))
+        bgtasks.update_device(devices=devids,uid=uid,task="upgrade")
         res={'status': True}
     else:
         res={'status': status}
@@ -166,4 +184,49 @@ def get_firmware(firmid):
         return send_file(path, as_attachment=True)
     # log.error(dev)
     return buildResponse({'result':'failed','err':"somthing went wrong"}, 200)
+
+@app.route('/api/devgroup/firmware_action', methods = ['POST'])
+@login_required(role='admin',perm={'device':'full'})
+def devgroup_firmware_action():
+    """Update or upgrade firmware for devices in a group"""
+    input = request.json
+    group_id = input.get('groupId')
+    action = input.get('action')
+    uid = session.get("userid")
+    
+    if not uid:
+        return buildResponse({'result':'failed','err':"No User"}, 200)
+    
+    if action not in ['update', 'upgrade']:
+        return buildResponse({'result':'failed','err':"Invalid action"}, 200)
+    
+    # Check if group exists
+    group = db_groups.get_group(group_id)
+    if not group:
+        return buildResponse({'result':'failed','err':"Group not found"}, 200)
+    
+    # Check user permission to group (skip for superadmin)
+    if str(uid) != "37cc36e0-afec-4545-9219-94655805868b":
+        perms = list(db_user_group_perm.DevUserGroupPermRel.query_permission_by_user_and_device_group(uid, [group_id]))
+        if not perms:
+            return buildResponse({'result':'failed','err':"No permission to group"}, 200)
+    
+    # Get accessible devices in group
+    devices = list(db_user_group_perm.DevUserGroupPermRel.get_user_devices(uid, group_id=group_id))
+    if not devices:
+        return buildResponse({'result':'failed','err':"No accessible devices in group"}, 200)
+    
+    # Check if task is already running
+    status = db_tasks.update_job_status().status
+    if status:
+        return buildResponse({'status': status}, 200)
+    
+    # Convert devices to comma-separated string
+    devids = ",".join([str(dev.id) for dev in devices])
+    
+    # Start background task
+    db_syslog.add_syslog_event(get_myself(), "Firmware", action, get_ip(), get_agent(), json.dumps(input))
+    bgtasks.update_device(devices=devids, uid=uid, task=action)
+    
+    return buildResponse({'status': True}, 200)
 

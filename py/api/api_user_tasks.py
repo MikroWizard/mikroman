@@ -81,8 +81,11 @@ def user_tasks_create():
     
     # todo
     # add owner check devids and dev groups with owner
-    if not name or not description:
-        return buildResponse({'status': 'failed'},200,error="Wrong name/desc")
+    if not name :
+        return buildResponse({'status': 'failed'},200,error="Please input a valid name")
+    if not description:
+        #set to null
+        description=None
     #check if cron is valid and correct
     if cron and not CronSlices.is_valid(cron):
         return buildResponse({'status': 'failed'},200,error="Wrong Cron")
@@ -126,7 +129,7 @@ def user_tasks_create():
         return buildResponse([{'status': 'success',"taskid":taskid}],200)
     except Exception as e:
         log.error(e)
-        return buildResponse({'status': 'failed','massage':str(e)},200)    
+        return buildResponse({'status': 'failed','err':str(e)},200)    
 
 
 @app.route('/api/user_tasks/edit', methods = ['POST'])
@@ -146,8 +149,11 @@ def user_tasks_edit():
     taskdata=input.get('data', False)
     # todo
     # add owner check devids and dev groups with owner
-    if not name or not description:
+    if not name:
         return buildResponse({'status': 'failed'},200,error="Wrong name/desc")
+    if not description:
+        #set to null
+        description=None
     # Check if cron is valid and correct
     if cron and not CronSlices.is_valid(cron):
         return buildResponse({'status': 'failed'},200,error="Wrong Cron")
@@ -201,7 +207,7 @@ def user_tasks_edit():
         return buildResponse([{'status': 'success',"taskid":taskid}],200)
     except Exception as e:
         log.error(e)
-        return buildResponse({'status': 'failed','massage':str(e)},200)   
+        return buildResponse({'status': 'failed','err':str(e)},200)   
 
 
 @app.route('/api/user_tasks/delete', methods = ['POST'])
@@ -215,7 +221,7 @@ def user_tasks_delete():
     utask=db_user_tasks.get_object_or_none(db_user_tasks.UserTasks, id=taskid)
     comment = "MikroWizard task #" + "taskid:{};".format(taskid)
     if not taskid:
-        return buildResponse({'status': 'failed'},200,error="Wrong name/desc")
+        return buildResponse({'status': 'failed'},200,error="Wrong task selected")
     try:
         jobs = crontab.find_comment(comment)
         if len(list(jobs)) > 0:
@@ -230,10 +236,10 @@ def user_tasks_delete():
             db_syslog.add_syslog_event(get_myself(), "Task","Delete", get_ip(),get_agent(),json.dumps(input))
             return buildResponse([{'status': 'success',"taskid":res}],200)
         else:
-            return buildResponse([{'status': 'failed',"massage":"record not exist"}],200)
+            return buildResponse([{'status': 'failed',"err":"record not exist"}],200)
     except Exception as e:
         log.error(e)
-        return buildResponse({'status': 'failed','massage':str(e)},200)    
+        return buildResponse({'status': 'failed','err':str(e)},200)    
 
 
 

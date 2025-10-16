@@ -29,6 +29,7 @@ def user_snippet_list():
     snips=db_user_tasks.Snippets
     page=input.get('page',0)
     size=input.get('size',10000)
+    limit=input.get('limit', False)
     # build where query
     clauses = []
     if name and name!="":
@@ -49,6 +50,8 @@ def user_snippet_list():
             query=snips.select(*selector)
         query=query.order_by(snips.id.desc())
         query=query.paginate(page,size)
+        if limit:
+            query=query.limit(limit)
         logs=list(query.dicts())
     except Exception as e:
         return buildResponse({"status":"failed", "err":str(e)},400)
