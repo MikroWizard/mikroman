@@ -286,13 +286,18 @@ def update_device(dev,q):
     ofa=db_sysconfig.get_firmware_action().value
     _installed_version=RouterOSVersion(dev.current_firmware)
     try:
-        if dev.firmware_to_install:
-            ver_to_install=dev.firmware_to_install
-        elif ofa=="keep" and _installed_version < RouterOSVersion('7.0.0'):
-            ver_to_install=db_sysconfig.get_firmware_old().value
+        if not dev.firmware_to_install and dev.upgrade_device:
+            #just do upgrade
+            ver_to_install=_installed_version
         else:
-            ver_to_install=db_sysconfig.get_firmware_latest().value
-        ver_to_install = RouterOSVersion(ver_to_install)
+            if dev.firmware_to_install:
+                ver_to_install=dev.firmware_to_install
+            elif ofa=="keep" and _installed_version < RouterOSVersion('7.0.0'):
+                ver_to_install=db_sysconfig.get_firmware_old().value
+            else:
+                ver_to_install=db_sysconfig.get_firmware_latest().value
+            ver_to_install = RouterOSVersion(ver_to_install)
+            
     except Exception as e:
         log.error(e)
         q.put({"id": dev.id})
@@ -308,9 +313,21 @@ def update_device(dev,q):
             util.check_or_fix_event(events,"firmware","Update Failed")
             util.check_or_fix_event(events,"firmware","Firmware repositpry")
             util.check_or_fix_event(events,"firmware","Device storage")
-            dev.failed_attempt=0
             dev.firmware_to_install=None
-            dev.save()
+            if dev.upgrade_device and dev.status != "failed":
+                dev.failed_attempt=0
+                dev.status = "upgrading"
+                dev.save()
+                upgrade_routerboot(dev, q)
+            elif dev.upgrade_device and dev.status == "failed":
+                dev.failed_attempt+=1
+                dev.status = "failed"
+                dev.save()
+                upgrade_routerboot(dev, q)
+            else:
+                dev.failed_attempt=0
+                dev.status = 'updated'
+                dev.save()
             q.put({"id": dev.id})
             return True
     except Exception as e:
@@ -420,3 +437,62 @@ def apply_firmware(packages,firm2,arch,dev,router,events,q):
         log.error(e)
         q.put({"id": dev.id})
     q.put({"id": dev.id})
+
+
+def upgrade_routerboot(dev, q=None):
+    success = False
+    options = util.build_api_options(dev)
+    router = RouterOSCheckResource(options)
+    api = None
+    try:
+        api = router._connect_api()
+        # Perform upgrade directly
+        log.info("Performing RouterBOOT firmware upgrade...")
+        cmd_upgrade = '/system/routerboard/upgrade'
+        call_upgrade = api(cmd_upgrade)
+        upgraderesults = tuple(call_upgrade)
+        log.warning(upgraderesults)  # e.g., [{'!done': True}, {'message': 'Firmware upgraded successfully'}]
+
+        # Reboot to apply
+        try:
+            log.info("Performing RouterBOOT Reboot...")
+            cmd_reboot = '/system/reboot'
+            call_reboot = api(cmd_reboot)
+            rebootresults = tuple(call_reboot)
+            log.warning(rebootresults)
+        except Exception as e:
+            log.error(f"Error during RouterBOOT Reboot: {e}")
+        dev.upgrade_device = False
+        dev.save()
+        success = True
+
+    except Exception as e:
+        log.error(f"Error during RouterBOOT upgrade: {e}")
+        if "no such command" in str(e):
+            db_events.firmware_event(dev.id, "updater", "Firmware Upgrade", "Error", 0, "RouterBOOT upgrade command not found")
+            dev.status = "updated"
+            dev.upgrade_device = False
+        else:
+            db_events.firmware_event(
+                dev.id, "updater", "Firmware Upgrade", "Error", 0, 
+                f"Failed to upgrade RouterBOOT: {str(e)}"
+            )
+            dev.status = "failed"
+        dev.save()
+        success = False
+
+    finally:
+        if api:
+            api.close()
+
+    # Update status and queue
+    if success:
+        dev.status = "updated"
+        # Optional: Reset upgrade flag
+        dev.upgrade_device = False
+    else:
+        dev.status = "failed"
+    dev.save()
+    if q:
+        q.put({"id": dev.id})
+    return success
