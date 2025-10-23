@@ -18,6 +18,12 @@ from libs.red import RedisDB
 import feedparser
 import requests
 import json
+try:
+    from libs import utilpro
+    ISPRO=True
+except ImportError:
+    ISPRO=False
+    pass
 
 log = logging.getLogger("logs")
 
@@ -364,7 +370,8 @@ def dashboard_stats():
         params={
             "serial_number": res['serial'],
             "username": username.strip(),
-            "version": __version__
+            "version": __version__,
+            "ISPRO":ISPRO
         }
         if versioncheck:
             params['versioncheck'] = True 
