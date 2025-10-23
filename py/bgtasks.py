@@ -606,12 +606,28 @@ def bulk_add_devices(*args, **kwargs):
                 return False
                 
             ip = device_info['ip']
+            log.info(f"Adding device {ip}")
             username = device_info['username']
             password = device_info['password']
             port = device_info.get('port', 8728)
             
             scan_results.append({'ip': ip})
-            
+            ip=str(ipaddress.IPv4Address(ip))
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                sock.settimeout(SOCKET_TIMEOUT)
+                result = sock.connect_ex((ip,int(port)))
+                if result != 0:
+                    scan_results[idx]['added']=False
+                    scan_results[idx]['failures']="Connection or authentication failed"
+                    log.error(f"Error adding device {ip}")
+                else:
+                    src_ip=sock.getsockname()[0]
+            except Exception as e:
+                scan_results[idx]['added']=False
+                scan_results[idx]['failures']="Connection or authentication failed"
+                log.error(f"Error adding device {ip}: {e}")
+                continue
             options={
                 'host':ip,
                 'username':username,
@@ -652,7 +668,6 @@ def bulk_add_devices(*args, **kwargs):
                 call = router.api.path("/ip/address")
                 ips = list(tuple(call))
                 result['ips']=ips
-                
                 is_availbe, current, arch, upgrade_availble = util.check_update(options,router)
                 
                 current_interface = None
@@ -699,8 +714,11 @@ def bulk_add_devices(*args, **kwargs):
                 device['password']=util.crypt_data(password)
                 device['port']=port
                 device['arch']=result['architecture-name']
-                
+                device['port']=options['port']
+                device['arch']=result['architecture-name']
+                device['peer_ip']=src_ip 
                 mikrotiks.append(device)
+
                 scan_results[idx]['added']=True
                 
             except Exception as e:
@@ -710,8 +728,8 @@ def bulk_add_devices(*args, **kwargs):
                 
         try:
             db_tasks.add_task_result('bulk-add', json.dumps(scan_results), json.dumps(info,default=serialize_datetime))
-        except:
-            pass
+        except Exception as e:
+            log.error(e)
             
         database.execute_sql("SELECT setval('devices_id_seq', MAX(id), true) FROM devices")
         
