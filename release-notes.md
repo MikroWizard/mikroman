@@ -1,4 +1,41 @@
 # Release Notes  
+## Version 1.2.0 Free / 1.2.0 Pro
+
+### New Features
+- **Web Access Button:** Added a WebFig access button next to each device name in the device list for quick and direct access.
+- **Network Map (Pro):** Automatically generates a live network topology map based on MikroTik neighbor discovery.
+- **Proxy WebFig (Pro):** Introduced secure proxy functionality that allows WebFig access from anywhere with auto-login configuration.
+- **Asyncio Syslog Server:** Complete rewrite of the syslog system using `asyncio` for enhanced performance and scalability.
+- **Enhanced DHCP Log Handling:** Improved parsing and interpretation of DHCP logs for more accurate reporting.
+- **Firmware Upgrade Tool:** Added the ability to upgrade device firmware directly from MikroWizard.
+- **Bulk Device Import:** Devices can now be added in bulk using a CSV file for faster setup.
+- **User & Device Group Management:** Assign and manage users directly from the Device Groups page.
+- **Device Group Bulk Operations:** Perform bulk firmware upgrades and updates on all devices within a group.
+- **Improved Scan/Add History:** Added a **History** button on the Devices page, allowing users to view or download scan/add operation logs directly as a CSV file.
+- **Upgradable/Updatable Filter:** The Upgradable/Updatable filter now functions correctly, and previously incorrect upgrade data has been fixed.
+- **Cron Selector in Tasks:** Added predefined cron examples with search and list functionality to simplify scheduling in the Tasks page.
+
+---
+
+### Improvements & Bug Fixes
+- **Database & API Layer:** Added new migrations for device upgrades and improved API error handling and response formatting.
+- **Background Tasks:** Optimized background task execution for better stability and performance.
+- **Network Discovery:** Improved device scanner for more accurate detection and mapping.
+- **Logging System:** Enhanced log structure and rotation. Logs are now stored in `/opt/mikrowizard/logs` for easier access and management.
+- **UI/UX Enhancements:** Refined the interface and improved usability across multiple pages, including Settings, Backups, User Management, Password Vault, Sync & Clone, User Tasks, Device Management, and Device Groups.
+- **Performance:** Improved syslog throughput, task cancellation, and database query performance. Introduced configurable thread limits and replaced manual threading with `ThreadPoolExecutor`.
+- **Security:** Strengthened input validation and implemented additional security measures throughout the platform.
+- **Bug Fixes:**
+  - Fixed multiple issues affecting firmware updates and upgrades.
+  - Improved error handling in device management modules.
+  - Various minor fixes and general performance improvements.
+
+---
+
+### Notes
+- This release focuses on **performance, reliability, and scalability**, while introducing several key new features for Pro users.
+- Core components have been extensively refactored to improve maintainability and monitoring.
+- Enhanced logging and monitoring now provide deeper operational visibility across all modules.
 
 ## Version 1.0.8 Free / 1.1.0 Pro
 
