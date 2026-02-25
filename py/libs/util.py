@@ -223,10 +223,14 @@ def grab_device_data(dev, q):
                 if 'no such command' not in str(e):
                     log.error(e)
                 pass
-            call = router.api.path(
-              "/system/health"
-            )
-            health = tuple(call)
+            try:
+                call = router.api.path(
+                  "/system/health"
+                )
+                health = tuple(call)
+            except Exception as e:
+                log.warning("Failed to fetch /system/health for {}: {}".format(dev.ip, e))
+                health = ()
             
             call = router.api.path(
                     "/system/identity"
@@ -262,22 +266,57 @@ def grab_device_data(dev, q):
             if len(health):
                 #since routeros v7 they changed health res from api
                 excluded_keys=['cpu-overtemp-check','active-fan','fan-mode','heater-control','psu2-state','cpu-overtemp-startup-delay','fan-on-threshold','heater-threshold','use-fan','cpu-overtemp-threshold','fan-switch','psu1-state','state','state-after-reboot']
-                if 'type' in health[0]:
-                    health_vals={}
-                    for d in health:
-                        if 'state' in d['name']:
-                            if d['value'] == 'fail':
-                                db_events.health_event(dev.id,'Data Puller',d['name'],'Critical',0,"{} is Failed".format(d['name']))
-                            else:
-                                check_or_fix_event(events,"health",d['name'])
-                            continue
-                        if d['name'] in excluded_keys:
-                            continue
-                        health_vals[d['name']]=d['value']
-                elif result['board-name']=='x86' or 'x86' in result['architecture-name']:
-                    health_vals={}
+                
+                health_vals={}
+                # Normalize health data to a dictionary
+                # v7 format: [{'name': 'voltage', 'value': '24.1', 'type': 'V'}, ...]
+                # v6 format: [{'voltage': '24.1', 'temperature': '30'}]
+                
+                # Check for v7 format
+                is_v7_format = False
+                if isinstance(health[0], dict) and 'name' in health[0] and 'value' in health[0]:
+                    is_v7_format = True
+                
+                items_to_process = []
+                if is_v7_format:
+                    for item in health:
+                        if 'name' in item and 'value' in item:
+                             items_to_process.append((item['name'], item['value']))
                 else:
-                    health_vals: Dict[str, str] = health[0]
+                    # v6 format or single dict
+                    for item in health:
+                        for k, v in item.items():
+                            items_to_process.append((k, v))
+
+                for name, value in items_to_process:
+                    if 'state' in name:
+                        if value == 'fail':
+                             db_events.health_event(dev.id,'Data Puller',name,'Critical',0,"{} is Failed".format(name))
+                        else:
+                             check_or_fix_event(events,"health",name)
+                        # Don't add state to health_vals (Redis)
+                        continue
+                    
+                    if name in excluded_keys:
+                        continue
+
+                    # Validate and convert value for Redis
+                    try:
+                        # 1. Strip units (e.g. "12.1V", "50C", "1547mA")
+                        # Remove trailing letters/percents
+                        val_clean = re.sub(r'[a-zA-Z%]+$', '', str(value)).strip()
+                        
+                        # 2. Convert to float
+                        val = float(val_clean)
+                        
+                        # 3. Round to 2 decimal places
+                        val = round(val, 2)
+                        
+                        health_vals[name] = val
+                    except (ValueError, TypeError):
+                        # Skip if conversion fails (e.g. ranges "50-55", strings "ok", "manual")
+                        continue
+
                 result.update(health_vals)
                 keys.extend(list(health_vals.keys()))
         except Exception as e:
