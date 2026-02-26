@@ -400,7 +400,7 @@ def scan_with_ip(*args, **kwargs):
                         is_availbe , current , arch , upgrade_availble =util.check_update(options,router) 
                         current_interface = None
                         for p in ips:
-                            if ip+"/" in p['address']:
+                            if ip+"/" in p['address'] and not p.get('invalid', False):
                                 current_interface=p['interface']
                                 break
                         
@@ -669,13 +669,11 @@ def bulk_add_devices(*args, **kwargs):
                 ips = list(tuple(call))
                 result['ips']=ips
                 is_availbe, current, arch, upgrade_availble = util.check_update(options,router)
-                
                 current_interface = None
                 for p in ips:
-                    if ip+"/" in p['address']:
+                    if ip+"/" in p['address'] and not p.get('invalid', False):
                         current_interface=p['interface']
                         break
-                        
                 if current_interface:
                     for inter in interfaces:
                         if inter['name']==current_interface:
@@ -696,7 +694,6 @@ def bulk_add_devices(*args, **kwargs):
                     unique_identifire=result['system-id']
                 else:
                     unique_identifire=ip
-                    
                 device['mac']=result['interface']['mac-address'] if "mac-address" in result['interface'] else 'tunnel-'+unique_identifire
                 device['name']=result['name']
                 
@@ -706,7 +703,6 @@ def bulk_add_devices(*args, **kwargs):
                     device['details']=result['board-name']
                 else:
                     device['details']='x86/64'
-                    
                 device['uptime']=result['uptime']
                 device['license']=""
                 device['interface']=result['interface']['name']
