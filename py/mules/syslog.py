@@ -185,6 +185,10 @@ class SyslogUDPProtocol(asyncio.DatagramProtocol):
             return
         if 'mikrowizard' in message and 'via api' not in message:
             if 'system,info,account' in message:
+                # Delay processing by 1 second to avoid race condition with RADIUS accounting inserts.
+                # Both events arrive simultaneously; allowing RADIUS to insert first ensures we can merge our connection details.
+                await asyncio.sleep(1)
+                
                 login_info = self.safe_extract_info(self.LOGIN_REGEX, message, 4)
                 if login_info:
                     try:

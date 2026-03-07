@@ -43,6 +43,29 @@ class RadServer(ServerAsync):
 
         ServerAsync.__init__(self, loop=loop, dictionary=dictionary,
                               debug=True)
+        # UDP packet deduplication cache: {key: timestamp}
+        self._dedup_cache = {}
+        self._dedup_ttl = 5  # seconds
+        self._dedup_cleanup_counter = 0
+        # Track proxy-authenticated users: {(username, devip): timestamp}
+        self._proxy_users = {}
+
+    def _is_duplicate(self, cache_key):
+        """Check if a packet with this key was already processed within TTL.
+        Returns True if duplicate, False if new (and registers it)."""
+        now = time.time()
+        # Periodic cleanup every 50 packets
+        self._dedup_cleanup_counter += 1
+        if self._dedup_cleanup_counter >= 50:
+            self._dedup_cleanup_counter = 0
+            cutoff = now - self._dedup_ttl
+            self._dedup_cache = {k: v for k, v in self._dedup_cache.items() if v > cutoff}
+
+        if cache_key in self._dedup_cache:
+            if now - self._dedup_cache[cache_key] < self._dedup_ttl:
+                return True
+        self._dedup_cache[cache_key] = now
+        return False
     def verifyMsChapV2(self,pkt,userpwd,group,nthash):
 
         ms_chap_response = pkt['MS-CHAP2-Response'][0]
@@ -111,6 +134,11 @@ class RadServer(ServerAsync):
             username = pkt['User-Name'][0]
             userip=pkt['Calling-Station-Id'][0]
             devip=pkt['NAS-IP-Address'][0]
+            # Dedup: drop retransmitted auth packets
+            auth_key = ('auth', username, userip, devip)
+            if self._is_duplicate(auth_key):
+                log.info("Dropping duplicate auth packet for %s" % username)
+                return
             dev=db_device.query_device_by_ip(devip)
             if not dev:
                 self.send_auth_reject(protocol,pkt,addr)
@@ -142,7 +170,8 @@ class RadServer(ServerAsync):
                             self.send_auth_reject(protocol,pkt,addr)
                             db_AA.Auth.add_log(dev.id, 'failed',  u.username , userip , by=None,sessionid=None,timestamp=tz,message="Unable to verify group")
                             return
-                nthash=u.hash 
+                nthash=u.hash
+                is_proxy = False
                 if(ISPRO):
                     is_proxy,nthash = utilpro.GetNThash(u)
                     userip,respro=utilpro.verfyRadius(u,userip,is_proxy)
@@ -157,7 +186,8 @@ class RadServer(ServerAsync):
                 if reply:
                     if reply.code==AccessAccept and is_proxy:
                         log.info("web-proxy User %s logged in from %s" % (u.username, userip))
-                        db_AA.Auth.add_log(dev.id, 'proxy', u.username, userip, by="proxy", sessionid=None, timestamp=tz,message="proxy login")
+                        # Mark this user as proxy-authenticated for upcoming accounting
+                        self._proxy_users[(u.username, devip)] = tz
                     protocol.send_response(reply, addr)
                     return True
                 db_AA.Auth.add_log(dev.id, 'failed',  u.username , userip , by=None,sessionid=None,timestamp=tz,message="Wrong Password")
@@ -180,9 +210,23 @@ class RadServer(ServerAsync):
             user=pkt['User-Name'][0]
             userip=pkt['Calling-Station-Id'][0]
             sessionid=pkt['Acct-Session-Id'][0]
+            # Dedup: drop retransmitted accounting packets
+            acct_key = ('acct', sessionid, type)
+            if self._is_duplicate(acct_key):
+                log.info("Dropping duplicate acct packet for %s (session %s, type %s)" % (user, sessionid, type))
+                reply = self.CreateReplyPacket(pkt)
+                protocol.send_response(reply, addr)
+                return
             if type == 'Start':
                 log.info("User %s logged in from %s" % (user, userip))
-                db_AA.Auth.add_log(dev.id, 'loggedin', user , userip , None,timestamp=ts,sessionid=sessionid)
+                # Check if this user authenticated via proxy
+                proxy_key = (user, dev_ip)
+                acct_by = None
+                if proxy_key in self._proxy_users:
+                    if ts - self._proxy_users[proxy_key] < 30:  # within 30s of proxy auth
+                        acct_by = 'MW-proxy'
+                    del self._proxy_users[proxy_key]
+                db_AA.Auth.add_log(dev.id, 'loggedin', user , userip , acct_by,timestamp=ts,sessionid=sessionid)
             elif type == 'Stop':
                 log.info("User %s logged out from %s" % (user, userip))
                 db_AA.Auth.add_log(dev.id, 'loggedout', user , userip , None,timestamp=ts,sessionid=sessionid)
