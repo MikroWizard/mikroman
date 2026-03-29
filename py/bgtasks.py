@@ -529,6 +529,7 @@ def exec_snipet(*args, **kwargs):
                 for _ in range(num_threads):
                     qres=q.get()
                     res.append(qres)
+                
                 try:
                     db_tasks.add_task_result('snipet_exec', json.dumps(res),json.dumps(model_to_dict(utask),default=serialize_datetime),utask.id)
                 except Exception as e:
@@ -541,6 +542,52 @@ def exec_snipet(*args, **kwargs):
             return False
     task.status=0
     task.save()
+    return False
+
+@spool(pass_arguments=True)
+def exec_sequence(*args, **kwargs):
+    try:
+        task = db_tasks.exec_sequence_status()
+    except:
+        task = None
+        
+    if task and task.action=='cancel':
+        cancel_task('Sequence Exec',task)
+        return False
+        
+    if not task or not task.status:
+        if task:
+            task.status=1
+            task.save()
+        if not ISPRO:
+            if task:
+                task.status=0
+                task.save()
+            return False
+            
+        try:
+            utask=kwargs.get('utask',False)
+            if utask:
+                import task_run_pro
+                res = task_run_pro.run_sequence_task(utask)
+                
+                try:
+                    log.info("Sequence Executed: {}".format(utask.id))      
+                    log.info("Sequence Result: {}".format(res))
+                    db_tasks.add_task_result('sequence_exec', json.dumps(res), json.dumps(model_to_dict(utask), default=serialize_datetime), utask.id)
+                except Exception as e:
+                    log.error(e)
+                    pass
+        except Exception as e:
+            log.error(e)
+            if task:
+                task.status=0
+                task.save()
+            return False
+            
+    if task:
+        task.status=0
+        task.save()
     return False
 
 @spool(pass_arguments=True)

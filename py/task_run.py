@@ -97,5 +97,11 @@ if __name__ == '__main__':
         if not ISPRO:
             exit()
         res=utilpro.run_vault_task(utask)
+    elif utask.task_type == "sequence":
+        log.error("sequence task")
+        if not ISPRO:
+            exit()
+        import task_run_pro
+        res = task_run_pro.run_sequence_task(utask)
     #log.error(res)
     #[{'id': 3, 'state': False}, {'id': 1, 'state': False}, {'id': 2, 'state': True}]

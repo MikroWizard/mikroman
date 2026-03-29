@@ -55,6 +55,9 @@ def firmware_service_status():
 def exec_snipet_status():
     return (Tasks.select().where(Tasks.signal == 160).get())
 
+def exec_sequence_status():
+    return (Tasks.select().where(Tasks.signal == 175).get())
+
 def get_running_tasks():
     return (Tasks.select().where(Tasks.status == True))
 

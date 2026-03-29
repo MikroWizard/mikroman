@@ -14,7 +14,7 @@ from threading import Lock
 from libs.db import db_device, db_AA, db_events
 from libs import util
 try:
-    from libs import utilpro
+    from libs import utilpro, syslog_regex_pro
     ISPRO=True
 except ImportError:
     ISPRO=False
@@ -183,6 +183,11 @@ class SyslogUDPProtocol(asyncio.DatagramProtocol):
         except Exception as e:
             log.error(f"Error in handle_log: {e}")
             return
+            
+        # Process custom regex engine if PRO is enabled.
+        if ISPRO:
+            syslog_regex_pro.process_custom_syslog_regex(dev, message)
+            
         if 'mikrowizard' in message and 'via api' not in message:
             if 'system,info,account' in message:
                 # Delay processing by 1 second to avoid race condition with RADIUS accounting inserts.

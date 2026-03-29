@@ -19,6 +19,8 @@ try:
     from api import api_pro_api
     from api import api_pro_api2
     from api import api_proxy
+    from api import api_snippet_pro
+    from api import wireguard_api_pro
 except ImportError:
     pass
 

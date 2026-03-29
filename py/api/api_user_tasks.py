@@ -46,8 +46,10 @@ def user_tasks_list():
         clauses.append(utaks.task_type == task_type)
     if not ISPRO:
         clauses.append(utaks.task_type != 'firmware')
+        clauses.append(utaks.task_type != 'sequence')
     clauses.append(utaks.task_type != 'vault')
     clauses.append(utaks.task_type != 'snipet_exec')
+    clauses.append(utaks.task_type != 'sequence_exec')
     expr=""
     logs = []
     selector=[utaks.id,utaks.name,utaks.description,utaks.desc_cron,utaks.action,utaks.task_type,utaks.dev_ids,utaks.snippetid,utaks.data,utaks.cron,utaks.selection_type,utaks.created]
@@ -76,7 +78,11 @@ def user_tasks_create():
     action=input.get('action',False)
     task_type=input.get('task_type',"backup")
     selection_type=input.get('selection_type',False)
-    taskdata=input.get('data',False)
+    taskdata=input.get('data',{}) or {}
+    sequence_id = input.get('sequence_id', False)
+    if task_type == 'sequence' and sequence_id:
+        taskdata['sequence_id'] = sequence_id
+        
     utasks=db_user_tasks.UserTasks
     
     # todo
@@ -105,7 +111,7 @@ def user_tasks_create():
     if selection_type not in ["devices","groups"]:
         return buildResponse({'status': 'failed'}, 200, error="Wrong member type")
     
-    if task_type not in ["backup","snippet","firmware"]:
+    if task_type not in ["backup","snippet","firmware","sequence"]:
         return buildResponse({'status': 'failed'}, 200, error="Wrong task type")
     try:
         task=utasks.create(**data)
@@ -146,7 +152,10 @@ def user_tasks_edit():
     action=input.get('action',False)
     task_type=input.get('task_type',"backup")
     selection_type=input.get('selection_type',False)
-    taskdata=input.get('data', False)
+    taskdata=input.get('data', {}) or {}
+    sequence_id = input.get('sequence_id', False)
+    if task_type == 'sequence' and sequence_id:
+        taskdata['sequence_id'] = sequence_id
     # todo
     # add owner check devids and dev groups with owner
     if not name:
@@ -161,7 +170,7 @@ def user_tasks_edit():
     if selection_type not in ["devices","groups"]:
         return buildResponse({'status': 'failed'}, 200, error="Wrong member type")
     
-    if task_type not in ["backup","snippet","firmware"]:
+    if task_type not in ["backup","snippet","firmware","sequence"]:
         return buildResponse({'status': 'failed'}, 200, error="Wrong task type")
     
     # check task exist and valid
