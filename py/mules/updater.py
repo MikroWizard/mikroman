@@ -18,7 +18,6 @@ import zipfile
 import subprocess
 import json
 import uwsgi
-import signal
 log = logging.getLogger("Updater_mule")
 import pip
 try:
@@ -61,54 +60,78 @@ def check_sha256(filename, expect):
     # and handling it is left as an exercise for the reader.
     try:
         with open(filename, 'rb') as fh:
-            # Read and hash the file in 4K chunks. Reading the whole
-            # file at once might consume a lot of memory if it is
-            # large.
             while True:
                 data = fh.read(4096)
                 if len(data) == 0:
                     break
                 else:
                     h.update(data)
-        return expect == h.hexdigest()
+        actual = h.hexdigest()
+        if expect == actual:
+            log.debug("Checksum match for {}: {}".format(filename, actual))
+            return True
+        else:
+            log.warning("Checksum mismatch for {}. Expected: {}, Actual: {}".format(filename, expect, actual))
+            return False
     except Exception as e:
+        log.error("Error during checksum verification of {}: {}".format(filename, e))
         return False
 
 def extract_zip_reload(filename,dst):
     """Extract the contents of the zip file "filename" to the directory
     "dst". Then reload the updated modules."""
+    log.info("Extracting {} to {}...".format(filename, dst))
     with zipfile.ZipFile(filename, 'r') as zip_ref:
         zip_ref.extractall(dst)
+    
     # run db migrate
     dir ="/app/"
     cmd = "cd {}; PYTHONPATH={}py PYSRV_CONFIG_PATH={} python3 scripts/dbmigrate.py".format(dir, dir, "/conf/server-conf.json")
-    p = subprocess.Popen(cmd, shell=True)
+    log.info("Running database migrations: {}".format(cmd))
+    p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     (output, err) = p.communicate()  
-    #This makes the wait possible
     p_status = p.wait()
-    #install requirments
+    if p_status == 0:
+        log.info("Database migrations completed successfully.")
+    else:
+        log.error("Database migrations failed with status {}. Error: {}".format(p_status, err.decode().strip()))
+
+    #install requirements
     try:
         proreqs="/app/py/pro-reqs.txt"
-        with open(proreqs, "r") as f:
-            for line in f:
-                import_or_install(line.strip())
-                log.info("Installed {}".format(line.strip()))
-                time.sleep(1)
-        time.sleep(3)
-    except ImportError:
+        if os.path.exists(proreqs):
+            log.info("Installing PRO requirements from {}...".format(proreqs))
+            with open(proreqs, "r") as f:
+                for line in f:
+                    pkg = line.strip()
+                    if pkg and not pkg.startswith("#"):
+                        import_or_install(pkg)
+                        log.info("Installed PRO package: {}".format(pkg))
+                        time.sleep(1)
+            time.sleep(3)
+    except Exception as e:
+        log.error("Error installing PRO requirements: {}".format(e))
         pass
+
     reqs="/app/reqs.txt"
-    with open(reqs, "r") as f:
-        for line in f:
-            try:
-                install_package(line.strip())
-            except:
-                pass
+    if os.path.exists(reqs):
+        log.info("Installing standard requirements from {}...".format(reqs))
+        with open(reqs, "r") as f:
+            for line in f:
+                pkg = line.strip()
+                if pkg and not pkg.startswith("#"):
+                    try:
+                        install_package(pkg)
+                        log.info("Installed package: {}".format(pkg))
+                    except Exception as e:
+                        log.error("Failed to install package {}: {}".format(pkg, e))
+    
+    log.info("Post-update tasks completed. Cleaning up artifact {}.".format(filename))
     os.remove(filename)
-    #touch server reload file /app/reload
+    
+    # touch server reload file /app/reload
     masterpid=uwsgi.masterpid()
-    if ISPRO:
-        os.kill(masterpid, signal.SIGKILL)
+    log.info("Triggering server reload (masterpid: {}).".format(masterpid))
     Path('/app/reload').touch()
 
 def main():
@@ -116,7 +139,7 @@ def main():
         next_hour = (time.time() // 3600 + 1) * 3600
         sleep_time = next_hour - time.time()
         # Code to be executed every hour
-        print("Running hourly Update checker ...")
+        log.info("Running hourly Update checker ...")
         interfaces = util.get_ethernet_wifi_interfaces()
         hwid = util.generate_serial_number(interfaces)
         update_mode=db_sysconfig.get_sysconfig('update_mode')
@@ -125,10 +148,13 @@ def main():
         except:
             update_mode={'mode':'auto','update_back':False,'update_front':False}
             db_sysconfig.set_sysconfig('update_mode',json.dumps(update_mode))
+        log.debug("Update mode: {}".format(update_mode))
         if update_mode['mode']=='manual':
             if not update_mode['update_back']:
                 hwid=hwid+"MANUAL"
+                log.info("Update mode is MANUAL, skipping auto-check (HWID: {})".format(hwid))
             else:
+                log.info("Manual update triggered.")
                 update_mode['update_back']=False
                 db_sysconfig.set_sysconfig('update_mode',json.dumps(update_mode))
         username=False
@@ -153,31 +179,35 @@ def main():
             "version": __version__,
             "ISPRO":ISPRO
         }
-        res=False
         url="https://mikrowizard.com/wp-json/mikrowizard/v1/get_update"
+        log.info("Checking for updates at {} with params: {}".format(url, params))
         # send post request to server mikrowizard.com with params in json
         try:
-            response = requests.post(url, json=params)
-            res = response
-        except:
-            time.sleep(sleep_time)
-            continue
-        # get response from server
-        try:
-            if res and res.status_code == 200:
-                res=res.json()
-            if 'token' in res:
-                params={
-                "token":res['token'],
-                "file_name":res['filename'],
-                "username":username.strip()
-                }
-                log.info("Update available/Downloading...")
+            response = requests.post(url, json=params, timeout=30)
+            if response.status_code == 200:
+                res = response.json()
+                log.debug("Server response (200): {}".format(res))
             else:
+                log.warning("Server returned status code: {}".format(response.status_code))
+                log.debug("Response body: {}".format(response.text))
                 time.sleep(sleep_time)
                 continue
         except Exception as e:
-            log.error(e)
+            log.error("Error during update check: {}".format(e))
+            time.sleep(sleep_time)
+            continue
+        
+        if res and isinstance(res, dict) and 'token' in res:
+            params={
+                "token":res['token'],
+                "file_name":res['filename'],
+                "username":username.strip()
+            }
+            log.info("Update available! Package: {}, SHA256: {}".format(res['filename'], res['sha256']))
+        else:
+            log.info("No update available or invalid response format from server.")
+            time.sleep(sleep_time)
+            continue
         
         # check if  filename exist in /app/ and checksum is same then dont continue
         if check_sha256("/app/"+res['filename'], res['sha256']):
@@ -186,21 +216,32 @@ def main():
             time.sleep(sleep_time)
             continue
         download_url="https://mikrowizard.com/wp-json/mikrowizard/v1/download_update"
+        log.info("Downloading update from {}...".format(download_url))
         # send post request to server mikrowizard.com with params in json
-        r = requests.post(download_url,json=params,stream=True)
-        if "invalid" in r.text or r.text=='false':
-            log.error("Invalid response")
-            time.sleep(sleep_time)
-            continue
-        with open("/app/"+res['filename'], 'wb') as fd:
-            for chunk in r.iter_content(chunk_size=128):
-                fd.write(chunk)
-        if check_sha256("/app/"+res['filename'], res['sha256']):
-            log.error("Update downloaded : "+"/app/"+res['filename'])
-            extract_zip_reload("/app/"+res['filename'],"/app/")
-        else:
-            log.error("Checksum not match")
-            os.remove("/app/"+res['filename'])
+        try:
+            r = requests.post(download_url,json=params,stream=True, timeout=60)
+            if r.status_code != 200:
+                log.error("Download failed with status: {}".format(r.status_code))
+                time.sleep(sleep_time)
+                continue
+            if "invalid" in r.text or r.text=='false':
+                log.error("Invalid download response: {}".format(r.text[:100]))
+                time.sleep(sleep_time)
+                continue
+            
+            with open("/app/"+res['filename'], 'wb') as fd:
+                for chunk in r.iter_content(chunk_size=4096):
+                    fd.write(chunk)
+            
+            log.info("Download complete. Verifying checksum...")
+            if check_sha256("/app/"+res['filename'], res['sha256']):
+                log.info("Update downloaded and verified: /app/{}".format(res['filename']))
+                extract_zip_reload("/app/"+res['filename'],"/app/")
+            else:
+                log.error("Downloaded file checksum mismatch. Deleting file.")
+                os.remove("/app/"+res['filename'])
+        except Exception as e:
+            log.error("Exception during download: {}".format(e))
         time.sleep(sleep_time)
 
 

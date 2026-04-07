@@ -6,7 +6,6 @@
 # Author: sepehr.ha@gmail.com
 
 from peewee import *
-from pathlib import Path
 from libs.db.db import User,BaseModel,get_object_or_404
 import logging
 log = logging.getLogger("db_sysconfig")
@@ -48,8 +47,6 @@ def get_sysconfig(key):
         return get_object_or_404(Sysconfig, key=key).value
     except Exception as e:
         log.error(e)
-        if "server closed the connection unexpectedly" in str(e):
-            Path('/app/reload').touch()
         return None
 
 def get_firmware_latest():
