@@ -1,4 +1,25 @@
 # Release Notes  
+## Version 1.3.0 Free / 1.3.0 Pro
+
+### New Features
+- **WireGuard VPN Manager (Pro):** Integrated WireGuard server for centralized VPN peer management. Connect MikroTik devices via a dedicated tunnel with easy provisioning (QR code, `.conf` files, or RouterOS scripts). Includes automatic mapping of peers to MikroTik devices.
+- **Sequences (Pro):** Chained execution of snippets and code with real-time output monitoring. Supports conditional actions and snippet execution based on output filtering (word filters or regex).
+- **Custom Syslog Regex (Pro):** Custom mode for parsing incoming syslog events using a regex builder or custom strings.
+- **Custom Alerts (Pro):** Generate fully custom alerts based on execution output or syslog events. Integrated visibility in Device Logs and the Monitoring Wall.
+- **Pro License Handling:** Improved expiration warnings and registration workflow.
+
+---
+
+### Improvements & Bug Fixes
+- **RADIUS Fix:** Resolved race conditions with RADIUS accounting inserts by introducing optimized processing delays.
+- **Health Status Fix:** Improved compatibility with MikroTik devices that do not support standard health data or return non-standard values.
+- **Database & API Layer:** Optimized background task execution and optimized backup/restore processes.
+- **Security:** Improved duplicate session handling and login stability.
+- **Performance:** Enhanced license verification concurrency.
+- **System:** Backend support for Angular 18 upgrade and PrimeNG migration.
+
+---
+
 ## Version 1.2.0 Free / 1.2.0 Pro
 
 ### New Features
