@@ -36,8 +36,6 @@ def save_all(data):
 
 def get_default_password():
     return get_object_or_404(Sysconfig, key="default_password")
-def update_sysconfig(key,value):
-    return Sysconfig.update(value=value).where(Sysconfig.key == key).execute()
 
 def get_scan_mode():
     return get_object_or_404(Sysconfig, key="scan_mode")
