@@ -18,8 +18,10 @@ from libs.red import RedisDB
 import feedparser
 import requests
 import json
+import concurrent.futures
 try:
     from libs import utilpro
+    from libs import license_helper
     ISPRO=True
 except ImportError:
     ISPRO=False
@@ -358,84 +360,143 @@ def dashboard_stats():
     update_mode=db_sysconfig.get_sysconfig('update_mode')
     update_mode=json.loads(update_mode)
     res['update_mode']=update_mode['mode']
-    try:
-        req = requests.get(test_url, timeout=(0.5,1)) 
-        req.raise_for_status()
-    except Exception as e:
-        log.error(e)
-        internet_connection=False
-        pass
+
     try:
         username = db_sysconfig.get_sysconfig('username')
-        params={
-            "serial_number": res['serial'],
-            "username": username.strip(),
-            "version": __version__,
-            "ISPRO":ISPRO
-        }
-        if versioncheck:
-            params['versioncheck'] = True 
-        url="https://mikrowizard.com/wp-json/mikrowizard/v1/get_update"
-        # send post request to server mikrowizard.com with params in json
-        try:
-            if internet_connection:
-                response = requests.post(url, json=params)
-                response=response.json()
-                # log.error(response)
-                res['license']=response.get('license',False)
-                res['update_available']=response.get('available',False)
-                res['latest_version']=response.get('latest_version',False)
-                res['update_inprogress']=update_mode['update_back']
-            else:
-                res['license']='connection_error'
-                res['update_available']=False
-                res['latest_version']=False
-        except:
-            pass
-        try:
-            if front_version and internet_connection:
-                params['version']=front_version
-                params['front']=True
-                response = requests.post(url, json=params)
-                response=response.json()
-                res['front_update_available']=response.get('available',False)
-                res['front_latest_version']=response.get('latest_version',False)
-                res['front_update_inprogress']=update_mode['update_front']
-        except:
-            pass
     except:
-        pass
-    # res['front_update_available']=True
-    # res['update_available']=True
+        username = False
+    
     if username:
         res['username']=username
     else:
         res['username']=False
-    res['blog']=[]
-    noconnectiondata={
-                "content": "Unable to connect to mikrowizard.com! please check server connection",
-                "media_content": "data:image/png;base64,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",
-                "summery": "Unable to connect mikrowizard.com to get latest News! <a  target=\"_blank\" href=\"https://mikrowizard.com/plan-your-project-with-your-software/\">Read More</a>",
-                "title": "Connection Error"
+
+    def do_internet_check():
+        try:
+            req = requests.head(test_url, timeout=(0.5,1)) 
+            req.raise_for_status()
+            return True
+        except:
+            return False
+
+    def do_get_update(internet_ok):
+        out = {
+            'license': 'connection_error' if not internet_ok else False,
+            'update_available': False,
+            'latest_version': False,
+            'update_inprogress': update_mode.get('update_back'),
+            'front_update_available': False,
+            'front_latest_version': False,
+            'front_update_inprogress': update_mode.get('update_front')
+        }
+        if internet_ok:
+            params={
+                "serial_number": res['serial'],
+                "username": username.strip() if username else "",
+                "version": __version__,
+                "ISPRO": ISPRO
             }
-    try:
-        if internet_connection:
-            feed = feedparser.parse(feedurl)['entries']
+            if versioncheck:
+                params['versioncheck'] = True 
+            try:
+                r = requests.post("https://mikrowizard.com/wp-json/mikrowizard/v1/get_update", json=params, timeout=5)
+                rj = r.json()
+                out['license'] = rj.get('license', False)
+                out['update_available'] = rj.get('available', False)
+                out['latest_version'] = rj.get('latest_version', False)
+            except:
+                pass
+            if front_version:
+                fparams = params.copy()
+                fparams['version'] = front_version
+                fparams['front'] = True
+                try:
+                    rf = requests.post("https://mikrowizard.com/wp-json/mikrowizard/v1/get_update", json=fparams, timeout=5)
+                    rfj = rf.json()
+                    out['front_update_available'] = rfj.get('available', False)
+                    out['front_latest_version'] = rfj.get('latest_version', False)
+                except:
+                    pass
+        return out
+
+    def do_fetch_blog(internet_ok):
+        b = []
+        noconnectiondata={
+            "content": "Unable to connect to mikrowizard.com! please check server connection",
+            "media_content": "data:image/png;base64,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",
+            "summery": "Unable to connect mikrowizard.com to get latest News! <a  target=\"_blank\" href=\"https://mikrowizard.com/plan-your-project-with-your-software/\">Read More</a>",
+            "title": "Connection Error"
+        }
+        if internet_ok:
+            try:
+                feed = feedparser.parse(feedurl)['entries']
+                if len(feed) > 0:
+                    for f in feed:
+                        tmp = {}
+                        tmp['title'] = f['title']
+                        tmp['content'] = f['content'][0]['value']
+                        tmp['summery'] = f['summary'][0:100] + " ... " + '<a target="_blank" href="' + f['link'] + '">Read More</a>'
+                        tmp['media_content'] = f['media_content'][0]['url']
+                        b.append(tmp)
+                else:
+                    b.append(noconnectiondata)
+            except:
+                b.append(noconnectiondata)
         else:
-            feed = []
-        if len(feed) >0:
-            for f in feed:
-                tmp={}
-                tmp['title']=f['title']
-                tmp['content']=f['content'][0]['value']
-                tmp['summery']=f['summary'][0:100]+" ... " + '<a  target="_blank" href="'+f['link']+'">Read More</a>'
-                tmp['media_content']=f['media_content'][0]['url']
-                res['blog'].append(tmp)
+            b.append(noconnectiondata)
+        return b
+
+    # Run tasks concurrently
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        f_internet = executor.submit(do_internet_check)
+        internet_connection = f_internet.result()
+
+        f_update = executor.submit(do_get_update, internet_connection)
+        f_blog = executor.submit(do_fetch_blog, internet_connection)
+
+        update_data = f_update.result()
+        res['blog'] = f_blog.result()
+
+    # Merge update data into res
+    res.update(update_data)
+
+    # License Info struct setup
+    res['license_info'] = {
+        "status": "pending",
+        "message": "",
+        "action_required": "none"
+    }
+
+    if not internet_connection:
+        res['license_info']['status'] = "connection_error"
+        res['license_info']['message'] = "Cannot connect to server to verify license and updates.if you are sure with internet refresh page"
+    elif not username or username.strip() == "":
+        res['license_info']['status'] = "no_username"
+        res['license_info']['action_required'] = "set_username"
+        res['license_info']['message'] = "Username is not configured. Please register/enter your Mikrowizard username in settings page."
+        res['license'] = False
+    else:
+        # User is configured, internet is fine
+        res['license_info']['status'] = res.get('license', 'Free')
+        if not res['license_info']['status']:
+             res['license_info']['status'] = 'Free'
+        
+        # Check active/expiration if PRO
+        if ISPRO:
+            try:
+                local_exp = license_helper.check_license_dev_limit_exp()
+                if not local_exp:
+                    res['license_info']['status'] = "expired"
+                    res['license_info']['action_required'] = "renew_license"
+                    res['license_info']['message'] = "Your Pro license has expired or max device limit reached. Please renew to continue receiving Pro features and updates."
+                else:
+                    res['license_info']['message'] = f"Your Pro license is active. Valid until {local_exp.strftime('%Y-%m-%d %H:%M:%S')}."
+                    res['license_info']['expiration_date'] = local_exp.strftime('%Y-%m-%d %H:%M:%S')
+            except Exception as e:
+                log.error(f"Error checking local license exp: {e}")
+                res['license_info']['message'] = "Error reading Pro license status locally."
         else:
-            res['blog'].append(noconnectiondata)
-    except:
-        res['blog'].append(noconnectiondata)
-        pass
+            res['license_info']['message'] = "You are currently using the Free version. Consider upgrading to Pro for extra features."
 
     return buildResponse(res, 200)
 

@@ -10,6 +10,7 @@ import os
 import config
 from urllib.parse import quote
 
+
 if config.DATABASE_HOST.startswith("/"):
     # sqlite
     # note: can't use full path here!
@@ -24,11 +25,10 @@ else:
         config.DATABASE_USER,
         quote(config.DATABASE_PASSWORD))
 
-print(cmd)
+# print(cmd)
 
 ret = os.system(cmd)
 if ret:
     print("migrate ERROR", ret)
 else:
     print("migrate OK")
-
