@@ -432,22 +432,39 @@ def check_syslog_config(dev,router,apply=False):
         mikro1=[item for item in results if "mikrowizard" in item.get('name')]
         regex=r'^mikrowizard{}$'.format(devid)
         mikro=[item for item in mikro1 if re.match(regex,item.get('name'))]
-        if len(mikro)==1 and mikro[0].get('remote-port')==5014 and mikro[0].get('remote')==peer_ip:
-            action_name=mikro[0].get('name')
+        if len(mikro) == 1:
+            action_name = mikro[0].get('name')
+            if mikro[0].get('remote-port') == 5014 and mikro[0].get('remote') == peer_ip:
+                # Configuration is already correct
+                pass
+            else:
+                if apply:
+                    log.info(f"Updating Peer IP for Syslog action {action_name} to {peer_ip}")
+                    params = {
+                        '.id': mikro[0].get('.id'),
+                        'remote': peer_ip,
+                        'remote-port': 5014
+                    }
+                    call.update(**params)
+                else:
+                    return False
         else:
             if apply:
                 if len(mikro1):
-                    ids=[item.get('.id') for item in mikro1 if 'mikrowizard' in item.get('name')]
+                    ids = [item.get('.id') for item in mikro1]
                     if len(ids):
+                        log.info(f"Removing old Syslog actions: {ids}")
                         call.remove(*ids)
-                action_name='mikrowizard{}'.format(devid)
-                action={
-                'name':action_name, 
-                'remote':peer_ip,
-                'remote-port':5014,
-                'target':'remote'
+                
+                action_name = f'mikrowizard{devid}'
+                log.info(f"Creating new Syslog action {action_name} with Peer IP {peer_ip}")
+                action = {
+                    'name': action_name,
+                    'remote': peer_ip,
+                    'remote-port': 5014,
+                    'target': 'remote'
                 }
-                res=call.add(**action )
+                call.add(**action)
             else:
                 return False
 
@@ -532,24 +549,101 @@ def configure_radius(router,ip,secret):
             'interim-update':'0s'
             }
             tuple(router.api.path('user', 'aaa')('set', **params))
-        for res in radius:
-            if res.get('address')==ip and res.get('secret')==secret:
-                return True
+        target_comment = 'mikrowizard'
+        
+        radius_list = list(radius)
+        target_comment = 'mikrowizard'
+        
+        # 1. Identify candidates
+        perfect_match = None
+        ip_secret_match = None
+        comment_match = None
+        ip_match = None
+        
+        for res in radius_list:
+            rid = res.get('.id')
+            r_ip = res.get('address')
+            r_secret = res.get('secret')
+            r_comment = res.get('comment')
+            
+            if r_comment == target_comment:
+                if r_ip == ip and r_secret == secret:
+                    perfect_match = rid
+                elif not comment_match:
+                    comment_match = rid
+            elif r_ip == ip:
+                if r_secret == secret:
+                    if not ip_secret_match:
+                        ip_secret_match = rid
+                else:
+                    if not ip_match:
+                        ip_match = rid
+        
+        # 2. Pick the winner
+        primary_id = perfect_match or ip_secret_match or comment_match or ip_match
+        
+        # 3. Identify losers
+        to_remove = []
+        for res in radius_list:
+            rid = res.get('.id')
+            if rid == primary_id:
+                continue
+            
+            # Remove duplicates for target IP or redundant managed entries
+            if res.get('address') == ip or res.get('comment') == target_comment:
+                to_remove.append(rid)
 
-        #configure radius client
-        action={
-            'address':ip,
-            'secret':secret,
-            'service':'login',
-            'require-message-auth':'no'
+        # Execute removal
+        if to_remove:
+            log.warning(f"Removing {len(to_remove)} redundant RADIUS entries for {ip}: {to_remove}")
+            try:
+                call.remove(*to_remove)
+            except Exception as e:
+                log.error(f"Failed to remove RADIUS entries: {e}")
+        else:
+            log.info(f"No redundant RADIUS entries found for {ip}")
+
+        # Now manage the primary entry
+        if primary_id:
+            # Re-fetch the entry data from our local tuple to see what needs updating
+            p_entry = next((r for r in radius if r.get('.id') == primary_id), None)
+            if p_entry:
+                if p_entry.get('address') == ip and p_entry.get('secret') == secret and p_entry.get('comment') == target_comment:
+                    # Already perfect
+                    return True
+                else:
+                    log.info(f"Synchronizing RADIUS entry {primary_id} to {ip} (comment: {target_comment})")
+                    params = {
+                        '.id': primary_id,
+                        'address': ip,
+                        'secret': secret,
+                        'comment': target_comment,
+                        'service': 'login'
+                    }
+                    try:
+                        call.update(**params)
+                        return True
+                    except Exception as e:
+                        log.error(f"Failed to update RADIUS entry: {e}")
+                        return False
+
+
+        # configure radius client
+        action = {
+            'address': ip, 
+            'secret': secret,
+            'service': 'login',
+            'require-message-auth': 'no',
+            'comment': target_comment
         }
         try:
             call.add(**action)
         except:
-            action.pop('require-message-auth')
+            if 'require-message-auth' in action:
+                action.pop('require-message-auth')
             call.add(**action)
         
-        return True
+        return True 
     except Exception as e:
         log.error(e)
         return False
