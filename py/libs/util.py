@@ -458,7 +458,7 @@ def check_syslog_config(dev,router,apply=False):
 
         results = tuple(call)
 
-        confs=[item for item in results if action_name in item.get('action')]
+        confs=[item for item in results if action_name == item.get('action') and action_name == item.get('prefix')]
         if len(confs)!=3:
             if apply:
                 ids=[item.get('.id') for item in results if 'mikrowizard' in item.get('prefix')]

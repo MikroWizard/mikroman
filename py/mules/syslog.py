@@ -11,7 +11,7 @@ import logging
 import re
 from threading import Lock
 
-from libs.db import db_device, db_AA, db_events
+from libs.db import db_device, db_AA, db_events, db_sysconfig
 from libs import util
 try:
     from libs import utilpro, syslog_regex_pro
@@ -34,6 +34,7 @@ last_cleanup = 0
 CLEANUP_INTERVAL = 600  # 10 minutes
 
 class SyslogUDPProtocol(asyncio.DatagramProtocol):
+    fixing_devices = set()  # Track devices currently being re-configured
     @staticmethod
     def get_cached_device(ip):
         """Get device from cache or database"""
@@ -141,6 +142,31 @@ class SyslogUDPProtocol(asyncio.DatagramProtocol):
             log.error(f"Error extracting regex data: {e}")
             return None
 
+    async def _fix_device_syslog(self, dev):
+        """Background task to fix device syslog configuration"""
+        dev_id = dev.id
+        ip = dev.ip
+        
+        if dev_id in self.fixing_devices:
+            return
+            
+        self.fixing_devices.add(dev_id)
+        try:
+            log.warning(f"Starting background syslog reconfiguration for {ip} (ID: {dev_id})...")
+            # Run the synchronous check_syslog_config in a thread
+            result = await asyncio.to_thread(util.check_syslog_config, dev, None, True)
+            if result:
+                log.warning(f"Successfully re-configured syslog for {ip}")
+                # Update cache to reflect that it might be fixed (optional, device ID mismatch will stop anyway)
+            else:
+                log.error(f"Failed to re-configure syslog for {ip}")
+        except Exception as e:
+            log.error(f"Error during syslog reconfiguration for {ip}: {e}")
+        finally:
+            # Wait a bit before allowing another fix attempt to avoid spamming the router
+            await asyncio.sleep(30)
+            self.fixing_devices.discard(dev_id)
+
     def datagram_received(self, data, addr):
         """Called when a datagram is received"""
         asyncio.create_task(self.handle_log(data, addr))
@@ -171,7 +197,11 @@ class SyslogUDPProtocol(asyncio.DatagramProtocol):
             try:
                 device_id = int(info[2])
                 if dev.id != device_id:
-                    log.error(f"Device id mismatch ignoring syslog for ip: {addr[0]}")
+                    if dev.id not in self.fixing_devices:
+                        log.error(f"Device id mismatch for ip: {addr[0]} (DB ID: {dev.id}, Syslog ID: {device_id}). Triggering fix...")
+                        force_syslog = db_sysconfig.get_sysconfig('force_syslog') == "True"
+                        if force_syslog:
+                            asyncio.create_task(self._fix_device_syslog(dev))
                     return
             except (ValueError, IndexError) as e:
                 log.error(f"Invalid device ID in message: {e}")

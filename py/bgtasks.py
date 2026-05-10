@@ -279,6 +279,15 @@ def scan_with_mac(timer=2):
             pass
     if len(data):
         log.info("Found {} devices ".format(len(data)))
+        
+        # Deduplicate data by mac
+        unique_data = {}
+        for item in data:
+            if item['mac'] in unique_data:
+                log.debug(f"Scan MAC duplicate found: {item['mac']}, keeping latest (IP: {item['ip']})")
+            unique_data[item['mac']] = item
+        data = list(unique_data.values())
+
         #ugly hack to reset sequnce number if device id
         database.execute_sql("SELECT setval('devices_id_seq', MAX(id), true) FROM devices")
         # update device list
@@ -424,7 +433,36 @@ def scan_with_ip(*args, **kwargs):
                             unique_identifire=result['system-id']
                         else:
                             unique_identifire=ip
-                        device['mac']=result['interface']['mac-address'] if "mac-address" in result['interface'] else 'tunnel-'+unique_identifire
+                        device['peer_ip']=src_ip
+                        
+                        # Identify device: Try current interface MAC first, then search all interfaces
+                        mac = result['interface'].get('mac-address')
+                        if not mac or mac == '00:00:00:00:00:00':
+                            # Prioritize physical interfaces (ether, wlan) for a more stable identity
+                            physical_interfaces = [i for i in interfaces if i.get('type') in ['ether', 'wlan']]
+                            # Search prioritized physical interfaces first
+                            for inter in physical_interfaces:
+                                m = inter.get('mac-address')
+                                if m and m != '00:00:00:00:00:00':
+                                    mac = m
+                                    break
+                            
+                            # Fallback to any other interface with a MAC if no physical ones found
+                            if not mac or mac == '00:00:00:00:00:00':
+                                for inter in interfaces:
+                                    m = inter.get('mac-address')
+                                    if m and m != '00:00:00:00:00:00':
+                                        mac = m
+                                        break
+                        
+                        if mac and mac != '00:00:00:00:00:00':
+                            device['mac'] = mac
+                            log.debug(f"Device {ip} identified with MAC: {device['mac']}")
+                        else:
+                            # Fallback to T- prefix and unique_identifire (Software-ID/System-ID)
+                            device['mac'] = f"T-{unique_identifire}"
+                            log.debug(f"Device {ip} has no physical MAC, using tunnel ID: {device['mac']}")
+
                         device['name']=result['name']
                         if 'board-name' in result and 'model' in result:
                             device['details']=result['board-name'] + " " +  result['model'] if result['model']!=result['board-name'] else result['model']
@@ -439,7 +477,6 @@ def scan_with_ip(*args, **kwargs):
                         device['password']=util.crypt_data(options['password'])
                         device['port']=options['port']
                         device['arch']=result['architecture-name']
-                        device['peer_ip']=src_ip
                         mikrotiks.append(device)
                         scan_results[dev_number]['added']=True
                         dev_number+=1
@@ -463,17 +500,31 @@ def scan_with_ip(*args, **kwargs):
             pass
         #ugly hack to reset sequnce number if device id
         database.execute_sql("SELECT setval('devices_id_seq', MAX(id), true) FROM devices")
-        try:
-            Devices.insert_many(mikrotiks).on_conflict(conflict_target=Devices.mac,
-                                                    update={Devices.ip:EXCLUDED.ip,
-                                                            Devices.uptime:EXCLUDED.uptime,
-                                                            Devices.name:EXCLUDED.name,
-                                                            Devices.interface:EXCLUDED.interface,
-                                                            Devices.details:EXCLUDED.details}).execute()
-        except Exception as e:
-            log.error(e)
-            task.status=0
-            task.save()
+        
+        if mikrotiks:
+            try:
+                log.info(f"Inserting/Updating {len(mikrotiks)} devices in database")
+                # Using on_conflict to update existing devices if they have the same MAC
+                Devices.insert_many(mikrotiks).on_conflict(conflict_target=Devices.mac,
+                                                        update={Devices.ip:EXCLUDED.ip,
+                                                                Devices.uptime:EXCLUDED.uptime,
+                                                                Devices.name:EXCLUDED.name,
+                                                                Devices.interface:EXCLUDED.interface,
+                                                                Devices.details:EXCLUDED.details}).execute()
+            except Exception as e:
+                if "ON CONFLICT DO UPDATE command cannot affect row a second time" in str(e):
+                    log.warning("Duplicate MACs found in the same scan batch. This usually means multiple IPs for the same device. Retrying with deduplication...")
+                    unique_mikrotiks = {dev['mac']: dev for dev in mikrotiks}
+                    Devices.insert_many(list(unique_mikrotiks.values())).on_conflict(conflict_target=Devices.mac,
+                                                        update={Devices.ip:EXCLUDED.ip,
+                                                                Devices.uptime:EXCLUDED.uptime,
+                                                                Devices.name:EXCLUDED.name,
+                                                                Devices.interface:EXCLUDED.interface,
+                                                                Devices.details:EXCLUDED.details}).execute()
+                else:
+                    log.error(f"Database insertion failed: {e}")
+                    task.status=0
+                    task.save()
         task.status=0
         task.save()
         return True
@@ -741,7 +792,35 @@ def bulk_add_devices(*args, **kwargs):
                     unique_identifire=result['system-id']
                 else:
                     unique_identifire=ip
-                device['mac']=result['interface']['mac-address'] if "mac-address" in result['interface'] else 'tunnel-'+unique_identifire
+                
+                # Identify device: Try current interface MAC first, then search all interfaces
+                mac = result['interface'].get('mac-address')
+                if not mac or mac == '00:00:00:00:00:00':
+                    # Prioritize physical interfaces (ether, wlan) for a more stable identity
+                    physical_interfaces = [i for i in interfaces if i.get('type') in ['ether', 'wlan']]
+                    # Search prioritized physical interfaces first
+                    for inter in physical_interfaces:
+                        m = inter.get('mac-address')
+                        if m and m != '00:00:00:00:00:00':
+                            mac = m
+                            break
+                    
+                    # Fallback to any other interface with a MAC if no physical ones found
+                    if not mac or mac == '00:00:00:00:00:00':
+                        for inter in interfaces:
+                            m = inter.get('mac-address')
+                            if m and m != '00:00:00:00:00:00':
+                                mac = m
+                                break
+                
+                if mac and mac != '00:00:00:00:00:00':
+                    device['mac'] = mac
+                    log.debug(f"Bulk Add: Device {ip} identified with MAC: {device['mac']}")
+                else:
+                    # Fallback to T- prefix and unique_identifire (Software-ID/System-ID)
+                    device['mac'] = f"T-{unique_identifire}"
+                    log.debug(f"Bulk Add: Device {ip} has no physical MAC, using tunnel ID: {device['mac']}")
+
                 device['name']=result['name']
                 
                 if 'board-name' in result and 'model' in result:
@@ -778,12 +857,26 @@ def bulk_add_devices(*args, **kwargs):
         
         try:
             if mikrotiks:
-                Devices.insert_many(mikrotiks).on_conflict(conflict_target=Devices.mac,
-                                                        update={Devices.ip:EXCLUDED.ip,
-                                                                Devices.uptime:EXCLUDED.uptime,
-                                                                Devices.name:EXCLUDED.name,
-                                                                Devices.interface:EXCLUDED.interface,
-                                                                Devices.details:EXCLUDED.details}).execute()
+                log.info(f"Bulk Add: Inserting/Updating {len(mikrotiks)} devices in database")
+                try:
+                    Devices.insert_many(mikrotiks).on_conflict(conflict_target=Devices.mac,
+                                                            update={Devices.ip:EXCLUDED.ip,
+                                                                    Devices.uptime:EXCLUDED.uptime,
+                                                                    Devices.name:EXCLUDED.name,
+                                                                    Devices.interface:EXCLUDED.interface,
+                                                                    Devices.details:EXCLUDED.details}).execute()
+                except Exception as e:
+                    if "ON CONFLICT DO UPDATE command cannot affect row a second time" in str(e):
+                        log.warning("Bulk Add: Duplicate MACs in same batch. Retrying with deduplication...")
+                        unique_mikrotiks = {dev['mac']: dev for dev in mikrotiks}
+                        Devices.insert_many(list(unique_mikrotiks.values())).on_conflict(conflict_target=Devices.mac,
+                                                            update={Devices.ip:EXCLUDED.ip,
+                                                                    Devices.uptime:EXCLUDED.uptime,
+                                                                    Devices.name:EXCLUDED.name,
+                                                                    Devices.interface:EXCLUDED.interface,
+                                                                    Devices.details:EXCLUDED.details}).execute()
+                    else:
+                        raise e
         except Exception as e:
             log.error(e)
             
