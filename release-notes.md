@@ -1,4 +1,23 @@
 # Release Notes  
+
+## Version 1.3.2
+**New Features & Improvements (Pro):**
+- **DHCP Manager Enhancements:** Improved DHCP syslog processing to robustly capture all server messages, including pool exhaustion and assignments. Fixed `KeyError` in DHCP lease info for static entries.
+- **RADIUS Management:** Optimized RADIUS configuration cleanup and peer identification. Improved "Force RADIUS" functionality to ensure consistent "Single Source of Truth" for device settings.
+- **Syslog Reliability:** Enhanced "Force Syslog" logic and regex patterns to handle diverse MikroTik tag formats and ensure critical events are always captured on the Monitoring Wall.
+
+**Bug Fixes:**
+- **Scanner Fix:** Resolved an issue where the scanner would skip new devices in tunnel environments due to MAC address duplication detection.
+- **API Stability:** Fixed various race conditions in database operations related to device configuration and RADIUS accounting.
+
+---
+
+## Version 1.3.1 (Hotfix)
+- **Spooler Fix:** Resolved a critical issue where the Spooler service failed to start or process tasks in version 1.3.0.
+- **Minor UI/UX Polish:** Small fixes for license handling and dashboard reporting.
+
+---
+
 ## Version 1.3.0 Free / 1.3.0 Pro
 
 ### New Features
