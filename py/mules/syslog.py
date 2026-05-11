@@ -116,7 +116,7 @@ class SyslogUDPProtocol(asyncio.DatagramProtocol):
     BUGGED_REGEX = re.compile(r"system,info mikrowizard\d+: (.*) (changed|added|removed|unscheduled) by  \((.*)\)")
     FALLBACK_REGEX = re.compile(r"system,info mikrowizard\d+: (.*) (changed|added|removed|unscheduled) by (.*)")
     LINK_REGEX = re.compile(r"interface,info mikrowizard\d+: (.*) link (down|up).*")
-    DHCP_REGEX = re.compile(r'dhcp,(?:info|warning|critical|error)(?:,info|,warning|,critical|,error)? mikrowizard\d+: (.*)')
+    DHCP_REGEX = re.compile(r'dhcp,.* mikrowizard\d+: (.*)')
     WIRELESS_REGEX = re.compile(r'wireless,info mikrowizard\d+: ([0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2})@(.*): (connected|disconnected), (signal strength|.*)? (-?\d{2})?.*')
     def extract_data_from_regex(self, regex, line):
         try:
@@ -288,21 +288,40 @@ class SyslogUDPProtocol(asyncio.DatagramProtocol):
                 if not dhcp_info:
                     return
                     
+                # Determine database level and status
                 level = "info"
+                status = 1  # Default to archived/silent
+                
                 if "dhcp,warning" in message:
-                    level = "warning"
+                    level = "Warning"
                 elif "dhcp,critical" in message:
-                    level = "critical"
+                    level = "Critical"
                 elif "dhcp,error" in message:
-                    level = "error"
-                    
-                if client_type == 'server':
-                    if "deassigned" in message:
-                        db_events.state_event(dev.id, "syslog", "dhcp deassigned", level, 1, dhcp_info[0])
-                    elif "assigned" in message:
-                        db_events.state_event(dev.id, "syslog", "dhcp assigned", level, 1, dhcp_info[0])
+                    level = "Error"
+
+                # Check for critical errors that should hit the monitoring wall (status=0)
+                if "pool" in message and "empty" in message:
+                    detail = "dhcp pool empty"
+                    level = "Warning"
+                    status = 0
+                elif "std failure: timeout" in message:
+                    detail = "dhcp resource timeout"
+                    level = "Error"
+                    status = 0
                 else:
-                    db_events.state_event(dev.id, "syslog", "dhcp client", level, 1, dhcp_info[0])
+                    # Generic detail for history/logs
+                    if client_type == 'server':
+                        if "deassigned" in message:
+                            detail = "dhcp deassigned"
+                        elif "assigned" in message:
+                            detail = "dhcp assigned"
+                        else:
+                            detail = "dhcp server event"
+                    else:
+                        detail = "dhcp client event"
+
+                # Store the event
+                db_events.state_event(dev.id, "syslog", detail, level, status, dhcp_info[0])
             elif "wireless,info mikrowizard" in message:
                 if ISPRO:
                     utilpro.wireless_syslog_event(dev, message)
