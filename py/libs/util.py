@@ -124,27 +124,35 @@ def get_interfaces_counters(router):
    return result
 
 def get_traffic(router,interfaces):
-   interfaces.append('aggregate')
-   interfaces=",".join(interfaces)
-   params = {'interface': interfaces, 'once': b' '}
-   results = tuple(router.api('/interface/monitor-traffic', **params))
+   if 'aggregate' not in interfaces:
+       interfaces.append('aggregate')
+   
    traffic={}
-   for row in results:
-       traffic[row.get('name','total')]={
-           'rx-packets-per-second':row.get('rx-packets-per-second',0),
-           'rx-bits-per-second':row.get('rx-bits-per-second',0),
-           'fp-rx-packets-per-second':row.get('fp-rx-packets-per-second',0),
-           'fp-rx-bits-per-second':row.get('fp-rx-bits-per-second',0),
-           'rx-drops-per-second':row.get('rx-drops-per-second',0),
-           'rx-errors-per-second':row.get('rx-errors-per-second',0),
-           'tx-packets-per-second':row.get('tx-packets-per-second',0),
-           'tx-bits-per-second':row.get('tx-bits-per-second',0),
-           'fp-tx-packets-per-second':row.get('fp-tx-packets-per-second',0),
-           'fp-tx-bits-per-second':row.get('fp-tx-bits-per-second',0),
-           'tx-drops-per-second':row.get('tx-drops-per-second',0),
-           'tx-queue-drops-per-second':row.get('tx-queue-drops-per-second',0),
-           'tx-errors-per-second':row.get('tx-errors-per-second',0),
-       }
+   chunk_size = 90
+   for i in range(0, len(interfaces), chunk_size):
+       chunk = interfaces[i:i + chunk_size]
+       chunk_str = ",".join(chunk)
+       params = {'interface': chunk_str, 'once': b' '}
+       try:
+           results = tuple(router.api('/interface/monitor-traffic', **params))
+           for row in results:
+               traffic[row.get('name','total')]={
+                   'rx-packets-per-second':row.get('rx-packets-per-second',0),
+                   'rx-bits-per-second':row.get('rx-bits-per-second',0),
+                   'fp-rx-packets-per-second':row.get('fp-rx-packets-per-second',0),
+                   'fp-rx-bits-per-second':row.get('fp-rx-bits-per-second',0),
+                   'rx-drops-per-second':row.get('rx-drops-per-second',0),
+                   'rx-errors-per-second':row.get('rx-errors-per-second',0),
+                   'tx-packets-per-second':row.get('tx-packets-per-second',0),
+                   'tx-bits-per-second':row.get('tx-bits-per-second',0),
+                   'fp-tx-packets-per-second':row.get('fp-tx-packets-per-second',0),
+                   'fp-tx-bits-per-second':row.get('fp-tx-bits-per-second',0),
+                   'tx-drops-per-second':row.get('tx-drops-per-second',0),
+                   'tx-queue-drops-per-second':row.get('tx-queue-drops-per-second',0),
+                   'tx-errors-per-second':row.get('tx-errors-per-second',0),
+               }
+       except Exception as e:
+           log.error(f"get_traffic error for interfaces {chunk_str}: {e}")
    return traffic
 
 def get_interface_list(interfaces):
