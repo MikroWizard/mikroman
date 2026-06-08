@@ -39,16 +39,21 @@ def grab_device_data(timer=2):
      'rx-total':0,
      'tx-total':0
     }
-    data=False
+    has_data=False
     for _ in range(num_threads):
         qres=q.get()
         if not qres.get("reason",False):
             data=qres.get("data", None)
             if data:
-                if data.get("rx-total", False):
-                    totals['rx-total']+=data["rx-total"]
-                if data.get("tx-total", False):
-                    totals["tx-total"]+=data["tx-total"]
+                rx_val = data.get("rx-total")
+                if rx_val is not None:
+                    totals['rx-total'] += rx_val
+                    has_data = True
+                
+                tx_val = data.get("tx-total")
+                if tx_val is not None:
+                    totals['tx-total'] += tx_val
+                    has_data = True
             res.append(qres)
         else:
             db_events.connection_event(qres['id'],'Data Puller',qres.get("detail","connection"),"Critical",0,qres.get("reason","problem in data puller"))
@@ -58,10 +63,10 @@ def grab_device_data(timer=2):
             "keys":keys
     }
     try:
-        if data:
+        if has_data:
             reddb=RedisDB(redopts)
             reddb.dev_create_keys()
-            reddb.add_dev_data(data)
+            reddb.add_dev_data(totals)
     except Exception as e:
         log.error(e)
 
