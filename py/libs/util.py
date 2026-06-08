@@ -84,23 +84,29 @@ def get_default_user_pass():
         default_pass=""
     return default_user,default_pass
 
+def get_device_port(dev):
+    try:
+        return int(dev.port) if dev.port else (8729 if getattr(dev, 'ssl', False) else 8728)
+    except:
+        return 8729 if getattr(dev, 'ssl', False) else 8728
+
 def build_api_options(dev):
     default_user,default_pass= get_default_user_pass()
     username=decrypt_data(dev.user_name ) or default_user
     password=decrypt_data(dev.password ) or default_pass
-    port=dev.port or 8728
+    port=get_device_port(dev)
     options={
        'host':dev.ip,
        'username':username,
        'password':password,
        'routeros_version':'auto',
        'port':port,
-       'ssl':False
+       'ssl':bool(getattr(dev, 'ssl', False))
     }
     return options
 
 def check_device_firmware_update(dev,q):
-    port=dev.port or 8728
+    port=get_device_port(dev)
     if check_port(dev.ip,port):
         options=build_api_options(dev)
         try:
@@ -197,7 +203,7 @@ def check_or_fix_event(events,eventtype,detail,comment=False):
 def grab_device_data(dev, q):
     max_attempts = 3
     attempts = 0
-    port=dev.port or 8728
+    port=get_device_port(dev)
     success = False
     time_to_wait=0.1
     while attempts < max_attempts:
@@ -750,7 +756,7 @@ def run_snippets(dev, snippet,q):
     return result
 
 def run_snippet(dev, snippet):
-    port=dev.port or 8728
+    port=get_device_port(dev)
     try:
         if check_port(dev.ip,port):
             options=build_api_options(dev)
@@ -798,7 +804,7 @@ def run_snippet(dev, snippet):
         return False
 
 def backup_router(dev):
-    port=dev.port or 8728
+    port=get_device_port(dev)
     try:
         if check_port(dev.ip,port):
             options=build_api_options(dev)

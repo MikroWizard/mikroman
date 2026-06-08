@@ -136,6 +136,54 @@ class RedisDB(object):
                 pass
         return data
 
+    def get_summed_dev_data(self, device_ids, keys, delta, start_time, end_time):
+        """
+        Read time-series from multiple devices via pipeline, sum across them.
+        Returns same dict-of-lists shape as get_dev_data_keys().
+        """
+        start_ms = int(time.mktime(start_time.timetuple()) * 1000)
+        end_ms = int(time.mktime(end_time.timetuple()) * 1000)
+
+        pipe = self.r.pipeline()
+        commands = []
+        for dev_id in device_ids:
+            for key in keys:
+                if delta == 'live':
+                    mk = "sensor::{}::{}".format(dev_id, key)
+                    pipe.ts().revrange(mk, start_ms, end_ms, count=30)
+                else:
+                    mk = "sensor{}::{}::{}".format(delta, dev_id, key)
+                    pipe.ts().range(mk, start_ms, end_ms)
+                commands.append((dev_id, key))
+
+        try:
+            results = pipe.execute(raise_on_error=False)
+        except Exception as e:
+            log.error("Redis pipeline failed: {}".format(e))
+            return {key: [] for key in keys}
+
+        summed_data = {key: defaultdict(float) for key in keys}
+
+        for idx, (dev_id, key) in enumerate(commands):
+            res_list = results[idx]
+            if isinstance(res_list, Exception):
+                continue
+            for item in res_list:
+                ts = item[0]
+                val = item[1]
+                if delta == 'live':
+                    ts = (ts // 10000) * 10000
+                summed_data[key][ts] += val
+
+        out = {}
+        for key in keys:
+            sorted_ts = sorted(summed_data[key].keys())
+            if delta == 'live':
+                out[key] = [(ts, summed_data[key][ts]) for ts in sorted_ts[-30:]]
+            else:
+                out[key] = [(ts, summed_data[key][ts]) for ts in sorted_ts]
+        return out
+
 
     def store_data(self, device_id, key, command):
         """

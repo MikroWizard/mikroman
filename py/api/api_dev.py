@@ -84,6 +84,8 @@ def get_editform():
         res['peer_ip']=dev['peer_ip']
         res['name']=dev['name']
         res['id']=dev['id']
+        res['ssl']=dev.get('ssl', False)
+        res['port']=dev.get('port', '')
         try:
             res['ips']=json.loads(db_sysconfig.get_sysconfig('all_ip'))
         except Exception as e:
@@ -104,12 +106,14 @@ def save_editform():
     ip = input.get('ip', False)
     peer_ip = input.get('peer_ip', False)
     name = input.get('name', False)
+    ssl = input.get('ssl', False)
+    port = input.get('port', None)
     try:
         if password == "Password is Hidden":
             password=False
         else:
             password=util.crypt_data(password)
-        if db_device.update_device(devid, util.crypt_data(user_name), password, ip, peer_ip, name):
+        if db_device.update_device(devid, util.crypt_data(user_name), password, ip, peer_ip, name, ssl, port):
             db_syslog.add_syslog_event(get_myself(), "Device", "Edit", get_ip(),get_agent(),json.dumps(input))
             return buildResponse({"result":"success"}, 200)
         else:
@@ -393,11 +397,17 @@ def dev_sensors():
     """return dev sensors chart data"""
     input = request.json
     devid=input.get('devid',False)
+    uid = session.get("userid") or False
+    if not uid:
+        return buildResponse({"status":"failed", "err":"Unauthorized"}, 200)
+    user_devices = db_user_group_perm.DevUserGroupPermRel.get_user_devices(uid)
+    if not devid or not isinstance(devid, int):
+        return buildResponse({'status': 'failed'},200,error="Wrong Data")
+    if not user_devices.where(db_device.Devices.id == devid).exists():
+        return buildResponse({"status":"failed", "err":"Unauthorized"}, 200)
     total=input.get('total','bps')
     delta=input.get('delta',"5m")
     if delta not in ["5m","1h","daily","live"]:
-        return buildResponse({'status': 'failed'},200,error="Wrong Data")
-    if not devid or not isinstance(devid, int):
         return buildResponse({'status': 'failed'},200,error="Wrong Data")
     dev=db_device.get_device(devid)
     if delta=="5m":
@@ -492,12 +502,18 @@ def dev_ifstat():
     """return device interfaces info"""
     input = request.json
     devid=input.get('devid',False)
+    uid = session.get("userid") or False
+    if not uid:
+        return buildResponse({"status":"failed", "err":"Unauthorized"}, 200)
+    user_devices = db_user_group_perm.DevUserGroupPermRel.get_user_devices(uid)
+    if not devid or not isinstance(devid, int):
+        return buildResponse({'status': 'failed'},200,error="Wrong Data")
+    if not user_devices.where(db_device.Devices.id == devid).exists():
+        return buildResponse({"status":"failed", "err":"Unauthorized"}, 200)
     chart_type=input.get('type','bps')
     delta=input.get('delta',"5m")
     interface=input.get('interface',False)
     if delta not in ["5m","1h","daily","live"]:
-        return buildResponse({'status': 'failed'},200,error="Wrong Data")
-    if not devid or not isinstance(devid, int):
         return buildResponse({'status': 'failed'},200,error="Wrong Data")
     res=db_device.get_device(devid)
     if delta=="5m":

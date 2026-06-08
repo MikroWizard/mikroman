@@ -5,10 +5,11 @@
 # MikroWizard.com , Mikrotik router management solution
 # Author: sepehr.ha@gmail.com
 
-from flask import request
+from flask import request, session
 import datetime
+from peewee import fn
 
-from libs.db import db,db_syslog,db_device,db_AA,db_events,db_sysconfig,db_tasks
+from libs.db import db,db_syslog,db_device,db_AA,db_events,db_sysconfig,db_tasks,db_user_group_perm
 from libs.webutil import app,buildResponse,login_required
 import logging
 import operator
@@ -57,8 +58,16 @@ def list_auth_log():
         clauses.append(auth.ltype == ltype)
     if by and by !='All':
         clauses.append(auth.by == by)
+    uid = session.get("userid") or False
+    if not uid:
+        return buildResponse({"status":"failed", "err":"Unauthorized"}, 200)
+    user_devices = db_user_group_perm.DevUserGroupPermRel.get_user_devices(uid)
     if devid and devid>0:
+        if not user_devices.where(db_device.Devices.id == devid).exists():
+            return buildResponse([], 200)
         clauses.append(auth.devid == devid)
+    else:
+        clauses.append(auth.devid << user_devices)
     if start_time:
         start_time=start_time.split(".000Z")[0]
         start_time=datetime.datetime.strptime(start_time, "%Y-%m-%dT%H:%M:%S")
@@ -131,8 +140,16 @@ def list_account_log():
         #set start time to one day ago
         start_time=datetime.datetime.now()-datetime.timedelta(days=1)
         clauses.append(acc.created >= start_time)
+    uid = session.get("userid") or False
+    if not uid:
+        return buildResponse({"status":"failed", "err":"Unauthorized"}, 200)
+    user_devices = db_user_group_perm.DevUserGroupPermRel.get_user_devices(uid)
     if devid and devid>0:
+        if not user_devices.where(db_device.Devices.id == devid).exists():
+            return buildResponse([], 200)
         clauses.append(acc.devid == devid)
+    else:
+        clauses.append(acc.devid << user_devices)
     if end_time:
         end_time=end_time.split(".000Z")[0]
         end_time=datetime.datetime.strptime(end_time, "%Y-%m-%dT%H:%M:%S")
@@ -207,12 +224,16 @@ def dev_events_list():
         clauses.append(event.comment.contains(comment))
     if src:
         clauses.append(event.src == src)
+    uid = session.get("userid") or False
+    if not uid:
+        return buildResponse({"status":"failed", "err":"Unauthorized"}, 200)
+    user_devices = db_user_group_perm.DevUserGroupPermRel.get_user_devices(uid)
     if devid:
-        dev=db_device.get_device(devid)
-        if not dev:
-            return buildResponse({'status': 'failed'}, 200, error="Wrong Data")
-        else:
-            clauses.append(event.devid == devid)
+        if not user_devices.where(db_device.Devices.id == devid).exists():
+            return buildResponse([], 200)
+        clauses.append(event.devid == devid)
+    else:
+        clauses.append(event.devid << user_devices)
     expr=""
     devs=db_device.Devices
     events=[]
@@ -296,16 +317,21 @@ def syslog_list():
 def dev_events_details_list():
     """return list of event details(types) for filters"""
     input = request.json
-    devid=input.get('devid', False)
-    event=db_events.select(event.details)
+    devid = input.get('devid', False)
+    uid = session.get("userid") or False
+    if not uid:
+        return buildResponse({"status":"failed", "err":"Unauthorized"}, 200)
+    user_devices = db_user_group_perm.DevUserGroupPermRel.get_user_devices(uid)
+    event_model = db_events.Events
+    query = event_model.select(event_model.detail)
     if devid:
-        dev=db_device.get_device(devid)
-        if not dev:
-            return buildResponse({'status': 'failed'}, 200, error="Wrong Data")
-        else:
-            event=event.where(event.devid == dev.id)
-    event=event.group_by(event.details).order_by(event.id.desc())
-    res=list(event.dicts())
+        if not user_devices.where(db_device.Devices.id == devid).exists():
+            return buildResponse([], 200)
+        query = query.where(event_model.devid == devid)
+    else:
+        query = query.where(event_model.devid << user_devices)
+    query = query.group_by(event_model.detail).order_by(fn.MAX(event_model.id).desc())
+    res = list(query.dicts())
     return buildResponse(res, 200)
 
 @app.route('/api/dashboard/stats', methods = ['POST'])
@@ -319,16 +345,46 @@ def dashboard_stats():
     from _version import __version__
     res={}
     res['version']=__version__
-    # get past 24h failed logins and success logins from auth
+    uid = session.get("userid") or False
+    has_all_access = False
+    if uid:
+        perms = list(db_user_group_perm.DevUserGroupPermRel.select().where(db_user_group_perm.DevUserGroupPermRel.user_id == uid))
+        has_all_access = any(p.group_id.id == 1 for p in perms)
+        user_devices = db_user_group_perm.DevUserGroupPermRel.get_user_devices(uid)
+
     auth=db_AA.Auth
-    res['FailedLogins']=auth.select().where(auth.ltype=='failed',auth.created>(datetime.datetime.now()-datetime.timedelta(days=1))).count()
-    res['SuccessfulLogins']=auth.select().where(auth.ltype=='loggedin', auth.created>(datetime.datetime.now()-datetime.timedelta(days=1))).count()
-    # get past 24h Critical and WARNING and info from events and also Total events
+    failed_logins_query = auth.select().where(auth.ltype=='failed', auth.created > (datetime.datetime.now()-datetime.timedelta(days=1)))
+    successful_logins_query = auth.select().where(auth.ltype=='loggedin', auth.created > (datetime.datetime.now()-datetime.timedelta(days=1)))
+    
     event=db_events.Events
-    res['Critical']=event.select().where(event.level=='Critical', event.eventtime>(datetime.datetime.now()-datetime.timedelta(days=1))).count()
-    res['Warning']=event.select().where(event.level=='Warning', event.eventtime>(datetime.datetime.now()-datetime.timedelta(days=1))).count()
-    res['Info']=event.select().where(event.level=='info', event.eventtime>(datetime.datetime.now()-datetime.timedelta(days=1))).count()
-    res['Events']=event.select().count()
+    critical_query = event.select().where(event.level=='Critical', event.eventtime > (datetime.datetime.now()-datetime.timedelta(days=1)))
+    warning_query = event.select().where(event.level=='Warning', event.eventtime > (datetime.datetime.now()-datetime.timedelta(days=1)))
+    info_query = event.select().where(event.level=='info', event.eventtime > (datetime.datetime.now()-datetime.timedelta(days=1)))
+    events_count_query = event.select()
+
+    acc=db_AA.Account
+    devs=db_device.Devices
+    devices_query = devs.select()
+    auth_count_query = auth.select()
+    acc_count_query = acc.select()
+
+    if uid and not has_all_access:
+        failed_logins_query = failed_logins_query.where(auth.devid << user_devices)
+        successful_logins_query = successful_logins_query.where(auth.devid << user_devices)
+        critical_query = critical_query.where(event.devid << user_devices)
+        warning_query = warning_query.where(event.devid << user_devices)
+        info_query = info_query.where(event.devid << user_devices)
+        events_count_query = events_count_query.where(event.devid << user_devices)
+        devices_query = devices_query.where(devs.id << user_devices)
+        auth_count_query = auth_count_query.where(auth.devid << user_devices)
+        acc_count_query = acc_count_query.where(acc.devid << user_devices)
+
+    res['FailedLogins'] = failed_logins_query.count()
+    res['SuccessfulLogins'] = successful_logins_query.count()
+    res['Critical'] = critical_query.count()
+    res['Warning'] = warning_query.count()
+    res['Info'] = info_query.count()
+    res['Events'] = events_count_query.count()
     interfaces = util.get_ethernet_wifi_interfaces()
     hwid = util.generate_serial_number(interfaces)
     install_date=False
@@ -344,13 +400,10 @@ def dashboard_stats():
         res['serial']=hwid+"-"+datetime.datetime.strptime(install_date, "%Y-%m-%d %H:%M:%S").strftime("%Y%m%d")
     else:
         res['serial']=False
-    # get total users , Total devices , total auth , total acc
-    acc=db_AA.Account
-    devs=db_device.Devices
     res['Users']=db.User.select().count() - 1
-    res['Devices']=devs.select().count()
-    res['Auth']=auth.select().count()
-    res['Acc']=acc.select().count()
+    res['Devices']=devices_query.count()
+    res['Auth']=auth_count_query.count()
+    res['Acc']=acc_count_query.count()
     res['license']=False
     username=False
     internet_connection=True
@@ -559,16 +612,36 @@ def dashboard_traffic():
         start_time=datetime.datetime.now()-datetime.timedelta(days=30)
     
     end_time=datetime.datetime.now()
+    group_id = input.get('group_id', False)
+    if group_id:
+        try:
+            group_id = int(group_id)
+        except:
+            group_id = False
+
+    uid = session.get("userid") or False
+    if not uid:
+        return buildResponse({"status":"failed", "err":"Unauthorized"}, 200)
+
+    perms = list(db_user_group_perm.DevUserGroupPermRel.select().where(db_user_group_perm.DevUserGroupPermRel.user_id == uid))
+    has_all_access = any(p.group_id.id == 1 for p in perms)
+
+    data_keys=['tx-{}'.format(interface),'rx-{}'.format(interface)]
+    if chart_type=='bps':
+        data_keys=['tx-{}'.format(interface),'rx-{}'.format(interface)]
+    elif chart_type=='pps':
+        data_keys=['txp-{}'.format(interface),'rxp-{}'.format(interface)]
+
     #Fix and change some data
     #Get data from redis
     try:
         res={
             'id':devid,
-            'sensors':['rx-total','tx-total']
+            'sensors': data_keys
         }
         redopts={
             "dev_id":res['id'],
-            "keys":res['sensors'],
+            "keys":data_keys,
             "start_time":start_time,
             "end_time":end_time,
             "delta":delta,
@@ -578,20 +651,27 @@ def dashboard_traffic():
             'borderColor': '#4dbd74',
             'pointHoverBackgroundColor': '#fff'
         }
-        reddb=RedisDB(redopts)
-        data=reddb.get_dev_data_keys()
-
+        
+        if has_all_access and not group_id:
+            reddb=RedisDB(redopts)
+            data=reddb.get_dev_data_keys()
+        else:
+            user_devices = db_user_group_perm.DevUserGroupPermRel.get_user_devices(uid, group_id)
+            device_ids = [d.id for d in user_devices]
+            if not device_ids:
+                data = {key: [] for key in data_keys}
+            else:
+                reddb = RedisDB(redopts)
+                data = reddb.get_summed_dev_data(
+                    device_ids, data_keys,
+                    delta, start_time, end_time
+                )
         temp=[]
         ids=['yA','yB']
         colors=['#4caf50','#ff9800']
         bgcolor=['rgba(76, 175, 80, 0.2)','rgba(255, 152, 0, 0.2)']
         datasets=[]
         lables=[]
-        data_keys=['tx-{}'.format(interface),'rx-{}'.format(interface)]
-        if chart_type=='bps':
-            data_keys=['tx-{}'.format(interface),'rx-{}'.format(interface)]
-        elif chart_type=='pps':
-            data_keys=['txp-{}'.format(interface),'rxp-{}'.format(interface)]
         for idx, val in enumerate(data_keys):
             for d in data[val]:
                 if len(lables) <= len(data[val]):

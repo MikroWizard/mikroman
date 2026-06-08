@@ -325,6 +325,7 @@ def scan_with_ip(*args, **kwargs):
         start_ip = ipaddress.IPv4Address(start_ip)
         end_ip = ipaddress.IPv4Address(end_ip)
         scan_port=kwargs.get('port',False)
+        ssl=kwargs.get('ssl',False)
         default_user,default_pass=util.get_default_user_pass()
         log.error("starting scan ")
         mikrotiks=[]
@@ -355,7 +356,7 @@ def scan_with_ip(*args, **kwargs):
                         'password':password if password else default_pass,
                         'routeros_version':'auto',
                         'port':scan_port,
-                        'ssl':False
+                        'ssl':bool(ssl)
                     }
                     router=RouterOSCheckResource(options)
                     try:
@@ -476,6 +477,7 @@ def scan_with_ip(*args, **kwargs):
                         device['user_name']=util.crypt_data(options['username'])
                         device['password']=util.crypt_data(options['password'])
                         device['port']=options['port']
+                        device['ssl']=options['ssl']
                         device['arch']=result['architecture-name']
                         mikrotiks.append(device)
                         scan_results[dev_number]['added']=True
@@ -510,7 +512,9 @@ def scan_with_ip(*args, **kwargs):
                                                                 Devices.uptime:EXCLUDED.uptime,
                                                                 Devices.name:EXCLUDED.name,
                                                                 Devices.interface:EXCLUDED.interface,
-                                                                Devices.details:EXCLUDED.details}).execute()
+                                                                Devices.details:EXCLUDED.details,
+                                                                Devices.ssl:EXCLUDED.ssl,
+                                                                Devices.port:EXCLUDED.port}).execute()
             except Exception as e:
                 if "ON CONFLICT DO UPDATE command cannot affect row a second time" in str(e):
                     log.warning("Duplicate MACs found in the same scan batch. This usually means multiple IPs for the same device. Retrying with deduplication...")
@@ -520,7 +524,9 @@ def scan_with_ip(*args, **kwargs):
                                                                 Devices.uptime:EXCLUDED.uptime,
                                                                 Devices.name:EXCLUDED.name,
                                                                 Devices.interface:EXCLUDED.interface,
-                                                                Devices.details:EXCLUDED.details}).execute()
+                                                                Devices.details:EXCLUDED.details,
+                                                                Devices.ssl:EXCLUDED.ssl,
+                                                                Devices.port:EXCLUDED.port}).execute()
                 else:
                     log.error(f"Database insertion failed: {e}")
                     task.status=0
@@ -707,7 +713,8 @@ def bulk_add_devices(*args, **kwargs):
             log.info(f"Adding device {ip}")
             username = device_info['username']
             password = device_info['password']
-            port = device_info.get('port', 8728)
+            ssl = device_info.get('ssl', False)
+            port = device_info.get('port') or (8729 if ssl else 8728)
             
             scan_results.append({'ip': ip})
             ip=str(ipaddress.IPv4Address(ip))
@@ -732,7 +739,7 @@ def bulk_add_devices(*args, **kwargs):
                 'password':password,
                 'routeros_version':'auto',
                 'port':port,
-                'ssl':False
+                'ssl':bool(ssl)
             }
             
             try:
@@ -834,9 +841,8 @@ def bulk_add_devices(*args, **kwargs):
                 device['interface']=result['interface']['name']
                 device['user_name']=util.crypt_data(username)
                 device['password']=util.crypt_data(password)
-                device['port']=port
-                device['arch']=result['architecture-name']
                 device['port']=options['port']
+                device['ssl']=options['ssl']
                 device['arch']=result['architecture-name']
                 device['peer_ip']=src_ip 
                 mikrotiks.append(device)
@@ -864,7 +870,9 @@ def bulk_add_devices(*args, **kwargs):
                                                                     Devices.uptime:EXCLUDED.uptime,
                                                                     Devices.name:EXCLUDED.name,
                                                                     Devices.interface:EXCLUDED.interface,
-                                                                    Devices.details:EXCLUDED.details}).execute()
+                                                                    Devices.details:EXCLUDED.details,
+                                                                    Devices.ssl:EXCLUDED.ssl,
+                                                                    Devices.port:EXCLUDED.port}).execute()
                 except Exception as e:
                     if "ON CONFLICT DO UPDATE command cannot affect row a second time" in str(e):
                         log.warning("Bulk Add: Duplicate MACs in same batch. Retrying with deduplication...")
@@ -874,7 +882,9 @@ def bulk_add_devices(*args, **kwargs):
                                                                     Devices.uptime:EXCLUDED.uptime,
                                                                     Devices.name:EXCLUDED.name,
                                                                     Devices.interface:EXCLUDED.interface,
-                                                                    Devices.details:EXCLUDED.details}).execute()
+                                                                    Devices.details:EXCLUDED.details,
+                                                                    Devices.ssl:EXCLUDED.ssl,
+                                                                    Devices.port:EXCLUDED.port}).execute()
                     else:
                         raise e
         except Exception as e:

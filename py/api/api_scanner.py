@@ -21,9 +21,10 @@ def scan_network():
     input = request.json
     start=input.get('start',False)
     end=input.get('end',False)
-    port=input.get('port',8728)
+    port=input.get('port')
+    ssl=input.get('ssl',False)
     if not port:
-        port=8728
+        port=8729 if ssl else 8728
     password=input.get('password',False)
     username=input.get('user',False)
     status=db_tasks.scanner_job_status().status
@@ -31,7 +32,7 @@ def scan_network():
     if not status:
         if start and end and port:
             db_syslog.add_syslog_event(get_myself(), "Scanner","start", get_ip(),get_agent(),json.dumps(input))
-            bgtasks.scan_with_ip(start=start,end=end,port=port,password=password,username=username,user=get_myself())
+            bgtasks.scan_with_ip(start=start,end=end,port=port,password=password,username=username,ssl=ssl,user=get_myself())
             return buildResponse({'status': True},200)
         else:
             return buildResponse({'status': status},200)
