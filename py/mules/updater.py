@@ -30,11 +30,11 @@ def import_or_install(package):
     try:
         __import__(package)
     except ImportError:
-        pip.main(['install', package])
+        subprocess.run(["python3", "-m", "pip", "install", package])
 
 def install_package(package):
     try:
-        pip.main(['install', package])
+        subprocess.run(["python3", "-m", "pip", "install", package])
     except Exception as e:
         log.error(e)
 
@@ -80,9 +80,24 @@ def check_sha256(filename, expect):
 def extract_zip_reload(filename,dst):
     """Extract the contents of the zip file "filename" to the directory
     "dst". Then reload the updated modules."""
-    log.info("Extracting {} to {}...".format(filename, dst))
+    tmp_extract_dir = "/tmp/mikroman_update"
+    
+    # Ensure a completely clean slate in case a previous update crashed midway
+    subprocess.run("rm -rf {}".format(tmp_extract_dir), shell=True)
+    
+    log.info("Extracting {} to {}...".format(filename, tmp_extract_dir))
     with zipfile.ZipFile(filename, 'r') as zip_ref:
-        zip_ref.extractall(dst)
+        zip_ref.extractall(tmp_extract_dir)
+        
+    log.info("Safely moving files to {}...".format(dst))
+    cmd = "cp -aT --remove-destination {} {}".format(tmp_extract_dir, dst)
+    p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    (output, err) = p.communicate()
+    p_status = p.wait()
+    if p_status != 0:
+        log.error("Failed to copy update files: {}".format(err.decode().strip()))
+        
+    subprocess.run("rm -rf {}".format(tmp_extract_dir), shell=True)
     
     # run db migrate
     dir ="/app/"
@@ -129,10 +144,17 @@ def extract_zip_reload(filename,dst):
     log.info("Post-update tasks completed. Cleaning up artifact {}.".format(filename))
     os.remove(filename)
     
-    # touch server reload file /app/reload
+    # Remove the startup locks so next boot re-verifies requirements
+    for f in ["/tmp/mw_pro_lock", "/tmp/mw_pro_done"]:
+        if os.path.exists(f):
+            os.remove(f)
+    
+    # Kill the uWSGI master to force a clean, hard container restart.
+    # PyArmor requires a clean Python interpreter for new files to prevent memory corruption. 
     masterpid=uwsgi.masterpid()
-    log.info("Triggering server reload (masterpid: {}).".format(masterpid))
-    Path('/app/reload').touch()
+    log.info("Triggering hard server restart (sending SIGTERM to masterpid: {}).".format(masterpid))
+    import signal
+    os.kill(masterpid, signal.SIGTERM)
 
 def main():
     while True:
