@@ -40,20 +40,30 @@ def sysconfig_save_all():
     input = request.json
     data=[]
     now=time.time()
-    for k,v in input.items():
-        if k=="default_password" and v['value']=="":
-            continue
-        elif k=="default_user" and v['value']=="":
-            continue
-        elif k=="default_password" or k=="default_user":
-            v['value']=util.crypt_data(v['value'])
-        elif k=="update_mode":
-            v['value']=json.dumps(v['value'])
+    for k, v in input.items():
+        if k in ["default_password", "default_user", "smtp_password", "ai_api_key"]:
+            if v['value'] == "":
+                continue
+            v['value'] = util.crypt_data(v['value'])
+        elif k == "update_mode":
+            v['value'] = json.dumps(v['value'])
+        elif k == "ai_openrouter_models":
+            # Ensure it is stored as a JSON string (frontend sends it as array)
+            if isinstance(v['value'], list):
+                v['value'] = json.dumps([m for m in v['value'] if m])
+            elif not isinstance(v['value'], str):
+                v['value'] = '[]'
+        elif k == "speedtest_servers":
+            if isinstance(v['value'], list):
+                v['value'] = json.dumps(v['value'])
+            elif not isinstance(v['value'], str):
+                v['value'] = '[]'
         data.append({"key":k,"value":v['value'],"modified":"NOW"})
     db_syslog.add_syslog_event(get_myself(), "Sys Config","Update", get_ip(),get_agent(),json.dumps(input))
     db_sysconfig.save_all(data)
     
     return buildResponse({"status":"success"})
+
 
 @app.route('/api/tasks/list', methods = ['POST'])
 @login_required(role='admin',perm={'settings':'read'})
@@ -111,8 +121,6 @@ def stop_task():
     task.action="None"
     task.save()
     return buildResponse({"status":"success"})
-
-
 
 @app.route('/api/sysconfig/apply_update', methods = ['POST'])
 @login_required(role='admin',perm={'settings':'write'})
