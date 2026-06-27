@@ -97,12 +97,19 @@ def build_api_options(dev):
     port=get_device_port(dev)
     options={
        'host':dev.ip,
+       'hostname': None,
        'username':username,
        'password':password,
        'routeros_version':'auto',
        'port':port,
-       'ssl':bool(getattr(dev, 'ssl', False))
+       'ssl':bool(getattr(dev, 'ssl', False)),
+       'ssl_cafile': None,
+       'ssl_capath': None,
+       'ssl_force_no_certificate': False,
+       'ssl_verify': False,
+       'ssl_verify_hostname': False,
     }
+
     return options
 
 def check_device_firmware_update(dev,q):
@@ -949,4 +956,5 @@ def ispro():
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
+
 
