@@ -37,7 +37,7 @@ def login():
         return buildResponse({"status":"failed", "err":"Wrong user/pass"}, 200)
 
     u = db.get_user_by_username(username)
-    if not u or not account.check_password(u.password, password) or u.role=='disabled':
+    if not u or not account.check_password(u.password, password) or u.role in ['disabled', 'customer_inactive']:
         # error
         try:
             db_syslog.add_syslog_event(u.id, "User login","Failed login",webutil.get_ip(),webutil.get_agent(),json.dumps({"username":username,'reason':'wrong password'}))
@@ -111,10 +111,29 @@ def create_user():
     u.email= email
     u.adminperms= json.dumps(adminperms)
     u.hash = nthashhex
-    u.tags = []
-    u.role = role # set default to what makes sense to your app
+    if role == 'customer':
+        if email and email.strip():
+            u.role = 'customer_inactive'
+        else:
+            u.role = 'customer'
+    else:
+        u.role = role
     u.save(force_insert=True)
     account.new_signup_steps(u)
+
+    if u.role == 'customer_inactive':
+        try:
+            import uuid
+            from libs.db.db_tickets_pro import UserActivationToken_pro
+            from libs.mail_pro import send_activation_email
+            import datetime
+            token = str(uuid.uuid4())
+            expires = datetime.datetime.now() + datetime.timedelta(hours=24)
+            UserActivationToken_pro.create(user_id=u.id, token=token, type='activation', expires=expires)
+            domain_url = request.host_url
+            send_activation_email(u, token, domain_url)
+        except Exception as e:
+            log.error("Failed to generate/send activation token: {}".format(e))
     for perm in userperms:
         db_user_group_perm.DevUserGroupPermRel.create_user_group_perm(u.id, int(perm['group_id']), int(perm['perm_id']))
     db_syslog.add_syslog_event(webutil.get_myself(), "User Managment","Create", webutil.get_ip(),webutil.get_agent(),json.dumps(input))
@@ -257,16 +276,44 @@ def user_edit():
     if lname:
         u.last_name = lname
 
+    send_activation = False
     if role and str(u.id) != "37cc36e0-afec-4545-9219-94655805868b":
-        u.role = role
+        if role == 'customer':
+            if email and email.strip() and u.role not in ['customer', 'customer_inactive']:
+                u.role = 'customer_inactive'
+                send_activation = True
+            elif not email or not email.strip():
+                u.role = 'customer'
+            else:
+                u.role = role
+        else:
+            u.role = role
     if adminperms and str(u.id) != "37cc36e0-afec-4545-9219-94655805868b":
         u.adminperms= json.dumps(adminperms)
     if email:
-        u.email= email
+        if u.role == 'customer' and email.strip() != u.email:
+            u.role = 'customer_inactive'
+            send_activation = True
+        u.email = email
     if passwd and passwd!="":
         u.password = newpass
         u.hash = nthashhex
     u.save()
+
+    if send_activation and u.role == 'customer_inactive':
+        try:
+            import uuid
+            from libs.db.db_tickets_pro import UserActivationToken_pro
+            from libs.mail_pro import send_activation_email
+            import datetime
+            token = str(uuid.uuid4())
+            expires = datetime.datetime.now() + datetime.timedelta(hours=24)
+            UserActivationToken_pro.delete().where(UserActivationToken_pro.user_id == u.id, UserActivationToken_pro.type == 'activation').execute()
+            UserActivationToken_pro.create(user_id=u.id, token=token, type='activation', expires=expires)
+            domain_url = request.host_url
+            send_activation_email(u, token, domain_url)
+        except Exception as e:
+            log.error("Failed to generate/send activation token in edit: {}".format(e))
     resp={"status":"success"}
     if err:
         resp={"status":"failed","err":err}

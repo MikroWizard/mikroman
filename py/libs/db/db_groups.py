@@ -126,9 +126,9 @@ def get_devs_of_groups(group_ids):
 def query_groups_api(group_ids=[]):
     t3=DevGroups.alias()
     if not isinstance(group_ids, list):
-        q=DevGroups.select(DevGroups.id,DevGroups.name,DevGroups.created,fn.array_agg(DevGroupRel.device_id)).join(DevGroupRel,JOIN.LEFT_OUTER, on=(DevGroupRel.group_id == DevGroups.id)).order_by(DevGroups.id).group_by(DevGroups.id)
+        q=DevGroups.select(DevGroups.id,DevGroups.name,DevGroups.created,fn.array_agg(DevGroupRel.device_id)).join(DevGroupRel,JOIN.LEFT_OUTER, on=(DevGroupRel.group_id == DevGroups.id)).where(~DevGroups.name.startswith("Customer Group: ")).order_by(DevGroups.id).group_by(DevGroups.id)
     else:
-        q=DevGroups.select(DevGroups.id,DevGroups.name,DevGroups.created,fn.array_agg(DevGroupRel.device_id)).join(DevGroupRel,JOIN.LEFT_OUTER, on=(DevGroupRel.group_id == DevGroups.id)).where(DevGroups.id << group_ids).order_by(DevGroups.id).group_by(DevGroups.id)
+        q=DevGroups.select(DevGroups.id,DevGroups.name,DevGroups.created,fn.array_agg(DevGroupRel.device_id)).join(DevGroupRel,JOIN.LEFT_OUTER, on=(DevGroupRel.group_id == DevGroups.id)).where((DevGroups.id << group_ids) & ~DevGroups.name.startswith("Customer Group: ")).order_by(DevGroups.id).group_by(DevGroups.id)
     return list(q.dicts())
 
 def get_groups_by_id(ids):

@@ -244,12 +244,13 @@ def search_groups():
             # find device groups  that contains searchstr in the name
             dev_groups = (group
                         .select()
-                        .where(group.name.contains(searchstr))
+                        .where(group.name.contains(searchstr) & ~group.name.startswith("Customer Group: "))
                         .dicts())
         else:
             # return first 10 ordered alphabeticaly
             dev_groups = (group
                         .select()
+                        .where(~group.name.startswith("Customer Group: "))
                         .order_by(group.name)
                         .limit(10)
                         .dicts())
@@ -392,7 +393,7 @@ def dev_kill_session():
     return buildResponse(res,200)
 
 @app.route('/api/dev/sensors', methods = ['POST'])
-@login_required(role='admin',perm={'device':'read'})
+@login_required
 def dev_sensors():
     """return dev sensors chart data"""
     input = request.json
@@ -400,6 +401,19 @@ def dev_sensors():
     uid = session.get("userid") or False
     if not uid:
         return buildResponse({"status":"failed", "err":"Unauthorized"}, 200)
+
+    current_user = get_myself()
+    if not current_user:
+        return buildResponse({"status":"failed", "err":"Unauthorized"}, 200)
+
+    if current_user.role == 'customer':
+        pass
+    else:
+        userperms = session.get("perms") or {}
+        perms_map = {"None": 1, "read": 2, "write": 3, "full": 4}
+        if current_user.role not in ['admin', 'superuser'] and perms_map.get(userperms.get('device', ''), 0) < perms_map['read']:
+            return buildResponse({"status":"failed", "err":"Unauthorized"}, 200)
+
     user_devices = db_user_group_perm.DevUserGroupPermRel.get_user_devices(uid)
     if not devid or not isinstance(devid, int):
         return buildResponse({'status': 'failed'},200,error="Wrong Data")
@@ -497,7 +511,7 @@ def dev_sensors():
 
 
 @app.route('/api/dev/ifstat', methods = ['POST'])
-@login_required(role='admin',perm={'device':'read'})
+@login_required
 def dev_ifstat():
     """return device interfaces info"""
     input = request.json
@@ -505,6 +519,19 @@ def dev_ifstat():
     uid = session.get("userid") or False
     if not uid:
         return buildResponse({"status":"failed", "err":"Unauthorized"}, 200)
+
+    current_user = get_myself()
+    if not current_user:
+        return buildResponse({"status":"failed", "err":"Unauthorized"}, 200)
+
+    if current_user.role == 'customer':
+        pass
+    else:
+        userperms = session.get("perms") or {}
+        perms_map = {"None": 1, "read": 2, "write": 3, "full": 4}
+        if current_user.role not in ['admin', 'superuser'] and perms_map.get(userperms.get('device', ''), 0) < perms_map['read']:
+            return buildResponse({"status":"failed", "err":"Unauthorized"}, 200)
+
     user_devices = db_user_group_perm.DevUserGroupPermRel.get_user_devices(uid)
     if not devid or not isinstance(devid, int):
         return buildResponse({'status': 'failed'},200,error="Wrong Data")
