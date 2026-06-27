@@ -271,7 +271,7 @@ def _is_role_atleast(myrole, rolebase, perm):
             else:
                 return False
     
-    levels = {"readonly":1, "editor":2, "user":3, "admin":4, "superuser":5}
+    levels = {"customer_inactive":0, "customer":0, "readonly":1, "editor":2, "user":3, "admin":4, "superuser":5}
     try:
         return res and levels[myrole] >= levels[rolebase]
     except Exception as e:
