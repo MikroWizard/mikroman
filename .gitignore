@@ -179,3 +179,5 @@ dist*
 .pyarmor*
 cloner_run.py
 api_proxy.py
+.git_pro/
+ai_provider_base.py

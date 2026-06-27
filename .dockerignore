@@ -162,6 +162,7 @@ cython_debug/
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+**/*pyarmor*
 **/*pro_api*
 **/*pro.py
 **/*pro*
@@ -169,4 +170,10 @@ cython_debug/
 **/public_key.pem
 **/license_helper.py
 **/license.lic
+**/license*
 **/api_proxy.py
+**/cloner_run.py
+**/*pro-build*
+**/pro-reqs.txt
+**/*.code-workspace
+**/api_snippet_pro.py
