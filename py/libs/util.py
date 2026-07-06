@@ -419,9 +419,16 @@ def grab_device_data(dev, q):
             "keys":keys
             }
             reddb=RedisDB(redopts)
-            if not dev.sensors or (len(json.loads(dev.sensors))<len(keys) and dev.sensors!=json.dumps(keys)):
+            
+            current_sensors = set(json.loads(dev.sensors)) if dev.sensors else set()
+            new_sensors = set(keys)
+            
+            # Only trigger if we've found a brand new sensor we've never seen before
+            if new_sensors - current_sensors:
                 log.info("updating keys for device {}".format(dev.id))
-                dev.sensors=json.dumps(keys)
+                # Accumulate sensors so we don't forget temporarily disconnected ones
+                updated_sensors = list(current_sensors.union(new_sensors))
+                dev.sensors = json.dumps(updated_sensors)
                 reddb.dev_create_keys()
             dev.save()
             reddb.add_dev_data(data)
