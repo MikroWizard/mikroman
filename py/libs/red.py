@@ -101,7 +101,15 @@ class RedisDB(object):
         for key, val in info.items():
             master_key="sensor::{}::{}".format(self.dev_id,key)
             datalist.append((master_key , '*' , val))
-        self.r.ts().madd(datalist)
+            
+        try:
+            self.r.ts().madd(datalist)
+        except redis.exceptions.ResponseError as e:
+            if "TSDB: the key does not exist" in str(e):
+                self.dev_create_keys()
+                self.r.ts().madd(datalist)
+            else:
+                raise e
         return True
 
     def get_dev_data(self,sensor):
