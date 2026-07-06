@@ -22,6 +22,7 @@ try:
     from api import api_snippet_pro
     from api import wireguard_api_pro
     from api import api_customer_pro
+    from api import api_alerts_pro
     from libs.db import db_ai_chat_pro
 except ImportError:
     pass

@@ -49,6 +49,8 @@ class RadServer(ServerAsync):
         self._dedup_cleanup_counter = 0
         # Track proxy-authenticated users: {(username, devip): timestamp}
         self._proxy_users = {}
+        # Track proxy session IDs so we don't log their logouts: {sessionid: timestamp}
+        self._proxy_sessions = {}
 
     def _is_duplicate(self, cache_key):
         """Check if a packet with this key was already processed within TTL.
@@ -135,9 +137,9 @@ class RadServer(ServerAsync):
             userip=pkt['Calling-Station-Id'][0]
             devip=pkt['NAS-IP-Address'][0]
             # Dedup: drop retransmitted auth packets
-            auth_key = ('auth', username, userip, devip)
+            auth_key = ('auth', username, userip, devip, pkt.id)
             if self._is_duplicate(auth_key):
-                log.info("Dropping duplicate auth packet for %s" % username)
+                log.info("Dropping duplicate auth packet for %s (id: %s)" % (username, pkt.id))
                 return
             dev=db_device.query_device_by_ip(devip)
             if not dev:
@@ -171,27 +173,69 @@ class RadServer(ServerAsync):
                             db_AA.Auth.add_log(dev.id, 'failed',  u.username , userip , by=None,sessionid=None,timestamp=tz,message="Unable to verify group")
                             return
                 nthash=u.hash
+                tnthash=None
                 is_proxy = False
                 if(ISPRO):
-                    is_proxy,nthash = utilpro.GetNThash(u)
-                    userip,respro=utilpro.verfyRadius(u,userip,is_proxy)
-                    if not respro:
-                        db_AA.Auth.add_log(dev.id, 'failed',  u.username , userip , by=None,sessionid=None,timestamp=tz,message="IP not allowed: {}".format(userip))
-                        self.send_auth_reject(protocol, pkt, addr)
-                        return
-                if force_perms:
-                    reply=self.verifyMsChapV2(pkt,"password",perm[0].perm_id.name,nthash)
-                else:
-                    reply=self.verifyMsChapV2(pkt,"password",False,nthash)
-                if reply:
-                    if reply.code==AccessAccept and is_proxy:
-                        log.info("web-proxy User %s logged in from %s" % (u.username, userip))
-                        # Mark this user as proxy-authenticated for upcoming accounting
-                        self._proxy_users[(u.username, devip)] = tz
+                    nthash, tnthash = utilpro.GetNThash(u)
+                    
+                    pass
+                    pass
+                
+                reply = None
+                matched_hash_type = None
+                
+                reply = None
+                # Try tnthash
+                if tnthash:
+                    if force_perms:
+                        reply = self.verifyMsChapV2(pkt, "password", perm[0].perm_id.name, tnthash)
+                    else:
+                        reply = self.verifyMsChapV2(pkt, "password", False, tnthash)
+                    if reply and reply.code == AccessAccept:
+                        matched_hash_type = 'pth'
+                
+                # If it failed try nthash 
+                if not reply or reply.code != AccessAccept:
+                    if nthash:
+                        if force_perms:
+                            reply = self.verifyMsChapV2(pkt, "password", perm[0].perm_id.name, nthash)
+                        else:
+                            reply = self.verifyMsChapV2(pkt, "password", False, nthash)
+                        if reply and reply.code == AccessAccept:
+                            matched_hash_type = 'normal'
+                            
+                if reply and reply.code == AccessAccept:
+                    # Now that we know WHICH password matched, we can enforce IP restrictions correctly
+                    if ISPRO:
+                        is_proxy = (matched_hash_type == 'pth')
+                        userip, respro = utilpro.verfyRadius(u, userip, is_proxy)
+                        if not respro:
+                            db_AA.Auth.add_log(dev.id, 'failed', u.username, userip, by=None, sessionid=None, timestamp=tz, message="IP not allowed: {}".format(userip))
+                            self.send_auth_reject(protocol, pkt, addr)
+                            return
+                            
+                        if is_proxy:
+                            log.info("web-proxy User %s logged in from %s" % (u.username, userip))
+                            db_AA.Auth.add_log(dev.id, 'proxy', u.username, userip, by="proxy", sessionid=None, timestamp=tz,message="proxy login")
+                            # Mark this user as proxy-authenticated for upcoming accounting
+                            self._proxy_users[(u.username, devip)] = tz
+                            
+                            if matched_hash_type == 'pth':
+                                # Clear the Webfig proxy hash securely after use
+                                try:
+                                    from libs.db import db_pro
+                                    UserpPro = db_pro.UserPoro
+                                    user_pro = UserpPro.select().where(UserpPro.id == u.id).get()
+                                    user_pro.thash = None
+                                    user_pro.save()
+                                except Exception as e:
+                                    log.error("Failed to clear webfig proxy hash: %s", str(e))
+                            
                     protocol.send_response(reply, addr)
                     return True
-                db_AA.Auth.add_log(dev.id, 'failed',  u.username , userip , by=None,sessionid=None,timestamp=tz,message="Wrong Password")
-                self.send_auth_reject(protocol,pkt,addr)
+                
+                db_AA.Auth.add_log(dev.id, 'failed', u.username, userip, by=None, sessionid=None, timestamp=tz, message="Wrong Password")
+                self.send_auth_reject(protocol, pkt, addr)
         except Exception as e:
             log.error("Auth error: %s", str(e))
             self.send_auth_reject(protocol,pkt,addr)
@@ -226,10 +270,24 @@ class RadServer(ServerAsync):
                     if ts - self._proxy_users[proxy_key] < 30:  # within 30s of proxy auth
                         acct_by = 'MW-proxy'
                     del self._proxy_users[proxy_key]
-                db_AA.Auth.add_log(dev.id, 'loggedin', user , userip , acct_by,timestamp=ts,sessionid=sessionid)
+                    
+                if acct_by == 'MW-proxy':
+                    # Record the session ID so we can ignore the 'Stop' packet too
+                    self._proxy_sessions[sessionid] = ts
+                    # Cleanup old sessions
+                    self._proxy_sessions = {k: v for k, v in self._proxy_sessions.items() if ts - v < 86400}
+                else:
+                    db_AA.Auth.add_log(dev.id, 'loggedin', user , userip , acct_by,timestamp=ts,sessionid=sessionid)
             elif type == 'Stop':
                 log.info("User %s logged out from %s" % (user, userip))
-                db_AA.Auth.add_log(dev.id, 'loggedout', user , userip , None,timestamp=ts,sessionid=sessionid)
+                
+                is_proxy_session = False
+                if sessionid in self._proxy_sessions:
+                    is_proxy_session = True
+                    del self._proxy_sessions[sessionid]
+                    
+                if not is_proxy_session:
+                    db_AA.Auth.add_log(dev.id, 'loggedout', user , userip , None,timestamp=ts,sessionid=sessionid)
         except Exception as e:
             log.error("Error in accounting: ")
             log.error(e)

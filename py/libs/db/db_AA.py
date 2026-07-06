@@ -82,7 +82,6 @@ class Auth(BaseModel):
                     Auth.devid == devid,
                     Auth.ltype == type,
                     Auth.username == username.strip(),
-                    ((Auth.by != 'Web-Proxy') | (Auth.by.is_null(True))),
                     Auth.started > timestamp - 5,
                     Auth.started < timestamp + 5
                 ).order_by(Auth.started.desc()).limit(1)
@@ -106,20 +105,21 @@ class Auth(BaseModel):
 
             if sessionid:
                 # RADIUS accounting login (has sessionid but no connection details).
-                # Check if syslog already created a partial row (syslog arrived first).
+                # Find any row for this login event within 5 seconds (syslog or first RADIUS packet).
                 auth = Auth.select().where(
                     Auth.devid == devid,
                     Auth.ltype == type,
                     Auth.username == username.strip(),
-                    ((Auth.by != 'Web-Proxy') | (Auth.by.is_null(True))),
-                    ((Auth.sessionid.is_null(True)) | (Auth.sessionid == '')),
                     Auth.started > timestamp - 5,
                     Auth.started < timestamp + 5
                 ).order_by(Auth.started.desc()).limit(1)
                 auth_list = list(auth)
                 if len(auth_list) > 0:
-                    # Syslog row exists — merge sessionid into it
                     a = auth_list[0]
+                    if a.sessionid and a.sessionid != sessionid:
+                        # Winbox opens multiple sessions concurrently; we already recorded one of them.
+                        # Ignore extra session packets to prevent duplicate rows.
+                        return
                     try:
                         a.sessionid = sessionid
                         a.save()

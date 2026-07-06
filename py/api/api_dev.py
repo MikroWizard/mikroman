@@ -11,7 +11,7 @@ import html
 import config
 import re
 from libs.red import RedisDB
-from libs.webutil import app,buildResponse,login_required,get_myself,get_ip,get_agent
+from libs.webutil import app,buildResponse,login_required,get_myself,get_ip,get_agent,_check_user_role
 from libs import util,ping
 from libs.db import db_device,db_groups,db_user_group_perm,db_user_tasks,db_sysconfig,db_syslog
 import logging
@@ -259,26 +259,34 @@ def search_groups():
     return buildResponse(dev_groups,200)
 
 @app.route('/api/search/devices', methods = ['POST'])
-@login_required(role='admin',perm={'device':'read'})
+@login_required
 def search_devices():
-    """search in groups"""
+    """search in groups or devices"""
+    user = get_myself()
     input = request.json
     searchstr=input.get('searchstr',False)
     # build HTML of the method list
     device=db_device.Devices
-    searchstr=input.get('searchstr',False)
     devs = []
+    
+    # base query
+    if user.role == 'customer':
+        q = db_user_group_perm.DevUserGroupPermRel.get_user_devices(user.id)
+    else:
+        err_response = _check_user_role(rolebase='admin', perm={'device':'read'})
+        if err_response:
+            return err_response
+        q = device.select()
+    
     try:
         if searchstr and searchstr!="":
             # find devices that contains searchstr in the name
-            devs = (device
-                    .select()
+            devs = (q
                     .where(device.name.contains(searchstr))
                     .dicts())
         else:
             # return first 10 ordered alphabeticaly
-            devs = (device
-                    .select()
+            devs = (q
                     .order_by(device.name)
                     .limit(10)
                     .dicts())

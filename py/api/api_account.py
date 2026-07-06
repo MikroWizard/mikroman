@@ -121,7 +121,7 @@ def create_user():
     u.save(force_insert=True)
     account.new_signup_steps(u)
 
-    if u.role == 'customer_inactive':
+    if u.role == 'customer_inactive' and ISPRO:
         try:
             import uuid
             from libs.db.db_tickets_pro import UserActivationToken_pro
@@ -300,7 +300,7 @@ def user_edit():
         u.hash = nthashhex
     u.save()
 
-    if send_activation and u.role == 'customer_inactive':
+    if send_activation and u.role == 'customer_inactive' and ISPRO:
         try:
             import uuid
             from libs.db.db_tickets_pro import UserActivationToken_pro
