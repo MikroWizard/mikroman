@@ -188,5 +188,6 @@ py/libs/agent_validation.py
 py/libs/command_sections.json
 py/api/api_config_versions.py
 py/api/api_terminal_proxy.py
+py/scripts/
 .cursorrules
 AGENTS.md
