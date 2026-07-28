@@ -32,3 +32,26 @@ if ret:
     print("migrate ERROR", ret)
 else:
     print("migrate OK")
+
+# --- TRANSITION PATCH FOR 1.3.0 -> 1.3.1 ---
+# The old updater.py (1.3.0) contains a bugs (pip.main segfault & touch-reload PyArmor conflict).
+# Because the old updater.py is currently in RAM doing the update, it will crash itself if it continues.
+# To bypass this, we intercept the update physically *here* (using the newly extracted dbmigrate.py)
+# to clean up the zip and kill the uwsgi master. This forces a clean docker container restart 
+# with the fixed 1.3.1 files, fully sidestepping the old updater's remaining logic.
+try:
+    import glob
+    import time
+    zips = glob.glob("/app/mikroman-pro*.zip")
+    if zips:
+        print("Update ZIP detected in /app/. Cleaning up and forcing hard restart to bypass old updater logic...")
+        for z in zips:
+            try:
+                os.remove(z)
+            except:
+                pass
+        # Kill uwsgi to force Docker to restart the container cleanly
+        os.system("killall -15 uwsgi || kill -15 1")
+        time.sleep(10) # Block old updater.py from continuing before the KILL signal arrives
+except Exception as e:
+    print(f"Error in transition patch: {e}")
