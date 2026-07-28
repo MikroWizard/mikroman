@@ -43,8 +43,33 @@ class Auth(BaseModel):
 
     def add_log(devid,type,username,ip,by,sessionid=False,timestamp=False,message=None):
         log.error(f"DEBUG add_log ENTRY: devid={devid}, type={type}, username={username}, ip={ip}, by={by}, sessionid={sessionid}, timestamp={timestamp}, message={message}")
-        if by=='proxy':
-            event=Auth(devid=devid,ltype='loggedin',username=username.strip(),ip=ip.strip(),by='Web-Proxy',started=timestamp,ended=timestamp,sessionid='sessionid'+str(timestamp),message='proxy')
+        if by=='proxy' or by=='Web-Proxy':
+            ts = timestamp or int(time.time())
+            cutoff = ts - 30
+            u_str = username.strip() if username else ''
+            existing = Auth.select().where(
+                (Auth.devid == devid) &
+                (Auth.username == u_str) &
+                (Auth.by == 'Web-Proxy') &
+                (Auth.started >= cutoff)
+            ).order_by(Auth.id.desc()).first()
+            if existing:
+                if sessionid and sessionid != True and not str(sessionid).startswith('sessionid'):
+                    existing.sessionid = str(sessionid)
+                    existing.save()
+                return True
+
+            event=Auth(
+                devid=devid,
+                ltype='loggedin',
+                username=u_str,
+                ip=ip.strip() if ip else '',
+                by='Web-Proxy',
+                started=ts,
+                ended=0,
+                sessionid=str(sessionid) if (sessionid and sessionid != True) else ('sessionid'+str(ts)),
+                message=message or 'proxy'
+            )
             event.save()
             return True
         if type=='failed':
@@ -76,27 +101,62 @@ class Auth(BaseModel):
         elif type=='loggedin':
             if message=='radius' and not sessionid:
                 # Syslog event for a RADIUS user login.
-                # Syslog has connection method (by='winbox'/'ssh'/etc) but no sessionid.
-                # Try to find the matching RADIUS-created row within a 5-second window.
+                # -----------------------------------------------------------------
+                # [COMMENTED OUT - Check 1] 2026-07-27
+                # PURPOSE: Check 1 was added to prevent duplicate "Local Access" rows
+                # when WebFig proxy sessions generated syslog events. When a user opened
+                # WebFig via the proxy, the RADIUS accounting Start was skipped (MW-proxy),
+                # so syslog events had no RADIUS row to merge with. Check 1 looked for
+                # an active unclosed Web-Proxy session and suppressed the syslog event.
+                #
+                # WHY COMMENTED: Check 1 caused problems with Case C — when a user had
+                # an active WebFig proxy session AND also made a direct WebFig/RADIUS
+                # login on the same device, Check 1 incorrectly suppressed the direct
+                # login's syslog event. This also could interfere with concurrent sessions.
+                #
+                # WHY IT STILL WORKS WITHOUT CHECK 1: The Web-Proxy Auth row created by
+                # AuthPro.attach_or_create_proxy_log has ltype='loggedin' and the same
+                # username, so Check 2 (15-second window) naturally finds it and merges
+                # the syslog event harmlessly (doesn't overwrite by='Web-Proxy').
+                # For direct logins during an active proxy session, the old proxy row
+                # falls outside the 15s window, so the RADIUS accounting row is matched.
+                #
+                # TO REVERT: Uncomment the block below if Check 2 fails to prevent
+                # duplicate sessionid=None rows for WebFig proxy sessions.
+                # -----------------------------------------------------------------
+                # u_clean = username.strip() if username else ''
+                # b_clean = by.strip() if by else ''
+                #
+                # if b_clean == 'web':
+                #     active_proxy = Auth.select().where(
+                #         (Auth.devid == devid) &
+                #         (Auth.by == 'Web-Proxy') &
+                #         (Auth.username == u_clean) &
+                #         ((Auth.ended.is_null(True)) | (Auth.ended == 0))
+                #     ).order_by(Auth.started.desc()).first()
+                #
+                #     if active_proxy:
+                #         log.info(f"[Auth Log] Merging syslog RADIUS login for {u_clean} via web into active Web-Proxy sessionid={active_proxy.sessionid} for devid={devid}")
+                #         return True
+                # -----------------------------------------------------------------
+
+                # Check 2: Try to find matching RADIUS-created row within a 15-second window.
                 auth = Auth.select().where(
                     Auth.devid == devid,
                     Auth.ltype == type,
                     Auth.username == username.strip(),
-                    Auth.started > timestamp - 5,
-                    Auth.started < timestamp + 5
+                    Auth.started > timestamp - 15,
+                    Auth.started < timestamp + 15
                 ).order_by(Auth.started.desc()).limit(1)
                 auth_list = list(auth)
                 if len(auth_list) > 0:
                     # RADIUS row exists — merge syslog connection details into it
                     a = auth_list[0]
                     if by and not a.by:
-                        # Only set 'by' if the row doesn't already have one
-                        # (e.g. MW-proxy set by accounting should not be overwritten)
                         a.by = by.strip()
                     a.save()
                 else:
                     # RADIUS hasn't arrived yet — create row with connection details.
-                    # RADIUS will merge its sessionid into this row when it arrives.
                     if by:
                         by = by.strip()
                     event = Auth(devid=devid, ltype=type, username=username.strip(), ip=ip.strip(), by=by, started=timestamp, message=message)
@@ -147,8 +207,10 @@ class Auth(BaseModel):
                 event = Auth(devid=devid, ltype=type, username=username.strip(), ip=ip.strip(), by=by, started=timestamp, message=message)
                 event.save()
         else:
+            if by == 'Web-Proxy' or by == 'proxy':
+                return
             if sessionid:
-                Auth.update(ended = timestamp).where(Auth.sessionid==sessionid).execute()
+                Auth.update(ended = timestamp).where((Auth.sessionid==sessionid) & (Auth.by != 'Web-Proxy')).execute()
             else:
                 if message=='radius':
                     pass
@@ -160,7 +222,8 @@ class Auth(BaseModel):
                         Auth.ltype == 'loggedin',
                         Auth.username == username.strip(),
                         Auth.ip == ip.strip(),
-                        Auth.ended.is_null(True)
+                        (Auth.ended.is_null(True) | (Auth.ended == 0)),
+                        (Auth.by != 'Web-Proxy') & (Auth.by != 'proxy')
                     ).order_by(Auth.started.desc()).limit(1)
                     unclosed_list = list(unclosed)
                     if len(unclosed_list) > 0:

@@ -80,6 +80,22 @@ def create_bulk_add_task(task_id):
     )
     return task
 
+def exec_multi_brand_status():
+    return (Tasks.select().where(Tasks.signal == 185).get())
+
+def create_exec_multi_brand_task(task_id=None):
+    import datetime
+    task = Tasks.create(
+        signal=185,
+        task_id=task_id,
+        starttime=datetime.datetime.now(),
+        endtime=datetime.datetime.now(),
+        status=False,
+        action='None',
+        name='Multi-Brand Exec'
+    )
+    return task
+
 def get_bulk_add_task(task_id):
     try:
         return Tasks.select().where((Tasks.signal == 180) & (Tasks.task_id == task_id)).get()

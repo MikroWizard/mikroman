@@ -18,6 +18,10 @@ class Snippets(BaseModel):
     name = TextField()
     description = TextField()
     content = TextField()
+    template_command_key = TextField(null=True)
+    brand = CharField(max_length=50, default='mikrotik')
+    is_default = BooleanField(default=False)
+    is_config_mode = BooleanField(default=False)
     created = DateTimeField()
 
     class Meta:
@@ -32,18 +36,20 @@ def get_snippet_by_name(name):
 def get_snippet(id):
     return get_object_or_none(Snippets, id=id)
 
-def update_snippet(id,name, description, content):
+def update_snippet(id,name, description, content, template_command_key=None):
     snippet = get_object_or_none(Snippets, id=id)
     snippet.name = name
     snippet.description = description
     snippet.content = content
+    snippet.template_command_key = template_command_key
     snippet.save()
 
-def create_snippet(name, description, content):
+def create_snippet(name, description, content, template_command_key=None):
     snippet = Snippets()
     snippet.name = name
     snippet.description = description
     snippet.content = content
+    snippet.template_command_key = template_command_key
     snippet.save()
 
 def delete_snippet(id):
@@ -63,6 +69,8 @@ class UserTasks(BaseModel):
     action = TextField()
     task_type = TextField()
     selection_type = TextField()
+    locked_at = DateTimeField(null=True)
+    locked_by = CharField(max_length=100, null=True)
     created = DateTimeField()
 
     class Meta:

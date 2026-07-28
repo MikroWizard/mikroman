@@ -39,15 +39,15 @@ class DevUserGroupPermRel(BaseModel):
             elif perm.group_id.id == 1 and group_id:
                 return Devices.select().join(DevGroupRel).where(DevGroupRel.group_id == group_id)
         if group_id:
-            return Devices.select().join(DevGroupRel).join(DevUserGroupPermRel,on=(DevUserGroupPermRel.group_id == DevGroupRel.group_id)).where(DevUserGroupPermRel.user_id == uid, DevGroupRel.group_id == group_id)
-        return Devices.select().join(DevGroupRel).join(DevUserGroupPermRel,on=(DevUserGroupPermRel.group_id == DevGroupRel.group_id)).where(DevUserGroupPermRel.user_id == uid)
+            return Devices.select().join(DevGroupRel).join(DevUserGroupPermRel,on=(DevUserGroupPermRel.group_id == DevGroupRel.group_id)).where(DevUserGroupPermRel.user_id == uid, DevGroupRel.group_id == group_id).distinct()
+        return Devices.select().join(DevGroupRel).join(DevUserGroupPermRel,on=(DevUserGroupPermRel.group_id == DevGroupRel.group_id)).where(DevUserGroupPermRel.user_id == uid).distinct()
 
     def get_user_devices_by_ids(uid,ids):
         perms=list(DevUserGroupPermRel.select().where(DevUserGroupPermRel.user_id == uid))
         for perm in perms:
             if perm.group_id.id == 1:
                 return Devices.select().where(Devices.id << ids)
-        return Devices.select().join(DevGroupRel).join(DevUserGroupPermRel,on=(DevUserGroupPermRel.group_id == DevGroupRel.group_id)).where(DevUserGroupPermRel.user_id == uid,Devices.id << ids)
+        return Devices.select().join(DevGroupRel).join(DevUserGroupPermRel,on=(DevUserGroupPermRel.group_id == DevGroupRel.group_id)).where(DevUserGroupPermRel.user_id == uid,Devices.id << ids).distinct()
     
     def delete_group(gid):
         #check if group exists

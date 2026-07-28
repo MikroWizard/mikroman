@@ -7,7 +7,7 @@
 
 from peewee import *
 from playhouse.shortcuts import model_to_dict
-from psycopg2.extensions import ISOLATION_LEVEL_SERIALIZABLE
+from psycopg2.extensions import ISOLATION_LEVEL_READ_COMMITTED
 
 from flask import abort
 import config
@@ -19,14 +19,22 @@ if config.IS_SQLITE:
     # config.DATABASE_HOST is full path to sqlite file
     database = SqliteDatabase(config.DATABASE_HOST, pragmas={})
 else:
-    from playhouse.postgres_ext import PostgresqlExtDatabase, ArrayField, BinaryJSONField, BooleanField, JSONField
+    from playhouse.pool import PooledPostgresqlExtDatabase
+    from playhouse.postgres_ext import ArrayField, BinaryJSONField, BooleanField, JSONField
     # support for arrays of uuid
     import psycopg2.extras
     psycopg2.extras.register_uuid()
 
-    database = PostgresqlExtDatabase(config.DATABASE_NAME,
+    database = PooledPostgresqlExtDatabase(config.DATABASE_NAME,
         user=config.DATABASE_USER, password=config.DATABASE_PASSWORD,
-        host=config.DATABASE_HOST, port=config.DATABASE_PORT , isolation_level=ISOLATION_LEVEL_SERIALIZABLE)
+        host=config.DATABASE_HOST, port=config.DATABASE_PORT,
+        isolation_level=ISOLATION_LEVEL_READ_COMMITTED,
+        # Per-process connection pool.
+        # Small deployments: 10 connections is fine.
+        # Enterprise (500+ devices): increase to 20.
+        max_connections=config.DATABASE_POOL_SIZE,
+        stale_timeout=config.DB_STALE_TIMEOUT,   # Close idle connections after N seconds
+    )
 
 
 # --------------------------------------------------------------------------

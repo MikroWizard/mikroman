@@ -10,6 +10,19 @@ from peewee import *
 from libs.db.db import User,BaseModel,get_object_or_none
 import logging
 from libs.db.db_device import Devices
+
+try:
+    from libs.db.db_pam import DeviceConnections, Credentials
+except ImportError:
+    DeviceConnections = None
+    Credentials = None
+
+try:
+    from libs.db.db_pam_pro import ConnectionSessions, CredentialRotationHistory
+    PAM_PRO_AVAILABLE = True
+except ImportError:
+    PAM_PRO_AVAILABLE = False
+
 log = logging.getLogger("db_groups")
 
 
@@ -148,8 +161,19 @@ def delete_from_group(devids):
 def delete_device(devid):
     try:
         delete_from_group([devid])
+        
+        # Delete PAM related data to ensure no orphaned rows (Task 18.2)
+        if DeviceConnections is not None:
+            DeviceConnections.delete().where(DeviceConnections.device_id == devid).execute()
+        if Credentials is not None:
+            Credentials.delete().where(Credentials.device_id == devid).execute()
+        if PAM_PRO_AVAILABLE:
+            ConnectionSessions.delete().where(ConnectionSessions.device_id == devid).execute()
+            CredentialRotationHistory.delete().where(CredentialRotationHistory.device_id == devid).execute()
+            
         dev = get_object_or_none(Devices, id=devid)
-        dev.delete_instance(recursive=True)
+        if dev:
+            dev.delete_instance(recursive=True)
         return True
     except Exception as e:
         log.error(e)
