@@ -181,3 +181,12 @@ cloner_run.py
 api_proxy.py
 .git_pro/
 ai_provider_base.py
+apprise_service_catalog.py
+py/libs/diff_exclusions.py
+py/libs/terminal_gateway.py
+py/libs/agent_validation.py
+py/libs/command_sections.json
+py/api/api_config_versions.py
+py/api/api_terminal_proxy.py
+.cursorrules
+AGENTS.md

@@ -15,6 +15,8 @@ from api import api_logs
 from api import api_scanner
 from api import api_backups
 from api import api_snippet
+from api import api_executions
+from api import api_pam
 try:
     from api import api_pro_api
     from api import api_pro_api2
@@ -24,8 +26,14 @@ try:
     from api import api_customer_pro
     from api import api_alerts_pro
     from libs.db import db_ai_chat_pro
-except ImportError:
-    pass
+    from api import api_terminal_pro
+    from api import api_non_mikrotik_pro
+    from api import api_policy_pro
+    from api import api_config_versions_pro
+    from api import api_config_versions
+except ImportError as _e:
+    import logging as _logging
+    _logging.getLogger("main").warning(f"Pro module import failed (running in free mode): {_e}")
 
 import logging
 log = logging.getLogger("main")
