@@ -5,11 +5,12 @@
 # MikroWizard.com , Mikrotik router management solution
 # Author: sepehr.ha@gmail.com
 
-from libs.db.db_device import Devices,EXCLUDED,database
+from libs.db.db_device import Devices, EXCLUDED, database
 from libs.db import db_sysconfig
 import logging
 import time
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 import logging
 from pyrad.dictionary import Dictionary
@@ -36,6 +37,11 @@ log = logging.getLogger("Radius")
 
 logging.basicConfig(filename="pyrad.log", level="DEBUG",
                     format="%(asctime)s [%(levelname)-8s] %(message)s")
+
+# Thread pool for blocking RADIUS operations (DB lookups + RouterOS API calls).
+# Small deployments: 4 workers is sufficient (RADIUS bursts are rare and short-lived).
+# Enterprise (500+ devices with force_perms): increase to 8-12 workers.
+_radius_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="radius-worker")
 
 class RadServer(ServerAsync):
 
@@ -128,132 +134,164 @@ class RadServer(ServerAsync):
         protocol.send_response(reply, addr)
 
     def handle_auth_packet(self, protocol, pkt, addr):
-        # log.error("Attributes: ")
-        # for attr in pkt.keys():
-        #     log.error("%s: %s" % (attr, pkt[attr]))
+        """Dispatcher: validate and dedup on the event loop, then hand off
+        all blocking work (DB + RouterOS API) to the thread pool.
+
+        NOTE: pyrad calls this synchronously from datagram_received, so it
+        cannot be async def.  We use loop.run_in_executor() to offload without
+        blocking the event loop thread."""
         try:
-            tz=int(time.time())
+            tz = int(time.time())
             username = pkt['User-Name'][0]
-            userip=pkt['Calling-Station-Id'][0]
-            devip=pkt['NAS-IP-Address'][0]
-            # Dedup: drop retransmitted auth packets
+            userip = pkt['Calling-Station-Id'][0]
+            devip = pkt['NAS-IP-Address'][0]
+
+            # Fast in-memory dedup — stays on the event loop thread
             auth_key = ('auth', username, userip, devip, pkt.id)
             if self._is_duplicate(auth_key):
                 log.info("Dropping duplicate auth packet for %s (id: %s)" % (username, pkt.id))
                 return
-            dev=db_device.query_device_by_ip(devip)
-            if not dev:
-                self.send_auth_reject(protocol,pkt,addr)
-                return
-      
-            u = db.get_user_by_username(username)
-            if not u or u.role=='disabled':
-                    self.send_auth_reject(protocol,pkt,addr)
-                    db_AA.Auth.add_log(dev.id, 'failed',  username , userip , by=None,sessionid=None,timestamp=tz,message="User Not Exist")
-                    return
-            else:
-                #get user permision related to device
-                if not dev:
-                    self.send_auth_reject(protocol, pkt, addr)
-                    db_AA.Auth.add_log(dev.id, 'failed', u.username, userip, by=None, sessionid=None, timestamp=tz, message="Device Not Exist")
-                    return
-                force_perms=True if db_sysconfig.get_sysconfig('force_perms')=="True" else False
-                if force_perms:
-                    dev_groups=db_groups.devgroups(dev.id)
-                    dev_groups_ids=[group.id for group in dev_groups]
-                    dev_groups_ids.append(1)
-                    res=False
-                    if dev and len(dev_groups_ids)>0:
-                        perm=db_user_group_perm.DevUserGroupPermRel.query_permission_by_user_and_device_group(u.id,dev_groups_ids)
-                        res2=False
-                        if len(list(perm))>0:
-                            res2=FourcePermToRouter(dev,perm)
-                        if not res2:
-                            self.send_auth_reject(protocol,pkt,addr)
-                            db_AA.Auth.add_log(dev.id, 'failed',  u.username , userip , by=None,sessionid=None,timestamp=tz,message="Unable to verify group")
-                            return
-                nthash=u.hash
-                tnthash=None
-                is_proxy = False
-                if(ISPRO):
-                    nthash, tnthash = utilpro.GetNThash(u)
-                    
-                    pass
-                    pass
-                
-                reply = None
-                matched_hash_type = None
-                
-                reply = None
-                # Try tnthash
-                if tnthash:
-                    if force_perms:
-                        reply = self.verifyMsChapV2(pkt, "password", perm[0].perm_id.name, tnthash)
-                    else:
-                        reply = self.verifyMsChapV2(pkt, "password", False, tnthash)
-                    if reply and reply.code == AccessAccept:
-                        matched_hash_type = 'pth'
-                
-                # If it failed try nthash 
-                if not reply or reply.code != AccessAccept:
-                    if nthash:
-                        if force_perms:
-                            reply = self.verifyMsChapV2(pkt, "password", perm[0].perm_id.name, nthash)
-                        else:
-                            reply = self.verifyMsChapV2(pkt, "password", False, nthash)
-                        if reply and reply.code == AccessAccept:
-                            matched_hash_type = 'normal'
-                            
-                if reply and reply.code == AccessAccept:
-                    # Now that we know WHICH password matched, we can enforce IP restrictions correctly
-                    if ISPRO:
-                        is_proxy = (matched_hash_type == 'pth')
-                        userip, respro = utilpro.verfyRadius(u, userip, is_proxy)
-                        if not respro:
-                            db_AA.Auth.add_log(dev.id, 'failed', u.username, userip, by=None, sessionid=None, timestamp=tz, message="IP not allowed: {}".format(userip))
-                            self.send_auth_reject(protocol, pkt, addr)
-                            return
-                            
-                        if is_proxy:
-                            log.info("web-proxy User %s logged in from %s" % (u.username, userip))
-                            db_AA.Auth.add_log(dev.id, 'proxy', u.username, userip, by="proxy", sessionid=None, timestamp=tz,message="proxy login")
-                            # Mark this user as proxy-authenticated for upcoming accounting
-                            self._proxy_users[(u.username, devip)] = tz
-                            
-                            if matched_hash_type == 'pth':
-                                # Clear the Webfig proxy hash securely after use
-                                try:
-                                    from libs.db import db_pro
-                                    UserpPro = db_pro.UserPoro
-                                    user_pro = UserpPro.select().where(UserpPro.id == u.id).get()
-                                    user_pro.thash = None
-                                    user_pro.save()
-                                except Exception as e:
-                                    log.error("Failed to clear webfig proxy hash: %s", str(e))
-                            
-                    protocol.send_response(reply, addr)
-                    return True
-                
-                db_AA.Auth.add_log(dev.id, 'failed', u.username, userip, by=None, sessionid=None, timestamp=tz, message="Wrong Password")
-                self.send_auth_reject(protocol, pkt, addr)
-        except Exception as e:
-            log.error("Auth error: %s", str(e))
-            self.send_auth_reject(protocol,pkt,addr)
-            #log failed attempts
 
-        
+            # Offload all DB + network work to thread pool
+            loop = asyncio.get_event_loop()
+            loop.run_in_executor(
+                _radius_executor,
+                self._handle_auth_blocking,
+                protocol, pkt, addr, username, userip, devip, tz
+            )
+        except Exception as e:
+            log.error("Auth dispatch error: %s", str(e))
+            self.send_auth_reject(protocol, pkt, addr)
+
+    def _handle_auth_blocking(self, protocol, pkt, addr, username, userip, devip, tz):
+        """Runs in thread pool. Performs all DB lookups and RouterOS API calls."""
+        try:
+            dev = db_device.query_device_by_ip(devip)
+            if not dev:
+                self.send_auth_reject(protocol, pkt, addr)
+                return
+
+            u = db.get_user_by_username(username)
+            if not u or u.role == 'disabled':
+                self.send_auth_reject(protocol, pkt, addr)
+                db_AA.Auth.add_log(dev.id, 'failed', username, userip,
+                                   by=None, sessionid=None, timestamp=tz,
+                                   message="User Not Exist")
+                return
+
+            if not dev:
+                self.send_auth_reject(protocol, pkt, addr)
+                db_AA.Auth.add_log(dev.id, 'failed', u.username, userip,
+                                   by=None, sessionid=None, timestamp=tz,
+                                   message="Device Not Exist")
+                return
+
+            force_perms = db_sysconfig.get_sysconfig('force_perms') == "True"
+            perm = None
+            if force_perms:
+                dev_groups = db_groups.devgroups(dev.id)
+                dev_groups_ids = [group.id for group in dev_groups]
+                dev_groups_ids.append(1)
+                if dev and len(dev_groups_ids) > 0:
+                    perm = db_user_group_perm.DevUserGroupPermRel.query_permission_by_user_and_device_group(
+                        u.id, dev_groups_ids
+                    )
+                    res2 = False
+                    if len(list(perm)) > 0:
+                        # Critical blocking call — now safely runs in thread pool
+                        res2 = FourcePermToRouter(dev, perm)
+                    if not res2:
+                        self.send_auth_reject(protocol, pkt, addr)
+                        db_AA.Auth.add_log(dev.id, 'failed', u.username, userip,
+                                           by=None, sessionid=None, timestamp=tz,
+                                           message="Unable to verify group")
+                        return
+
+            nthash = u.hash
+            tnthash = None
+            is_proxy = False
+            if ISPRO:
+                nthash, tnthash = utilpro.GetNThash(u)
+
+            reply = None
+            matched_hash_type = None
+
+            if tnthash:
+                if force_perms:
+                    reply = self.verifyMsChapV2(pkt, "password", perm[0].perm_id.name, tnthash)
+                else:
+                    reply = self.verifyMsChapV2(pkt, "password", False, tnthash)
+                if reply and reply.code == AccessAccept:
+                    matched_hash_type = 'pth'
+
+            if not reply or reply.code != AccessAccept:
+                if nthash:
+                    if force_perms:
+                        reply = self.verifyMsChapV2(pkt, "password", perm[0].perm_id.name, nthash)
+                    else:
+                        reply = self.verifyMsChapV2(pkt, "password", False, nthash)
+                    if reply and reply.code == AccessAccept:
+                        matched_hash_type = 'normal'
+
+            if reply and reply.code == AccessAccept:
+                if ISPRO:
+                    is_proxy = (matched_hash_type == 'pth')
+                    userip, respro = utilpro.verfyRadius(u, userip, is_proxy)
+                    if not respro:
+                        db_AA.Auth.add_log(dev.id, 'failed', u.username, userip,
+                                           by=None, sessionid=None, timestamp=tz,
+                                           message="IP not allowed: {}".format(userip))
+                        self.send_auth_reject(protocol, pkt, addr)
+                        return
+
+                    if is_proxy:
+                        log.info("web-proxy User %s logged in from %s" % (u.username, userip))
+                        db_AA.Auth.add_log(dev.id, 'proxy', u.username, userip,
+                                           by="proxy", sessionid=None, timestamp=tz,
+                                           message="proxy login")
+                        self._proxy_users[(u.username, devip)] = tz
+
+                        if matched_hash_type == 'pth':
+                            try:
+                                from libs.db import db_pro
+                                UserpPro = db_pro.UserPoro
+                                user_pro = UserpPro.select().where(UserpPro.id == u.id).get()
+                                user_pro.thash = None
+                                user_pro.save()
+                            except Exception as e:
+                                log.error("Failed to clear webfig proxy hash: %s", str(e))
+
+                # send_response is thread-safe (UDP sendto)
+                protocol.send_response(reply, addr)
+                return True
+
+            db_AA.Auth.add_log(dev.id, 'failed', u.username, userip,
+                               by=None, sessionid=None, timestamp=tz,
+                               message="Wrong Password")
+            self.send_auth_reject(protocol, pkt, addr)
+        except Exception as e:
+            log.error("Auth worker error: %s", str(e))
+            self.send_auth_reject(protocol, pkt, addr)
 
     def handle_acct_packet(self, protocol, pkt, addr):
+        """Dispatcher: offload DB accounting writes to thread pool."""
+        loop = asyncio.get_event_loop()
+        loop.run_in_executor(
+            _radius_executor,
+            self._handle_acct_blocking,
+            protocol, pkt, addr
+        )
+
+    def _handle_acct_blocking(self, protocol, pkt, addr):
+        """Original accounting logic, runs in thread pool."""
         try:
-            # for attr in pkt.keys():
-            #     log.error("%s: %s" % (attr, pkt[attr]))
             ts = int(time.time())
-            dev_ip=pkt['NAS-IP-Address'][0]
-            dev=db_device.query_device_by_ip(dev_ip)
-            type=pkt['Acct-Status-Type'][0]
-            user=pkt['User-Name'][0]
-            userip=pkt['Calling-Station-Id'][0]
-            sessionid=pkt['Acct-Session-Id'][0]
+            dev_ip = pkt['NAS-IP-Address'][0]
+            dev = db_device.query_device_by_ip(dev_ip)
+            type = pkt['Acct-Status-Type'][0]
+            user = pkt['User-Name'][0]
+            userip = pkt['Calling-Station-Id'][0]
+            sessionid = pkt['Acct-Session-Id'][0]
             # Dedup: drop retransmitted accounting packets
             acct_key = ('acct', sessionid, type)
             if self._is_duplicate(acct_key):
@@ -263,39 +301,32 @@ class RadServer(ServerAsync):
                 return
             if type == 'Start':
                 log.info("User %s logged in from %s" % (user, userip))
-                # Check if this user authenticated via proxy
                 proxy_key = (user, dev_ip)
                 acct_by = None
                 if proxy_key in self._proxy_users:
-                    if ts - self._proxy_users[proxy_key] < 30:  # within 30s of proxy auth
+                    if ts - self._proxy_users[proxy_key] < 30:
                         acct_by = 'MW-proxy'
                     del self._proxy_users[proxy_key]
-                    
+
                 if acct_by == 'MW-proxy':
-                    # Record the session ID so we can ignore the 'Stop' packet too
                     self._proxy_sessions[sessionid] = ts
-                    # Cleanup old sessions
                     self._proxy_sessions = {k: v for k, v in self._proxy_sessions.items() if ts - v < 86400}
                 else:
-                    db_AA.Auth.add_log(dev.id, 'loggedin', user , userip , acct_by,timestamp=ts,sessionid=sessionid)
+                    db_AA.Auth.add_log(dev.id, 'loggedin', user, userip, acct_by, timestamp=ts, sessionid=sessionid)
             elif type == 'Stop':
                 log.info("User %s logged out from %s" % (user, userip))
-                
                 is_proxy_session = False
                 if sessionid in self._proxy_sessions:
                     is_proxy_session = True
                     del self._proxy_sessions[sessionid]
-                    
                 if not is_proxy_session:
-                    db_AA.Auth.add_log(dev.id, 'loggedout', user , userip , None,timestamp=ts,sessionid=sessionid)
+                    db_AA.Auth.add_log(dev.id, 'loggedout', user, userip, None, timestamp=ts, sessionid=sessionid)
         except Exception as e:
             log.error("Error in accounting: ")
             log.error(e)
             log.error("Received an accounting request")
             log.error("Attributes: ")
             log.error(pkt.keys())
-        # for attr in pkt.keys():
-        #     log.error("%s: %s" % (attr, pkt[attr]))
         reply = self.CreateReplyPacket(pkt)
         protocol.send_response(reply, addr)
 

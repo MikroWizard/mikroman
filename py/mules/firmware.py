@@ -9,8 +9,10 @@ import time
 import concurrent.futures
 from libs import util, firm_lib
 from libs.db import db_tasks, db_device
+import config
 import logging
 import queue
+import os
 
 log = logging.getLogger("Firmware")
 
@@ -21,7 +23,7 @@ except ImportError:
     ISPRO = False
 
 # Configuration
-MAX_CONCURRENT_THREADS = 40
+MAX_CONCURRENT_THREADS = getattr(config, "FIRMWARE_CONCURRENCY", 40)
 
 def process_firmware_updates(devices):
     """Process firmware updates using thread pool"""
@@ -59,7 +61,8 @@ def process_routerboot_upgrades(devices):
 def updater():
     task = db_tasks.firmware_service_status()
     if not task.status:
-        log.info("Firmware updater started")
+        if os.getenv("DEV_MODE") == "true":
+            log.info("Firmware updater started")
         task.status = 1
         task.save()
         try:

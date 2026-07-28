@@ -9,7 +9,7 @@ import asyncio
 import time
 import logging
 import re
-from threading import Lock
+import os
 
 from libs.db import db_device, db_AA, db_events, db_sysconfig
 from libs import util
@@ -23,90 +23,79 @@ except ImportError:
 log = logging.getLogger("SYSLOG")
 
 # Cache for devices and users to reduce DB calls
+# NOTE: asyncio event loop is single-threaded — these dicts are safe
+# to read/write from coroutines without any locking.
 device_cache = {}
 user_cache = {}
 message_cache = {}  # Deduplication cache
-cache_lock = Lock()
-CACHE_TTL = 300  # 5 minutes for devices
-USER_CACHE_TTL = 30  # 30 seconds for users (frequent changes)
-MESSAGE_DEDUP_TTL = 5  # 5 seconds for message deduplication
+CACHE_TTL = 300          # 5 minutes for devices
+USER_CACHE_TTL = 30      # 30 seconds for users (frequent role/perm changes)
+MESSAGE_DEDUP_TTL = 5   # 5 seconds for message deduplication
 last_cleanup = 0
 CLEANUP_INTERVAL = 600  # 10 minutes
 
 class SyslogUDPProtocol(asyncio.DatagramProtocol):
     fixing_devices = set()  # Track devices currently being re-configured
     @staticmethod
-    def get_cached_device(ip):
-        """Get device from cache or database"""
-        with cache_lock:
-            now = time.time()
-            if ip in device_cache:
-                dev, timestamp = device_cache[ip]
-                if now - timestamp < CACHE_TTL:
-                    return dev
-            
-            # Cache miss or expired
-            dev = db_device.query_device_by_ip(ip)
-            if dev:
-                device_cache[ip] = (dev, now)
-            return dev
-    
+    async def get_cached_device(ip):
+        """Get device from cache or database — awaits DB lookup so event loop stays free."""
+        now = time.time()
+        if ip in device_cache:
+            dev, timestamp = device_cache[ip]
+            if now - timestamp < CACHE_TTL:
+                return dev
+        # Cache miss or expired — run blocking DB query in thread pool
+        dev = await asyncio.to_thread(db_device.query_device_by_ip, ip)
+        if dev:
+            device_cache[ip] = (dev, now)
+        return dev
+
     @staticmethod
-    def get_cached_users(dev_id, opts):
-        """Get users from cache or API"""
-        with cache_lock:
-            now = time.time()
-            if dev_id in user_cache:
-                users, timestamp = user_cache[dev_id]
-                if now - timestamp < USER_CACHE_TTL:
-                    return users
-            
-            # Cache miss or expired
-            users = util.get_local_users(opts)
-            if users:
-                user_cache[dev_id] = (users, now)
-            return users or []
+    async def get_cached_users(dev_id, opts):
+        """Get users from cache or router API — awaits so event loop stays free."""
+        now = time.time()
+        if dev_id in user_cache:
+            users, timestamp = user_cache[dev_id]
+            if now - timestamp < USER_CACHE_TTL:
+                return users
+        # Cache miss — run blocking API call in thread pool
+        users = await asyncio.to_thread(util.get_local_users, opts)
+        if users:
+            user_cache[dev_id] = (users, now)
+        return users or []
     
     @staticmethod
     def is_duplicate_message(addr, message):
-        """Check if message is duplicate within dedup window"""
-        with cache_lock:
-            now = time.time()
-            key = f"{addr[0]}:{hash(message)}"
-            
-            if key in message_cache:
-                last_seen = message_cache[key]
-                if now - last_seen < MESSAGE_DEDUP_TTL:
-                    return True
-            
-            message_cache[key] = now
-            return False
-    
+        """Check if message is duplicate within dedup window.
+        Safe without a lock — asyncio event loop is single-threaded."""
+        now = time.time()
+        key = f"{addr[0]}:{hash(message)}"
+        if key in message_cache:
+            last_seen = message_cache[key]
+            if now - last_seen < MESSAGE_DEDUP_TTL:
+                return True
+        message_cache[key] = now
+        return False
+
     @staticmethod
     def cleanup_cache_if_needed():
-        """Non-blocking cache cleanup with minimal lock time"""
+        """Periodic cache cleanup — no lock needed (single-threaded event loop)."""
         global last_cleanup
         now = time.time()
-        
-        # Only attempt cleanup every 10 minutes and if we can get lock immediately
-        if now - last_cleanup > CLEANUP_INTERVAL and cache_lock.acquire(blocking=False):
-            try:
-                last_cleanup = now
-                # Quick cleanup - build new dicts instead of iterating and deleting
-                device_cutoff = now - CACHE_TTL
-                user_cutoff = now - USER_CACHE_TTL
-                message_cutoff = now - MESSAGE_DEDUP_TTL
-                new_device_cache = {ip: (dev, ts) for ip, (dev, ts) in device_cache.items() if ts > device_cutoff}
-                new_user_cache = {dev_id: (users, ts) for dev_id, (users, ts) in user_cache.items() if ts > user_cutoff}
-                new_message_cache = {key: ts for key, ts in message_cache.items() if ts > message_cutoff}
-                device_cache.clear()
-                device_cache.update(new_device_cache)
-                user_cache.clear()
-                user_cache.update(new_user_cache)
-                message_cache.clear()
-                message_cache.update(new_message_cache)
-            finally:
-                cache_lock.release()
+        if now - last_cleanup > CLEANUP_INTERVAL:
+            last_cleanup = now
+            device_cutoff = now - CACHE_TTL
+            user_cutoff = now - USER_CACHE_TTL
+            message_cutoff = now - MESSAGE_DEDUP_TTL
+            for ip in list(device_cache.keys()):
+                if device_cache[ip][1] <= device_cutoff:
+                    del device_cache[ip]
+            for dev_id in list(user_cache.keys()):
+                if user_cache[dev_id][1] <= user_cutoff:
+                    del user_cache[dev_id]
+            for key in list(message_cache.keys()):
+                if message_cache[key] <= message_cutoff:
+                    del message_cache[key]
     # Pre-compiled regex patterns for better performance
     DEVICE_ID_REGEX = re.compile(r'(.*),?(info.*|warning|critical|error) mikrowizard(\d+):.*')
     LOGIN_REGEX = re.compile(r"user (.*) logged (in|out) from (..*)via.(.*)")
@@ -174,39 +163,40 @@ class SyslogUDPProtocol(asyncio.DatagramProtocol):
     async def handle_log(self, data, addr):
         try:
             message = data.strip().decode('utf-8', errors='ignore')
-            
+
             # Check for duplicate messages
             if self.is_duplicate_message(addr, message):
                 return
-                
-            log.warning(f"Received syslog message from {addr[0]}: {message}")
+
+            if os.getenv("DEV_MODE") == "true":
+                log.warning(f"Received syslog message from {addr[0]}: {message}")
             ts = int(time.time())
-            
+
             # Periodic non-blocking cache cleanup
             self.cleanup_cache_if_needed()
-            
-            # Use cached device lookup
-            dev = self.get_cached_device(addr[0])
+
+            # Await async cache lookup (DB call runs in thread pool on cache miss)
+            dev = await self.get_cached_device(addr[0])
             if not dev:
                 return
-                
+
             info = self.safe_extract_info(self.DEVICE_ID_REGEX, message, 3)
             if not info:
                 return
-                
+
             try:
                 device_id = int(info[2])
                 if dev.id != device_id:
                     if dev.id not in self.fixing_devices:
                         log.error(f"Device id mismatch for ip: {addr[0]} (DB ID: {dev.id}, Syslog ID: {device_id}). Triggering fix...")
-                        force_syslog = db_sysconfig.get_sysconfig('force_syslog') == "True"
-                        if force_syslog:
+                        force_syslog = await asyncio.to_thread(db_sysconfig.get_sysconfig, 'force_syslog')
+                        if force_syslog == "True":
                             asyncio.create_task(self._fix_device_syslog(dev))
                     return
             except (ValueError, IndexError) as e:
                 log.error(f"Invalid device ID in message: {e}")
                 return
-                
+
             # Use cached user lookup only when needed
             opts = util.build_api_options(dev)
             users = None  # Lazy load users only when needed
@@ -214,26 +204,34 @@ class SyslogUDPProtocol(asyncio.DatagramProtocol):
             log.error(f"Error in handle_log: {e}")
             return
             
-        # Process custom regex engine if PRO is enabled.
         if ISPRO:
-            syslog_regex_pro.process_custom_syslog_regex(dev, message)
-            
+            # Wrap blocking pro regex engine in thread pool
+            await asyncio.to_thread(syslog_regex_pro.process_custom_syslog_regex, dev, message)
+
         if 'mikrowizard' in message and 'via api' not in message:
             if 'system,info,account' in message:
                 # Delay processing by 1 second to avoid race condition with RADIUS accounting inserts.
-                # Both events arrive simultaneously; allowing RADIUS to insert first ensures we can merge our connection details.
                 await asyncio.sleep(1)
-                
+
                 login_info = self.safe_extract_info(self.LOGIN_REGEX, message, 4)
                 if login_info:
                     try:
                         if users is None:
-                            users = self.get_cached_users(dev.id, opts)
+                            # Await async user lookup
+                            users = await self.get_cached_users(dev.id, opts)
                         msg = 'local' if login_info[0] in users else 'radius'
                         if 'logged in' in message and 'via api' not in message:
-                            db_AA.Auth.add_log(dev.id, 'loggedin', login_info[0], login_info[2], login_info[3], timestamp=ts, message=msg)
+                            await asyncio.to_thread(
+                                db_AA.Auth.add_log, dev.id, 'loggedin',
+                                login_info[0], login_info[2], login_info[3],
+                                timestamp=ts, message=msg
+                            )
                         elif 'logged out' in message and login_info[0] in users:
-                            db_AA.Auth.add_log(dev.id, 'loggedout', login_info[0], login_info[2], login_info[3], timestamp=ts, message=msg)
+                            await asyncio.to_thread(
+                                db_AA.Auth.add_log, dev.id, 'loggedout',
+                                login_info[0], login_info[2], login_info[3],
+                                timestamp=ts, message=msg
+                            )
                     except Exception as e:
                         log.error(f"Error processing login: {e}")
                         log.error(message)
@@ -242,45 +240,78 @@ class SyslogUDPProtocol(asyncio.DatagramProtocol):
                     failure_info = self.safe_extract_info(self.LOGIN_FAILURE_REGEX, message, 3)
                     if failure_info:
                         if users is None:
-                            users = self.get_cached_users(dev.id, opts)
+                            users = await self.get_cached_users(dev.id, opts)
                         msg = 'local' if failure_info[0] in users else 'radius'
-                        db_AA.Auth.add_log(dev.id, 'failed', failure_info[0], failure_info[1], failure_info[2], timestamp=ts, message=msg)
+                        await asyncio.to_thread(
+                            db_AA.Auth.add_log, dev.id, 'failed',
+                            failure_info[0], failure_info[1], failure_info[2],
+                            timestamp=ts, message=msg
+                        )
                 elif "rebooted" in message:
                     reboot_info = self.safe_extract_info(self.REBOOT_REGEX, message, 1)
                     if reboot_info:
-                        db_events.state_event(dev.id, "syslog", "Unexpected Reboot", "Critical", 1, reboot_info[0])
-                    
+                        await asyncio.to_thread(
+                            db_events.state_event, dev.id, "syslog",
+                            "Unexpected Reboot", "Critical", 1, reboot_info[0]
+                        )
+
             elif 'system,info mikrowizard' in message:
                 if ISPRO:
-                    utilpro.do_pro("syslog", False, dev, message)
-                    
+                    await asyncio.to_thread(utilpro.do_pro, "syslog", False, dev, message)
+
                 system_info = self.safe_extract_info(self.SYSTEM_INFO_REGEX, message, 6)
                 if system_info:
                     address = system_info[4].split('/')
                     ctype = self._determine_connection_type(system_info[2], address)
-                    db_AA.Account.add_log(dev.id, system_info[0], system_info[1], system_info[3], message, ctype, address[0], system_info[5])
+                    await asyncio.to_thread(
+                        db_AA.Account.add_log, dev.id, system_info[0],
+                        system_info[1], system_info[3], message, ctype,
+                        address[0], system_info[5]
+                    )
                 else:
                     bugged_info = self.safe_extract_info(self.BUGGED_REGEX, message, 3)
                     if bugged_info:
-                        db_AA.Account.add_log(dev.id, bugged_info[0], bugged_info[1], "Unknown (Mikrotik Bug)", message, config=bugged_info[2])
+                        await asyncio.to_thread(
+                            db_AA.Account.add_log, dev.id, bugged_info[0],
+                            bugged_info[1], "Unknown (Mikrotik Bug)", message,
+                            config=bugged_info[2]
+                        )
                     elif "rebooted" in message:
-                        db_events.state_event(dev.id, "syslog", "Router Rebooted", "info", 1, info[0])
+                        await asyncio.to_thread(
+                            db_events.state_event, dev.id, "syslog",
+                            "Router Rebooted", "info", 1, info[0]
+                        )
                     elif "resetting system configuration" in message:
-                        db_events.state_event(dev.id, "syslog", "Router reset", "info", 1, info[0])
+                        await asyncio.to_thread(
+                            db_events.state_event, dev.id, "syslog",
+                            "Router reset", "info", 1, info[0]
+                        )
                     else:
                         fallback_info = self.safe_extract_info(self.FALLBACK_REGEX, message, 3)
                         if fallback_info:
-                            db_AA.Account.add_log(dev.id, fallback_info[0], fallback_info[1], fallback_info[2], message)
+                            await asyncio.to_thread(
+                                db_AA.Account.add_log, dev.id, fallback_info[0],
+                                fallback_info[1], fallback_info[2], message
+                            )
             elif 'interface,info mikrowizard' in message:
-                events = list(db_events.get_events_by_src_and_status("syslog", 0, dev.id).dicts())
+                events = await asyncio.to_thread(
+                    lambda: list(db_events.get_events_by_src_and_status("syslog", 0, dev.id).dicts())
+                )
                 if "link down" in message:
                     link_info = self.safe_extract_info(self.LINK_REGEX, message, 1)
                     if link_info:
-                        db_events.state_event(dev.id, "syslog", f"Link Down: {link_info[0]}", "Warning", 0, f"Link is down for {link_info[0]}")
+                        await asyncio.to_thread(
+                            db_events.state_event, dev.id, "syslog",
+                            f"Link Down: {link_info[0]}", "Warning", 0,
+                            f"Link is down for {link_info[0]}"
+                        )
                 elif "link up" in message:
                     link_info = self.safe_extract_info(self.LINK_REGEX, message, 1)
                     if link_info:
-                        util.check_or_fix_event(events, 'state', f"Link Down: {link_info[0]}")
+                        await asyncio.to_thread(
+                            util.check_or_fix_event, events, 'state',
+                            f"Link Down: {link_info[0]}"
+                        )
             elif any(term in message for term in ["dhcp,info", "dhcp,critical", "dhcp,warning", "dhcp,error"]):
                 client_type = 'client' if " dhcp-client on" in message else 'server'
                 
@@ -321,18 +352,23 @@ class SyslogUDPProtocol(asyncio.DatagramProtocol):
                         detail = "dhcp client event"
 
                 # Store the event
-                db_events.state_event(dev.id, "syslog", detail, level, status, dhcp_info[0])
+                await asyncio.to_thread(
+                    db_events.state_event, dev.id, "syslog", detail, level, status, dhcp_info[0]
+                )
             elif "wireless,info mikrowizard" in message:
                 if ISPRO:
-                    utilpro.wireless_syslog_event(dev, message)
+                    await asyncio.to_thread(utilpro.wireless_syslog_event, dev, message)
                 else:
                     wireless_info = self.safe_extract_info(self.WIRELESS_REGEX, message, 3)
                     if wireless_info:
                         strength = wireless_info[4] if len(wireless_info) > 4 else ""
-                        db_events.state_event(dev.id, "syslog", "wireless client", "info", 1, 
-                                            f"{wireless_info[0]} {wireless_info[1]} {wireless_info[2]} {wireless_info[3]} {strength}")
+                        await asyncio.to_thread(
+                            db_events.state_event, dev.id, "syslog", "wireless client", "info", 1,
+                            f"{wireless_info[0]} {wireless_info[1]} {wireless_info[2]} {wireless_info[3]} {strength}"
+                        )
             else:
-                log.error(message)
+                if os.getenv("DEV_MODE") == "true":
+                    log.error(message)
 
     def _determine_connection_type(self, connection_info, address):
         """Determine connection type from syslog info"""

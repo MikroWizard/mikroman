@@ -205,6 +205,8 @@ def main():
         log.info("Checking for updates at {} with params: {}".format(url, params))
         # send post request to server mikrowizard.com with params in json
         try:
+            if os.getenv("DEV_MODE") == "true":
+                log.info(f"[DEV_MODE] Params: {params}")
             response = requests.post(url, json=params, timeout=30)
             if response.status_code == 200:
                 res = response.json()
@@ -227,6 +229,7 @@ def main():
             }
             log.info("Update available! Package: {}, SHA256: {}".format(res['filename'], res['sha256']))
         else:
+            log.error("res is {}".format(res))
             log.info("No update available or invalid response format from server.")
             time.sleep(sleep_time)
             continue

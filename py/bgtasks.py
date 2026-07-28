@@ -8,6 +8,9 @@
 from uwsgidecorators import spool
 from playhouse.shortcuts import model_to_dict
 from libs import util,firm_lib
+from libs import compat_runner
+from libs import config_runner as cfg_runner
+import config
 import time
 from libs.db import db_tasks,db_device,db_events,db_user_group_perm
 from threading import Thread
@@ -29,13 +32,18 @@ except ImportError:
     ISPRO=False
     pass
 
+try:
+    from libs.db.db_pam import DeviceConnections
+except ImportError:
+    pass
+
 sensor_pile = queue.LifoQueue()
 other_sensor_pile = queue.LifoQueue()
 
 # Constants
-MAX_CONCURRENT_THREADS = 10
+MAX_CONCURRENT_THREADS = getattr(config, "MAX_CONCURRENT_THREADS", 10)
 CANCEL_CHECK_INTERVAL = 10
-SOCKET_TIMEOUT = 0.2
+SOCKET_TIMEOUT = getattr(config, "SOCKET_SCAN_TIMEOUT", 0.2)
 
 import logging
 log = logging.getLogger("bgtasks")
@@ -205,7 +213,7 @@ def backup_devices(*args, **kwargs):
                     q = queue.Queue()
                     if devices:
                         with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_THREADS, len(devices))) as executor:
-                            futures = [executor.submit(util.backup_routers, dev, q) for dev in devices]
+                            futures = [executor.submit(compat_runner.backup_routers, dev, q) for dev in devices]
                             for future in futures:
                                 future.result()
                     res=[]
@@ -578,8 +586,11 @@ def exec_snipet(*args, **kwargs):
                     eligible_devs.append((dev, snipet_code))
                 
                 if eligible_devs:
+                    def _snipet_worker(dev, code, q):
+                        with database.connection_context():
+                            compat_runner.run_snippets(dev, code, q)
                     with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_THREADS, len(eligible_devs))) as executor:
-                        futures = [executor.submit(util.run_snippets, dev, code, q) for dev, code in eligible_devs]
+                        futures = [executor.submit(_snipet_worker, dev, code, q) for dev, code in eligible_devs]
                         for future in futures:
                             future.result()
                 res=[]
@@ -598,6 +609,55 @@ def exec_snipet(*args, **kwargs):
             task.save()
             return False
     task.status=0
+    task.save()
+    return False
+
+@spool(pass_arguments=True)
+def exec_multi_brand(*args, **kwargs):
+    task = db_tasks.exec_multi_brand_status()
+    if task.action == "cancel":
+        cancel_task("Multi-Brand Exec", task)
+        return False
+    if not task.status:
+        task.status = 1
+        task.save()
+        try:
+            now = datetime.datetime.now()
+            devices = kwargs.get("devices", [])
+            device_ids = kwargs.get("device_ids", [])
+            if not device_ids and devices:
+                device_ids = [d.id for d in devices]
+            if not device_ids:
+                task.status = 0
+                task.save()
+                return False
+            user_task_id = kwargs.get("user_task_id")
+            job_config = {
+                "device_ids": device_ids,
+                "command_key": kwargs.get("command_key"),
+                "custom_command": kwargs.get("custom_command"),
+                "snippet_id": kwargs.get("snippet_id"),
+                "snippet_content": kwargs.get("snippet_content"),
+                "is_config_mode": kwargs.get("is_config_mode", False),
+                "user_task_id": user_task_id,
+                "max_workers": MAX_CONCURRENT_THREADS,
+            }
+            results = cfg_runner.run_bulk_job(job_config)
+            try:
+                db_tasks.add_task_result(
+                    "multi_brand_exec",
+                    json.dumps(results),
+                    json.dumps({"device_ids": device_ids, "user_task_id": user_task_id}, default=serialize_datetime),
+                    user_task_id,
+                )
+            except Exception as e:
+                log.error("exec_multi_brand add_task_result failed: %s", e)
+        except Exception as e:
+            log.error("exec_multi_brand: %s", e)
+            task.status = 0
+            task.save()
+            return False
+    task.status = 0
     task.save()
     return False
 
@@ -873,6 +933,7 @@ def bulk_add_devices(*args, **kwargs):
                                                                     Devices.details:EXCLUDED.details,
                                                                     Devices.ssl:EXCLUDED.ssl,
                                                                     Devices.port:EXCLUDED.port}).execute()
+                                                                    
                 except Exception as e:
                     if "ON CONFLICT DO UPDATE command cannot affect row a second time" in str(e):
                         log.warning("Bulk Add: Duplicate MACs in same batch. Retrying with deduplication...")
@@ -885,6 +946,29 @@ def bulk_add_devices(*args, **kwargs):
                                                                     Devices.details:EXCLUDED.details,
                                                                     Devices.ssl:EXCLUDED.ssl,
                                                                     Devices.port:EXCLUDED.port}).execute()
+                                                                    
+                    # --- Task 18.3 & 18.1: Create default DeviceConnections for auto-discovered devices ---
+                    try:
+                        macs = [d['mac'] for d in mikrotiks]
+                        inserted_devices = list(Devices.select().where(Devices.mac.in_(macs)))
+                        now = datetime.datetime.now(datetime.timezone.utc)
+                        for dev in inserted_devices:
+                            m_data = next((m for m in mikrotiks if m['mac'] == dev.mac), None)
+                            if not m_data: continue
+                            api_port = m_data.get('port') or 8728
+                            
+                            # API connection (MicroTik default)
+                            if not DeviceConnections.select().where(DeviceConnections.device_id == dev.id, DeviceConnections.protocol == 'api').exists():
+                                DeviceConnections.create(device_id=dev.id, protocol='api', port=api_port, auth_mode='credential', is_default=True, created=now, modified=now)
+                            # Default SSH
+                            if not DeviceConnections.select().where(DeviceConnections.device_id == dev.id, DeviceConnections.protocol == 'ssh').exists():
+                                DeviceConnections.create(device_id=dev.id, protocol='ssh', port=22, auth_mode='credential', is_default=False, created=now, modified=now)
+                            # Default WebFig
+                            if not DeviceConnections.select().where(DeviceConnections.device_id == dev.id, DeviceConnections.protocol == 'webfig').exists():
+                                DeviceConnections.create(device_id=dev.id, protocol='webfig', port=80, auth_mode='credential', is_default=False, created=now, modified=now)
+                    except Exception as e:
+                        log.error(f"Error creating DeviceConnections for bulk added devices: {e}")
+                    # --------------------------------------------------------------------------------------
                     else:
                         raise e
         except Exception as e:
