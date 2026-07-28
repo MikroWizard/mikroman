@@ -97,6 +97,9 @@ def get_default_user_pass():
 
 def get_device_port(dev):
     try:
+        conn = get_device_connection(dev.id, 'api')
+        if conn and conn.port:
+            return int(conn.port)
         return int(dev.port) if dev.port else (8729 if getattr(dev, 'ssl', False) else 8728)
     except:
         return 8729 if getattr(dev, 'ssl', False) else 8728
@@ -106,7 +109,8 @@ def build_api_options(dev):
     username=decrypt_data(dev.user_name ) or default_user
     password=decrypt_data(dev.password ) or default_pass
     port=get_device_port(dev)
-    
+    ssl = bool(getattr(dev, 'ssl', False))
+
     # Try fetching from new PAM structure (Task 18)
     try:
         cred = CredentialService.get_credential_for_connection(dev.id, 'api')
@@ -114,10 +118,12 @@ def build_api_options(dev):
             username = cred['username']
             if 'password' in cred:
                 password = cred['password']
-                
+
         conn = get_device_connection(dev.id, 'api')
         if conn and conn.port:
             port = conn.port
+        if conn and hasattr(conn, 'ssl'):
+            ssl = bool(conn.ssl)
     except Exception:
         pass
 
@@ -128,7 +134,7 @@ def build_api_options(dev):
        'password':password,
        'routeros_version':'auto',
        'port':port,
-       'ssl':bool(getattr(dev, 'ssl', False)),
+        'ssl':ssl,
        'ssl_cafile': None,
        'ssl_capath': None,
        'ssl_force_no_certificate': False,

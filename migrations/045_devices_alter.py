@@ -89,14 +89,17 @@ def migrate(migrator, database, fake=False, **kwargs):
 
     # ------------------------------------------------------------------
     # Default DeviceConnections for existing MikroTik devices (queued via migrator).
+    # Add ssl column first, then backfill from devices.ssl.
     # ------------------------------------------------------------------
+    migrator.sql("ALTER TABLE device_connections ADD COLUMN IF NOT EXISTS ssl BOOLEAN NOT NULL DEFAULT FALSE")
+
     migrator.sql("""
         INSERT INTO device_connections (device_id, protocol, port, credential_id,
-                                        auth_mode, is_default, connection_type, created, modified)
+                                        auth_mode, is_default, connection_type, ssl, created, modified)
         SELECT d.id, 'api',
                COALESCE(NULLIF(d.port, '')::int, CASE WHEN d.ssl THEN 8729 ELSE 8728 END),
                c.id,
-               'credential', TRUE, 'device', NOW(), NOW()
+               'credential', TRUE, 'device', COALESCE(d.ssl, FALSE), NOW(), NOW()
           FROM devices d
           LEFT JOIN credentials c ON c.device_id = d.id AND c.scope = 'device'
          WHERE d.device_type = 'mikrotik'
@@ -106,11 +109,11 @@ def migrate(migrator, database, fake=False, **kwargs):
 
     migrator.sql("""
         INSERT INTO device_connections (device_id, protocol, port, credential_id,
-                                        auth_mode, is_default, connection_type, created, modified)
+                                        auth_mode, is_default, connection_type, ssl, created, modified)
         SELECT d.id, 'ssh',
                22,
                c.id,
-               'credential', FALSE, 'device', NOW(), NOW()
+               'credential', FALSE, 'device', FALSE, NOW(), NOW()
           FROM devices d
           LEFT JOIN credentials c ON c.device_id = d.id AND c.scope = 'device'
          WHERE d.device_type = 'mikrotik'
@@ -131,3 +134,4 @@ def rollback(migrator, database, fake=False, **kwargs):
     migrator.sql("ALTER TABLE devices DROP COLUMN IF EXISTS template_id")
     migrator.sql("ALTER TABLE devices DROP COLUMN IF EXISTS device_model")
     migrator.sql("ALTER TABLE devices DROP COLUMN IF EXISTS device_type")
+    migrator.sql("ALTER TABLE device_connections DROP COLUMN IF EXISTS ssl")

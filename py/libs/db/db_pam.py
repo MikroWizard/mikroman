@@ -273,7 +273,9 @@ class DeviceConnections(BaseModel):
     )
     auth_mode = TextField(default="credential")  # 'credential', 'prompt'
     is_default = BooleanField(default=False)
+    ssl = BooleanField(default=False)
     agent_modes = BinaryJSONField(null=True)  # Per-device override for agent modes
+    connection_type = TextField(default="device")  # 'device', 'override', 'shared', 'user'
     notes = TextField(null=True)
     created = DateTimeField()
     modified = DateTimeField()
