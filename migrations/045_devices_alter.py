@@ -94,7 +94,7 @@ def migrate(migrator, database, fake=False, **kwargs):
         INSERT INTO device_connections (device_id, protocol, port, credential_id,
                                         auth_mode, is_default, connection_type, created, modified)
         SELECT d.id, 'api',
-               COALESCE(NULLIF(d.port, '')::int, 8728),
+               COALESCE(NULLIF(d.port, '')::int, CASE WHEN d.ssl THEN 8729 ELSE 8728 END),
                c.id,
                'credential', TRUE, 'device', NOW(), NOW()
           FROM devices d
