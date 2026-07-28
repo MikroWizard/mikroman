@@ -1,35 +1,32 @@
 # 047_bigint_logs.py
-# Alters free log tables to use BIGINT for their primary key sequences.
+# Alters high-volume tables to use BIGINT primary keys with matching sequences.
+# Prevents INT32 overflow on deployments with many devices and heavy log volumes.
 
 from peewee import *
 import logging
 
 log = logging.getLogger('peewee_migrate')
 
+TABLES = [
+    'events',      # device alerts/events
+    'auth',        # authentication logs
+    'syslogs',     # syslog events (highest volume)
+    'user_tasks',  # task execution history
+]
+
 def migrate(migrator, database, fake=False, **kwargs):
-    tables_to_upgrade = [
-        'events',
-        'auth',
-        'radacct'
-    ]
-    
-    for table in tables_to_upgrade:
+    for table in TABLES:
         try:
-            with database.atomic():
-                database.execute_sql(f'ALTER TABLE {table} ALTER COLUMN id TYPE BIGINT;')
-            log.info(f"Successfully altered {table}.id to BIGINT")
+            database.execute_sql(f'ALTER TABLE {table} ALTER COLUMN id TYPE BIGINT;')
+            database.execute_sql(f'ALTER SEQUENCE IF EXISTS {table}_id_seq AS BIGINT;')
+            log.info(f"Upgraded {table}.id to BIGINT")
         except Exception as e:
-            log.warning(f"Could not alter {table}.id to BIGINT (maybe it doesn't exist or is already BIGINT?): {e}")
+            log.warning(f"Could not upgrade {table}.id (may not exist or already BIGINT): {e}")
 
 def rollback(migrator, database, fake=False, **kwargs):
-    tables_to_upgrade = [
-        'events',
-        'auth',
-        'radacct'
-    ]
-    for table in tables_to_upgrade:
+    for table in TABLES:
         try:
-            with database.atomic():
-                database.execute_sql(f'ALTER TABLE {table} ALTER COLUMN id TYPE INT;')
+            database.execute_sql(f'ALTER TABLE {table} ALTER COLUMN id TYPE INT;')
+            database.execute_sql(f'ALTER SEQUENCE IF EXISTS {table}_id_seq AS INT;')
         except Exception:
             pass
