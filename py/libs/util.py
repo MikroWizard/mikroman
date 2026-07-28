@@ -32,6 +32,17 @@ try:
 except ImportError:
     ISPRO=False
     pass
+
+try:
+    from libs.credential_service import CredentialService
+    from libs.db.db_pam import get_device_connection
+    from libs.template_service import TemplateService
+    from libs.terminal_gateway import initiate_session
+except ImportError:
+    pass
+
+import urllib.request, urllib.parse, urllib.error
+
 # --------------------------------------------------------------------------
 # date related common methods
 
@@ -95,6 +106,21 @@ def build_api_options(dev):
     username=decrypt_data(dev.user_name ) or default_user
     password=decrypt_data(dev.password ) or default_pass
     port=get_device_port(dev)
+    
+    # Try fetching from new PAM structure (Task 18)
+    try:
+        cred = CredentialService.get_credential_for_connection(dev.id, 'api')
+        if cred and cred.get('username'):
+            username = cred['username']
+            if 'password' in cred:
+                password = cred['password']
+                
+        conn = get_device_connection(dev.id, 'api')
+        if conn and conn.port:
+            port = conn.port
+    except Exception:
+        pass
+
     options={
        'host':dev.ip,
        'hostname': None,
@@ -629,7 +655,8 @@ def configure_radius(router,ip,secret):
             except Exception as e:
                 log.error(f"Failed to remove RADIUS entries: {e}")
         else:
-            log.info(f"No redundant RADIUS entries found for {ip}")
+            if os.getenv("DEV_MODE") == "true":
+                log.info(f"No redundant RADIUS entries found for {ip}")
 
         # Now manage the primary entry
         if primary_id:
@@ -757,19 +784,74 @@ def check_update(options,router=False):
         log.error(e)
         return False,False,False,False
 
-def log_alert(type,dev,massage):
-    log.error("Alert: {} {} Device: {} ".format(type,massage,dev.ip))
+def log_alert(type, dev, massage):
+    if isinstance(dev, int):
+        dev_ip = "Device {}".format(dev)
+    else:
+        dev_ip = getattr(dev, "ip", str(dev))
+    log.error("Alert: {} {} Device: {} ".format(type, massage, dev_ip))
 
 def backup_routers(dev,q):
     status=backup_router(dev)
     q.put({"id": dev.id,"devip":dev.ip,"state":status})
 
-def run_snippets(dev, snippet,q):
-    result=run_snippet(dev, snippet)
+def run_snippets(dev, snippet,q, template_key=None):
+    result=run_snippet(dev, snippet, template_key=template_key)
     q.put({"devid": dev.id,"devip": dev.ip,"devname": dev.name, "status":True if result else False , "result":result if result else 'Exec Failed'})
     return result
 
-def run_snippet(dev, snippet):
+def run_snippet(dev, snippet, template_key=None):
+    # Task 19: Check if this is a Mikrotik device or uses the legacy RouterOS API path
+    is_mikrotik = not dev.device_type or dev.device_type == 'mikrotik'
+    
+    # If a template_key is provided AND it's not a Mikrotik device, route through PAM Terminal Gateway
+    if not is_mikrotik and template_key:
+        try:
+            t_dict = TemplateService.get_template_for_device(dev.id)
+            if not t_dict:
+                return f"No template found for device_type {dev.device_type}"
+                
+            command = TemplateService.resolve_command(t_dict, template_key)
+            if not command:
+                return f"Template command key '{template_key}' not found in template."
+                
+            # Execute standard string replacements like the legacy path
+            if '[mikrowizard]' in command:
+                default_ip = db_sysconfig.get_sysconfig('default_ip')
+                command = command.replace('[mikrowizard]', dev.peer_ip if dev.peer_ip else default_ip)
+                
+            # If the snippet is meant to be a script parameter rather than a standalone command, we format it here
+            if snippet and '{snippet}' in command:
+                command = command.replace('{snippet}', snippet)
+            elif snippet:
+                command = f"{command} {snippet}"
+                
+            # 2. Find connection details
+            conn = get_device_connection(dev.id, 'ssh') or get_device_connection(dev.id, 'telnet')
+            if not conn:
+                return "No SSH/Telnet connection defined for this device."
+                
+            # 3. Request execution from the gateway
+            session_id = str(uuid.uuid4())
+            callback_url = f"{config.MY_URL}/api/pam/webhook" if hasattr(config, 'MY_URL') else f"http://127.0.0.1:8000/api/pam/webhook"
+            
+            init_res = initiate_session(
+                dev.ip, conn.port, None, None, conn.protocol, session_id, callback_url,
+                template=t_dict, credential_id=conn.credential_id, device_id=dev.id,
+                connection_id=conn.id, run_command=command
+            )
+            
+            if not init_res.get('success'):
+                return f"Gateway execution failed: {init_res.get('error', 'Unknown Error')}"
+                
+            # The execution is async. Wait briefly or return the session tracking ID
+            return f"Execution spawned via PAM Terminal Gateway. Session ID: {session_id}"
+            
+        except Exception as e:
+            log.error(f"PAM snippet execution error: {e}")
+            return f"PAM Error: {e}"
+
+    # --- LEGACY MIKROTIK ROUTEROS API PATH ---
     port=get_device_port(dev)
     try:
         if check_port(dev.ip,port):
