@@ -41,7 +41,11 @@ def user_snippet_list():
 
     expr=""
     logs = []
-    selector=[snips.id,snips.name,snips.description,snips.content,snips.created]
+    selector=[snips.id,snips.name,snips.description,snips.content,snips.created,snips.template_command_key,snips.brand,snips.is_default,snips.is_config_mode]
+
+    brand = input.get('brand', False)
+    if brand:
+        clauses.append(snips.brand == brand)
     try:
         if len(clauses):
             expr = reduce(operator.and_, clauses)
@@ -67,6 +71,10 @@ def user_snippet_save():
     name=input.get('name', False)
     description=input.get('description', False)
     content=input.get('content', False)
+    template_command_key=input.get('template_command_key', None)
+    brand = input.get('brand', 'mikrotik')
+    is_default = input.get('is_default', False)
+    is_config_mode = input.get('is_config_mode', False)
 
     # if id is 0 then we are creating new snippet
     # else edit the snippet with provided id
@@ -74,8 +82,14 @@ def user_snippet_save():
         snippet=db_user_tasks.get_snippet_by_name(name)
         if snippet:
             return buildResponse({"result":"failed","err":"Snippet already exists"}, 200)
-        snippet=db_user_tasks.create_snippet(name,description,content)
+        snippet=db_user_tasks.create_snippet(name,description,content,template_command_key)
         if snippet:
+            snip_obj = db_user_tasks.get_snippet_by_name(name)
+            if snip_obj:
+                snip_obj.brand = brand
+                snip_obj.is_default = is_default
+                snip_obj.is_config_mode = is_config_mode
+                snip_obj.save()
             db_syslog.add_syslog_event(get_myself(), "Snippet","Create", get_ip(),get_agent(),json.dumps(input))
             return buildResponse({"result":"success"}, 200)
         else:
@@ -84,7 +98,13 @@ def user_snippet_save():
         snippet=db_user_tasks.get_snippet(id)
         if snippet:
             db_syslog.add_syslog_event(get_myself(), "Snippet","Update", get_ip(),get_agent(),json.dumps(input))
-            snippet=db_user_tasks.update_snippet(id, name, description, content)
+            snippet=db_user_tasks.update_snippet(id, name, description, content, template_command_key)
+            snip_obj = db_user_tasks.get_snippet(id)
+            if snip_obj:
+                snip_obj.brand = brand
+                snip_obj.is_default = is_default
+                snip_obj.is_config_mode = is_config_mode
+                snip_obj.save()
             return buildResponse({"result":"success"}, 200)
         else:
             return buildResponse({"result":"failed","err":"Snippet not found"}, 200)

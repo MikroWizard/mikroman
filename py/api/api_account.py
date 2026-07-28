@@ -11,11 +11,15 @@ from libs.util import ISPRO
 from libs.db import db,db_permissions,db_user_group_perm,db_groups,db_sysconfig,db_syslog
 
 import json
+import uuid
+import datetime
 from libs import webutil,account
 from libs.webutil import app, login_required, get_myself , buildResponse
 from libs.mschap3.mschap import nt_password_hash
 try:
     from libs import utilpro
+    from libs.db.db_tickets_pro import UserActivationToken_pro
+    from libs.mail_pro import send_activation_email
     ISPRO=True
 except ImportError:
     ISPRO=False
@@ -123,10 +127,6 @@ def create_user():
 
     if u.role == 'customer_inactive' and ISPRO:
         try:
-            import uuid
-            from libs.db.db_tickets_pro import UserActivationToken_pro
-            from libs.mail_pro import send_activation_email
-            import datetime
             token = str(uuid.uuid4())
             expires = datetime.datetime.now() + datetime.timedelta(hours=24)
             UserActivationToken_pro.create(user_id=u.id, token=token, type='activation', expires=expires)
@@ -302,10 +302,6 @@ def user_edit():
 
     if send_activation and u.role == 'customer_inactive' and ISPRO:
         try:
-            import uuid
-            from libs.db.db_tickets_pro import UserActivationToken_pro
-            from libs.mail_pro import send_activation_email
-            import datetime
             token = str(uuid.uuid4())
             expires = datetime.datetime.now() + datetime.timedelta(hours=24)
             UserActivationToken_pro.delete().where(UserActivationToken_pro.user_id == u.id, UserActivationToken_pro.type == 'activation').execute()
@@ -326,7 +322,7 @@ def user_edit():
 def users():
     """Search list of users. """
 
-    input = request.args or {}
+    input = request.json or {}
     page = input.get('page')
     size = input.get('size')
     search = input.get('search')

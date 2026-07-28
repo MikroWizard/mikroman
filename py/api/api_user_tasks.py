@@ -111,7 +111,7 @@ def user_tasks_create():
     if selection_type not in ["devices","groups"]:
         return buildResponse({'status': 'failed'}, 200, error="Wrong member type")
     
-    if task_type not in ["backup","snippet","firmware","sequence"]:
+    if task_type not in ["backup","snippet","firmware","sequence","config_backup","command_exec"]:
         return buildResponse({'status': 'failed'}, 200, error="Wrong task type")
     try:
         task=utasks.create(**data)
@@ -170,7 +170,7 @@ def user_tasks_edit():
     if selection_type not in ["devices","groups"]:
         return buildResponse({'status': 'failed'}, 200, error="Wrong member type")
     
-    if task_type not in ["backup","snippet","firmware","sequence"]:
+    if task_type not in ["backup","snippet","firmware","sequence","config_backup","command_exec"]:
         return buildResponse({'status': 'failed'}, 200, error="Wrong task type")
     
     # check task exist and valid

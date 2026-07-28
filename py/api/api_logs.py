@@ -30,6 +30,25 @@ except ImportError:
 
 log = logging.getLogger("logs")
 
+import time
+import config
+import redis
+
+def _get_redis_client():
+    try:
+        if hasattr(config, 'SESSION_REDIS') and config.SESSION_REDIS:
+            return config.SESSION_REDIS
+    except Exception:
+        pass
+    try:
+        return config.flask_config["SESSION_REDIS"]
+    except Exception:
+        pass
+    try:
+        return redis.from_url(f"redis://{config.redishost}")
+    except Exception:
+        return None
+
 def peewee_sql_to_str(sql):
     return (sql[0] % tuple(sql[1]))
 
@@ -47,7 +66,11 @@ def list_auth_log():
     ltype=input.get('state',False)
     server=input.get('server',False)
     by=input.get('connection_type',False)
-    auth=db_AA.Auth
+    try:
+        from libs.db.db_pro import AuthPro
+        auth = AuthPro
+    except ImportError:
+        auth = db_AA.Auth
     # build where query
     clauses = []
     if ip and ip != "":
@@ -90,17 +113,42 @@ def list_auth_log():
             clauses.append(auth.sessionid.is_null(False))
     expr=""
     devs=db_device.Devices
-    if devip and devip!="":
-        clauses.append(devs.ip.contains(devip))
-    logs = []
+
     selector=[auth.ip,auth.username,auth.started,auth.ended,auth.sessionid,auth.ltype,auth.by,auth.message,auth.created,devs.ip.alias('devip'),devs.name]
+    if hasattr(auth, 'recording_path'):
+        selector.insert(8, auth.recording_path)
     try:
+        # Auto-cleanup stale Web-Proxy sessions that expired without an explicit close signal
+        try:
+            r_client = _get_redis_client()
+            if r_client:
+                stale_webfig = list(auth.select().where(auth.by.in_(['Web-Proxy', 'proxy'])))
+                now_ts = int(time.time())
+                log.info(f"[WebFig Debug list_auth_log] Fetched {len(stale_webfig)} Web-Proxy records from Auth table")
+                for srow in stale_webfig:
+                    sid = srow.sessionid
+                    is_ended_candidate = srow.ended in (0, '0', None, '')
+                    exists_hb = r_client.exists(f"proxy_heartbeat:{sid}") if sid else False
+                    exists_sess = r_client.exists(f"proxy_session:{sid}") if sid else False
+                    log.info(f"[WebFig Debug list_auth_log] Auth id={srow.id}, sessionid={sid}, ended={srow.ended}, is_candidate={is_ended_candidate}, hb_exists={exists_hb}, sess_exists={exists_sess}")
+                    if is_ended_candidate and sid and not exists_hb:
+                        log.info(f"[WebFig Debug list_auth_log] Cleaning up stale sessionid={sid}, setting ended={now_ts}")
+                        srow.ended = now_ts
+                        srow.save()
+                        try:
+                            r_client.delete(f"proxy_session:{sid}")
+                        except Exception:
+                            pass
+        except Exception as se:
+            log.warning(f"[WebFig Debug list_auth_log] Cleanup exception: {se}")
+
         if len(clauses):
             expr = reduce(operator.and_, clauses)
             query=auth.select(*selector).join(devs).where(expr)
         else:
             query=auth.select(*selector).join(devs)
         query=query.order_by(auth.id.desc())
+
         logs=list(query.dicts())
     except Exception as e:
         return buildResponse({"status":"failed", "err":str(e)},200)
