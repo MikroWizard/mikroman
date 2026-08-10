@@ -28,19 +28,38 @@ from libs.db.db import database
 from libs.db.db_device import Devices
 from libs.db.db_pam import DeviceTemplates, DeviceConnections
 from libs.db.db_user_tasks import Snippets
-from libs.db.db_config_versions import ConfigVersions, CommandExecutionLog
+from libs.db.db_config_versions import CommandExecutionLog
 from libs.db import db_backups
 from libs import util
 import config
 
 try:
-    from libs.diff_exclusions import compile_exclusions, apply_exclusions
+    from libs.config_runner_pro import normalize_output, run_versioning
 except ImportError:
-    def compile_exclusions(canonical):
-        return {}
 
-    def apply_exclusions(text, compiled_excl, section=None):
-        return text
+    def normalize_output(raw_output, t_dict, command_key):
+        return raw_output or ""
+
+    def run_versioning(config, execution_run_id, device_id, template_id, device,
+                       command_string, raw_size, normalized, content_hash,
+                       raw_path, raw_hash, norm_path, duration_ms, skip_versioning):
+        command_key = config.get("command_key") or "show_config"
+        if command_key == "show_config":
+            try:
+                db_backups.create(
+                    dev=device,
+                    directory=os.path.join(VERSIONS_DIR, raw_path),
+                    size=raw_size,
+                )
+            except Exception as e:
+                log.warning("config_runner: legacy Backups create failed: %s", e)
+        exec_log_id = _log_execution(
+            config.get("user_task_id"), execution_run_id, device_id, template_id,
+            command_key, command_string, raw_size, content_hash, norm_path,
+            raw_hash, "ok", None, duration_ms, False, None, raw_path
+        )
+        return False, None, 0, exec_log_id
+
 from libs.device_connector import (
     connect_and_execute,
     build_prompt_re,
@@ -55,6 +74,8 @@ log = logging.getLogger("config_runner")
 
 VERSIONS_DIR = os.path.join(getattr(config, "BACKUP_DIR", "/opt/mikrowizard/backups"), "versions")
 _DEVMODE = os.environ.get("DEV_MODE") == "true"
+
+os.makedirs(VERSIONS_DIR, exist_ok=True)
 
 # ---------------------------------------------------------------------------
 # Blob store (content-addressed, atomic writes)
@@ -72,7 +93,11 @@ def store_blob(content, kind):
     if os.path.exists(abs_path):
         return rel_path
 
-    os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+    try:
+        os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+    except OSError as e:
+        log.error("Cannot create backup directory %s: %s", os.path.dirname(abs_path), e)
+        raise
     tmp_path = abs_path + ".tmp-{}-{}".format(os.getpid(), threading.get_ident())
     with open(tmp_path, "w", encoding="utf-8") as f:
         f.write(content)
@@ -344,8 +369,7 @@ def run_device_job(config):
             result["output_raw"] = raw_output
 
         # --- 8. COMPILE EXCLUSIONS + NORMALIZE ---
-        compiled_excl = compile_exclusions(t_dict.get("diff_exclusions"))
-        normalized = apply_exclusions(raw_output or "", compiled_excl, config.get("command_key"))
+        normalized = normalize_output(raw_output or "", t_dict, config.get("command_key"))
 
         if capture_output:
             result["output_normalized"] = normalized
@@ -361,102 +385,11 @@ def run_device_job(config):
         norm_path = store_blob(normalized, "norm")
 
         # --- 12. VERSION CHECK (atomic block) ---
-        is_versioned = False
-        version_id = None
-        version_num = 0
-
-        if not skip_versioning:
-            now_ = datetime.now(timezone.utc)
-            command_key = config.get("command_key") or "show_config"
-
-            try:
-                with database.atomic():
-                    latest = (ConfigVersions
-                              .select()
-                              .where(ConfigVersions.device_id == device_id,
-                                     ConfigVersions.command_key == command_key)
-                              .order_by(ConfigVersions.version_num.desc())
-                              .first())
-
-                    if latest and latest.normalized_hash == content_hash:
-                        latest.last_seen_at = now_
-                        latest.save()
-                        is_versioned = False
-                        version_id = latest.id
-                        version_num = latest.version_num
-                    else:
-                        version_num = (latest.version_num + 1) if latest else 1
-                        new_ver = ConfigVersions.create(
-                            device_id=device_id, template_id=template_id,
-                            command_key=command_key, version_num=version_num,
-                            normalized_hash=content_hash, storage_path=norm_path,
-                            size_bytes=len(normalized),
-                            previous_version_id=latest.id if latest else None,
-                            first_seen_at=now_, last_seen_at=now_,
-                        )
-                        is_versioned = True
-                        version_id = new_ver.id
-
-                    exec_log_id = _log_execution(
-                        config.get("user_task_id"), execution_run_id, device_id, template_id,
-                        command_key, command_string, raw_size, content_hash, norm_path,
-                        raw_hash, "ok", None, duration_ms, is_versioned, version_id, raw_path
-                    )
-
-                    # Legacy dual-write (§9)
-                    if is_versioned and command_key == "show_config":
-                        try:
-                            db_backups.create(
-                                dev=device,
-                                directory=os.path.join(VERSIONS_DIR, raw_path),
-                                size=raw_size,
-                            )
-                        except Exception as e:
-                            log.warning("config_runner: legacy Backups dual-write failed: %s", e)
-
-            except peewee.IntegrityError:
-                # Concurrent runner won the race — re-read
-                time.sleep(0.1)
-                latest2 = (ConfigVersions
-                           .select()
-                           .where(ConfigVersions.device_id == device_id,
-                                  ConfigVersions.command_key == command_key)
-                           .order_by(ConfigVersions.version_num.desc())
-                           .first())
-                if latest2 and latest2.normalized_hash == content_hash:
-                    is_versioned = False
-                    version_id = latest2.id
-                    version_num = latest2.version_num
-                else:
-                    # Retry once
-                    version_num = (latest2.version_num + 1) if latest2 else 1
-                    new_ver2 = ConfigVersions.create(
-                        device_id=device_id, template_id=template_id,
-                        command_key=command_key, version_num=version_num,
-                        normalized_hash=content_hash, storage_path=norm_path,
-                        size_bytes=len(normalized),
-                        previous_version_id=latest2.id if latest2 else None,
-                        first_seen_at=now_, last_seen_at=now_,
-                    )
-                    is_versioned = True
-                    version_id = new_ver2.id
-                exec_log_id = _log_execution(
-                    config.get("user_task_id"), execution_run_id, device_id, template_id,
-                    command_key, command_string, raw_size, content_hash, norm_path,
-                    raw_hash, "ok", None, duration_ms, is_versioned, version_id, raw_path
-                )
-                if is_versioned and command_key == "show_config":
-                    try:
-                        db_backups.create(dev=device, directory=os.path.join(VERSIONS_DIR, raw_path), size=raw_size)
-                    except Exception:
-                        pass
-        else:
-            command_key = config.get("command_key")
-            exec_log_id = _log_execution(
-                config.get("user_task_id"), execution_run_id, device_id, template_id,
-                command_key, command_string, raw_size, content_hash, norm_path,
-                raw_hash, "ok", None, duration_ms, False, None, raw_path
-            )
+        is_versioned, version_id, version_num, exec_log_id = run_versioning(
+            config, execution_run_id, device_id, template_id, device,
+            command_string, raw_size, normalized, content_hash,
+            raw_path, raw_hash, norm_path, duration_ms, skip_versioning,
+        )
 
         # --- 13. POST-HOOKS ---
         run_hooks(post_hooks, "post_disconnect", device, t_dict, hook_context)

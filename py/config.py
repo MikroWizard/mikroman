@@ -60,6 +60,9 @@ KEK = srvconf.get("PYSRV_KEK", "")
 TERMINAL_GATEWAY_URL = srvconf.get("PYSRV_TERMINAL_GATEWAY_URL", "http://terminal-gateway:8080")
 BACKUP_DIR = srvconf["PYSRV_BACKUP_FOLDER"]
 FIRM_DIR = srvconf["PYSRV_FIRM_FOLDER"]
+
+os.makedirs(BACKUP_DIR, exist_ok=True)
+os.makedirs(FIRM_DIR, exist_ok=True)
 IS_SQLITE = DATABASE_HOST.startswith("/")
 
 # Flask + session config
