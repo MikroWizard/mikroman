@@ -6,7 +6,7 @@
 # Author: sepehr.ha@gmail.com
 
 from peewee import *
-from libs.db.db import User,BaseModel,get_object_or_404
+from libs.db.db import User,BaseModel,get_object_or_404,get_object_or_none
 import logging
 log = logging.getLogger("db_sysconfig")
 
@@ -41,11 +41,10 @@ def get_scan_mode():
     return get_object_or_404(Sysconfig, key="scan_mode")
 
 def get_sysconfig(key):
-    try:
-        return get_object_or_404(Sysconfig, key=key).value
-    except Exception as e:
-        log.error(e)
-        return None
+    obj = get_object_or_none(Sysconfig, key=key)
+    if obj:
+        return obj.value
+    return None
 
 def get_firmware_latest():
     return get_object_or_404(Sysconfig, key="latest_version")

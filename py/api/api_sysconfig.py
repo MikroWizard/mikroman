@@ -43,8 +43,9 @@ def sysconfig_save_all():
     for k, v in input.items():
         if k in ["default_password", "default_user", "smtp_password", "ai_api_key"]:
             if v['value'] == "":
-                continue
-            v['value'] = util.crypt_data(v['value'])
+                v['value'] = ""
+            else:
+                v['value'] = util.crypt_data(v['value'])
         elif k == "update_mode":
             v['value'] = json.dumps(v['value'])
         elif k == "ai_openrouter_models":
