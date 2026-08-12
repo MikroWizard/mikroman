@@ -4,8 +4,11 @@
 import os
 import json
 import logging
+import time
 import secrets as _secrets
 import requests
+from flask import request
+from libs.webutil import app, login_required, buildResponse
 import config
 from libs.db.db_sysconfig import get_sysconfig
 from flask import request
@@ -48,22 +51,24 @@ def _proxy_request(endpoint, body=None, method="POST", timeout=5):
         ("%s/%s" % (SSL_AGENT_URL, endpoint.lstrip("/")), timeout),
     ]
 
-    for url, connect_timeout in urls:
-        try:
-            if method == "GET":
-                resp = requests.get(url, headers=headers, timeout=connect_timeout)
-            else:
-                resp = requests.post(url, json=body or {}, headers=headers, timeout=connect_timeout)
+    for attempt in range(3):
+        for url, connect_timeout in urls:
+            try:
+                if method == "GET":
+                    resp = requests.get(url, headers=headers, timeout=connect_timeout)
+                else:
+                    resp = requests.post(url, json=body or {}, headers=headers, timeout=connect_timeout)
 
-            if resp.status_code == 401:
+                if resp.status_code == 401:
+                    continue
+                return resp.json(), resp.status_code
+            except requests.exceptions.ConnectionError:
                 continue
-            return resp.json(), resp.status_code
-        except requests.exceptions.ConnectionError:
-            continue
-        except requests.exceptions.Timeout:
-            continue
-        except Exception:
-            continue
+            except requests.exceptions.Timeout:
+                continue
+            except Exception:
+                continue
+        time.sleep(1)
 
     return {"error": "ssl_agent_unreachable", "detail": "SSL agent is not running. Start ssl-agent first."}, 503
 
