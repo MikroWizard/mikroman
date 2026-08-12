@@ -2,54 +2,50 @@
 # -*- coding: utf-8 -*-
 
 import os
+import json
 import logging
-import secrets
+import secrets as _secrets
 import requests
+import config
+from libs.db.db_sysconfig import get_sysconfig
 from flask import request
 from libs.webutil import app, login_required, buildResponse
 
 log = logging.getLogger("api.ssl")
 
 SSL_AGENT_URL = "http://host.docker.internal/ssl-internal"
-TOKEN_FILE = "/conf/ssl-agent-token"
-TOKEN_FILE_HOST = "/opt/mikrowizard/ssl-agent-token"
-TOKEN_FILE_FALLBACK = "/tmp/mw-ssl-agent-token"
+
+TOKEN_KEY = "ssl_agent_token"
 
 
 def _get_token():
-    for path in [TOKEN_FILE, TOKEN_FILE_HOST, TOKEN_FILE_FALLBACK]:
-        try:
-            if os.path.exists(path):
-                with open(path, "r") as f:
-                    token = f.read().strip()
-                    if token:
-                        return token
-        except Exception:
-            pass
+    token = config.srvconf.get(TOKEN_KEY)
+    if token:
+        return token
 
-    import secrets as _secrets
     token = _secrets.token_hex(32)
-    for path in [TOKEN_FILE_HOST, TOKEN_FILE_FALLBACK, TOKEN_FILE]:
-        try:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w") as f:
-                f.write(token)
-            os.chmod(path, 0o644)
-            log.info("Generated new SSL agent token at %s", path)
-            return token
-        except Exception as e:
-            log.warning("Could not write token to %s: %s", path, e)
+    config.srvconf[TOKEN_KEY] = token
+
+    conf_path = os.environ["PYSRV_CONFIG_PATH"]
+    try:
+        with open(conf_path, "r") as f:
+            disk_conf = json.load(f)
+        disk_conf[TOKEN_KEY] = token
+        with open(conf_path, "w") as f:
+            json.dump(disk_conf, f, indent=2)
+        log.info("Persisted ssl_agent_token to server-conf.json")
+    except Exception as e:
+        log.warning("Could not persist token: %s", e)
     return token
 
 
-def _proxy_request(endpoint, body=None, method="POST"):
+def _proxy_request(endpoint, body=None, method="POST", timeout=5):
     token = _get_token()
     headers = {"X-SSL-Agent-Token": token, "Content-Type": "application/json"}
-    timeout = 360
 
     urls = [
-        ("http://127.0.0.1:8199/%s" % endpoint.lstrip("/"), 3),
-        ("%s/%s" % (SSL_AGENT_URL, endpoint.lstrip("/")), 5),
+        ("http://127.0.0.1:8199/%s" % endpoint.lstrip("/"), min(3, timeout)),
+        ("%s/%s" % (SSL_AGENT_URL, endpoint.lstrip("/")), timeout),
     ]
 
     for url, connect_timeout in urls:
@@ -61,7 +57,6 @@ def _proxy_request(endpoint, body=None, method="POST"):
 
             if resp.status_code == 401:
                 continue
-
             return resp.json(), resp.status_code
         except requests.exceptions.ConnectionError:
             continue
@@ -76,6 +71,7 @@ def _proxy_request(endpoint, body=None, method="POST"):
 @app.route('/api/ssl/status', methods=['POST'])
 @login_required(role='admin', perm={'settings': 'read'})
 def ssl_status():
+    log.info("Requesting SSL status from agent")
     data, code = _proxy_request("status")
     return buildResponse(data, code)
 
@@ -97,14 +93,14 @@ def ssl_install_cert():
 @app.route('/api/ssl/letsencrypt/request', methods=['POST'])
 @login_required(role='admin', perm={'settings': 'write'})
 def ssl_letsencrypt_request():
-    data, code = _proxy_request("letsencrypt/request", request.get_json() or {})
+    data, code = _proxy_request("letsencrypt/request", request.get_json() or {}, timeout=120)
     return buildResponse(data, code)
 
 
 @app.route('/api/ssl/letsencrypt/renew', methods=['POST'])
 @login_required(role='admin', perm={'settings': 'write'})
 def ssl_letsencrypt_renew():
-    data, code = _proxy_request("letsencrypt/renew", request.get_json() or {})
+    data, code = _proxy_request("letsencrypt/renew", request.get_json() or {}, timeout=120)
     return buildResponse(data, code)
 
 
@@ -160,9 +156,40 @@ def ssl_nginx_config():
 @app.route('/api/ssl/migration-script', methods=['POST'])
 @login_required(role='admin', perm={'settings': 'read'})
 def ssl_migration_script():
-    content = ""
-    script_path = "/conf/recreate-ssl.sh"
-    if os.path.exists(script_path):
-        with open(script_path, "r") as f:
-            content = f.read()
-    return buildResponse({"script": content})
+    data, code = _proxy_request("migration-script/generate", {})
+    return buildResponse(data, code)
+
+
+@app.route('/api/ssl/install-certbot', methods=['POST'])
+@login_required(role='admin', perm={'settings': 'write'})
+def ssl_install_certbot():
+    data, code = _proxy_request("install-certbot", {})
+    return buildResponse(data, code)
+
+
+@app.route('/api/ssl/install-certbot/status', methods=['POST'])
+@login_required(role='admin', perm={'settings': 'write'})
+def ssl_install_certbot_status():
+    data, code = _proxy_request("install-certbot/status", {})
+    return buildResponse(data, code)
+
+
+@app.route('/api/ssl/letsencrypt/dns-manual/start', methods=['POST'])
+@login_required(role='admin', perm={'settings': 'write'})
+def ssl_dns_manual_start():
+    data, code = _proxy_request("letsencrypt/dns-manual/start", request.get_json() or {})
+    return buildResponse(data, code)
+
+
+@app.route('/api/ssl/letsencrypt/dns-manual/status', methods=['POST'])
+@login_required(role='admin', perm={'settings': 'write'})
+def ssl_dns_manual_status():
+    data, code = _proxy_request("letsencrypt/dns-manual/status", {})
+    return buildResponse(data, code)
+
+
+@app.route('/api/ssl/letsencrypt/dns-manual/continue', methods=['POST'])
+@login_required(role='admin', perm={'settings': 'write'})
+def ssl_dns_manual_continue():
+    data, code = _proxy_request("letsencrypt/dns-manual/continue", {})
+    return buildResponse(data, code)
