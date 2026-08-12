@@ -182,8 +182,8 @@ def user_change_password():
     
     err = account.check_password_validity(newpass)
     if not err:
-        newpass = account.hash_password(newpass)
         nthashhex=''.join(list("{:02x}".format(ord(c)) for c in nt_password_hash(newpass)))
+        newpass = account.hash_password(newpass)
     else:
         err = "Invalid password : {}".format(err)
         resp={"status":"failed","err":err}
