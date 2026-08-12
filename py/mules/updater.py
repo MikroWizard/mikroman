@@ -30,13 +30,12 @@ def import_or_install(package):
     try:
         __import__(package)
     except ImportError:
-        subprocess.run(["python3", "-m", "pip", "install", package])
+        subprocess.run(["python3", "-m", "pip", "install", package],
+                       capture_output=True, text=True, check=True)
 
 def install_package(package):
-    try:
-        subprocess.run(["python3", "-m", "pip", "install", package])
-    except Exception as e:
-        log.error(e)
+    subprocess.run(["python3", "-m", "pip", "install", package],
+                   capture_output=True, text=True, check=True)
 
 
 def set_get_install_date():
@@ -99,18 +98,6 @@ def extract_zip_reload(filename,dst):
         
     subprocess.run("rm -rf {}".format(tmp_extract_dir), shell=True)
     
-    # run db migrate
-    dir ="/app/"
-    cmd = "cd {}; PYTHONPATH={}py PYSRV_CONFIG_PATH={} python3 scripts/dbmigrate.py".format(dir, dir, "/conf/server-conf.json")
-    log.info("Running database migrations: {}".format(cmd))
-    p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    (output, err) = p.communicate()  
-    p_status = p.wait()
-    if p_status == 0:
-        log.info("Database migrations completed successfully.")
-    else:
-        log.error("Database migrations failed with status {}. Error: {}".format(p_status, err.decode().strip()))
-
     #install requirements
     try:
         proreqs="/app/py/pro-reqs.txt"
@@ -140,12 +127,25 @@ def extract_zip_reload(filename,dst):
                         log.info("Installed package: {}".format(pkg))
                     except Exception as e:
                         log.error("Failed to install package {}: {}".format(pkg, e))
+
+    # run db migrate
+    dir ="/app/"
+    cmd = "cd {}; PYTHONPATH={}py PYSRV_CONFIG_PATH={} python3 scripts/dbmigrate.py".format(dir, dir, "/conf/server-conf.json")
+    log.info("Running database migrations: {}".format(cmd))
+    p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    (output, err) = p.communicate()  
+    p_status = p.wait()
+    if p_status == 0:
+        log.info("Database migrations completed successfully.")
+    else:
+        log.error("Database migrations failed with status {}. Error: {}".format(p_status, err.decode().strip()))
     
     log.info("Post-update tasks completed. Cleaning up artifact {}.".format(filename))
     os.remove(filename)
     
     # Remove the startup locks so next boot re-verifies requirements
-    for f in ["/tmp/mw_pro_lock", "/tmp/mw_pro_done"]:
+    for f in ["/tmp/mw_pro_lock", "/tmp/mw_pro_done",
+              "/tmp/mw_init_ai_chat_pro", "/tmp/mw_init_speedtest_pro", "/tmp/mw_init_tickets_pro"]:
         if os.path.exists(f):
             os.remove(f)
     

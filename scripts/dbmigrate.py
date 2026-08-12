@@ -33,6 +33,12 @@ if ret:
 else:
     print("migrate OK")
 
+# Install updated requirements before any restart — this ensures
+# packages (e.g. netmiko) are available when the server comes back up,
+# even when dbmigrate.py kills uWSGI via the transition patch below.
+print("Installing requirements from /app/reqs.txt...")
+os.system("python3 -m pip install -r /app/reqs.txt")
+
 # --- TRANSITION PATCH FOR 1.3.0 -> 1.3.1 ---
 # The old updater.py (1.3.0) contains a bugs (pip.main segfault & touch-reload PyArmor conflict).
 # Because the old updater.py is currently in RAM doing the update, it will crash itself if it continues.
