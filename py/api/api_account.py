@@ -158,6 +158,11 @@ def user_delete():
         return buildResponse(resp, 200)
 
     u.delete_instance(recursive=True)
+    if ISPRO:
+        try:
+            utilpro.revoke_user_pam(uid)
+        except Exception as e:
+            log.error("revoke pam on delete error: {}".format(e))
     db_syslog.add_syslog_event(webutil.get_myself(), "User Managment", "Delete", webutil.get_ip(), webutil.get_agent(), json.dumps(input))
     return buildResponse({}, 200)
 
@@ -223,6 +228,29 @@ def me():
             "tz":db_sysconfig.get_sysconfig('timezone'),
             "ISPRO":ISPRO
         }
+        if ISPRO:
+            try:
+                status = utilpro.check_license_status()
+                if status['reason'] in ('mikrotik_limit', 'other_limit'):
+                    lstatus = 'over_limit'
+                elif status['reason'] == 'expired':
+                    lstatus = 'expired'
+                elif status['reason'] == 'invalid':
+                    lstatus = 'invalid'
+                else:
+                    lstatus = 'ok'
+                res['license'] = {
+                    'status': lstatus,
+                    'reason': status['reason'],
+                    'counts': status['counts'],
+                    'limits': status['limits'],
+                    'expiration': status['expiration'].isoformat() if status['expiration'] else None,
+                }
+            except Exception as e:
+                log.error("me license status error: {}".format(e))
+                res['license'] = {'status': 'ok', 'reason': None}
+        else:
+            res['license'] = {'status': 'free', 'reason': None}
         reply = res
     else:
         reply = {"username":"public","first_name":"guest","last_name":"guest","role":"admin"}
@@ -299,6 +327,14 @@ def user_edit():
         u.password = newpass
         u.hash = nthashhex
     u.save()
+
+    # Deactivation revokes PAM access (free the seat + kill active terminal sessions)
+    if ISPRO and u.role == 'disabled':
+        try:
+            utilpro.revoke_user_pam(uid)
+            db_syslog.add_syslog_event(webutil.get_myself(), "User Managment", "PAM Access Revoked", webutil.get_ip(), webutil.get_agent(), json.dumps({'uid': str(uid)}))
+        except Exception as e:
+            log.error("revoke pam on deactivate error: {}".format(e))
 
     if send_activation and u.role == 'customer_inactive' and ISPRO:
         try:

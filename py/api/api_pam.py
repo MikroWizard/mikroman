@@ -23,6 +23,12 @@ try:
 except ImportError:
     ISPRO = False
 
+def _license_blocked():
+    """Return a blocking response when the license is invalid/over device limit, else None."""
+    if ISPRO and not utilpro.check_license_dev_limit_exp():
+        return buildResponse({'status': 'failed'}, 200, error="License Expired")
+    return None
+
 def _user_can_access_device(user, device_id):
     """Check System B: user must be admin/superuser OR belong to a device group containing device_id."""
     if user.role in ('admin', 'superuser'):
@@ -37,6 +43,9 @@ def _user_can_access_device(user, device_id):
 @app.route("/api/pam/brands/list", methods=["POST"])
 @login_required(role="admin", perm={"connection_manager": "read"})
 def list_brands():
+    blocked = _license_blocked()
+    if blocked:
+        return blocked
     brands = list(DeviceBrands.select().dicts())
     return buildResponse(brands, 200)
 
@@ -116,6 +125,9 @@ def delete_brand():
 @app.route("/api/pam/templates/list", methods=["POST"])
 @login_required(role="admin", perm={"connection_manager": "read"})
 def list_templates():
+    blocked = _license_blocked()
+    if blocked:
+        return blocked
     data = request.json or {}
     brand_id = data.get('brand_id')
     return buildResponse(TemplateService.list_templates(brand=brand_id), 200)
@@ -123,6 +135,9 @@ def list_templates():
 @app.route("/api/pam/templates/get", methods=["POST"])
 @login_required(role="admin", perm={"connection_manager": "read"})
 def get_template():
+    blocked = _license_blocked()
+    if blocked:
+        return blocked
     data = request.json or {}
     t = TemplateService.get_template_by_id(data.get('template_id'))
     if not t:
@@ -180,6 +195,9 @@ def delete_template():
 @app.route("/api/pam/credentials/list", methods=["POST"])
 @login_required(role="admin", perm={"connection_manager": "read"})
 def list_credentials():
+    blocked = _license_blocked()
+    if blocked:
+        return blocked
     data = request.json or {}
     creds = CredentialService.list_credentials(
         scope=data.get('scope'),
@@ -253,6 +271,9 @@ def delete_credential():
 @app.route("/api/pam/device-connections/list", methods=["POST"])
 @login_required(role="admin", perm={"connection_manager": "read"})
 def list_device_connections():
+    blocked = _license_blocked()
+    if blocked:
+        return blocked
     dev_id = (request.json or {}).get('device_id')
     if not _user_can_access_device(request.user, dev_id):
         return buildResponse({"status": "failed", "error": "Access denied"}, 403)
@@ -352,6 +373,9 @@ def delete_device_connection():
 @app.route("/api/pam/sessions/list", methods=["POST"])
 @login_required(role="admin", perm={"connection_manager": "read"})
 def list_sessions():
+    blocked = _license_blocked()
+    if blocked:
+        return blocked
     data = request.json or {}
     page = data.get('page', 1)
     limit = 50

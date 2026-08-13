@@ -229,6 +229,14 @@ def add_device():
     
     if db_device.query_device_by_ip(ip):
         return buildResponse({"result": "failed", "err": "IP already exists"}, 200)
+
+    if ISPRO and device_type == 'mikrotik':
+        try:
+            allowed, err = utilpro.can_add_device('mikrotik')
+            if not allowed:
+                return buildResponse({"result": "failed", "err": err}, 200)
+        except Exception as e:
+            log.error(e)
         
     try:
         now = datetime.datetime.now(datetime.timezone.utc)

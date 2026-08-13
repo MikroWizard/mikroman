@@ -16,6 +16,12 @@ from libs.db.db_pam import DeviceBrands, DeviceTemplates, DeviceConnections, Cre
 from libs.agent_validation import validate_agent_modes
 from libs import util, kek_provider, envelope_crypto
 import bgtasks_non_mikrotik
+try:
+    from libs import utilpro
+    ISPRO = True
+except ImportError:
+    ISPRO = False
+    pass
 
 log = logging.getLogger('api_non_mikrotik')
 non_mikrotik_api = Blueprint('non_mikrotik_api', __name__)
@@ -98,6 +104,13 @@ def add_non_mikrotik():
         return buildResponse({"status": "failed", "error": "IP required"}, 400)
     if db_device.query_device_by_ip(ip):
         return buildResponse({"status": "failed", "error": "IP already exists"}, 200)
+    if ISPRO:
+        try:
+            allowed, err = utilpro.can_add_device('other')
+            if not allowed:
+                return buildResponse({"status": "failed", "error": err}, 200)
+        except Exception as e:
+            log.error(e)
     now = datetime.datetime.now(datetime.timezone.utc)
     try:
         enc_user = util.crypt_data(username) if username else ''
@@ -509,6 +522,19 @@ def bulk_add_non_mikrotik():
             'status': 'validation_failed',
             'rows': rows
         }, 200)
+
+    # Enforce the non-MikroTik device limit before creating the task
+    if ISPRO:
+        try:
+            status = utilpro.check_license_status()
+            if status['reason'] in ('invalid', 'expired'):
+                return buildResponse({"status": "failed", "error": "License is not valid. Please renew your license."}, 200)
+            counts = status['counts']
+            limits = status['limits']
+            if counts['other'] + len(devices) > limits['other']:
+                return buildResponse({"status": "failed", "error": "Non-MikroTik device limit reached ({} of {}). Delete devices or renew your license.".format(counts['other'], limits['other'])}, 200)
+        except Exception as e:
+            log.error(e)
 
     # Prepare clean device list for background task
     clean_devices = []

@@ -582,17 +582,39 @@ def dashboard_stats():
         if not res['license_info']['status']:
              res['license_info']['status'] = 'Free'
         
-        # Check active/expiration if PRO
+        # Check active/expiration/limits if PRO
         if ISPRO:
             try:
-                local_exp = license_helper.check_license_dev_limit_exp()
-                if not local_exp:
+                status = license_helper.check_license_status()
+                counts = status.get('counts') or {}
+                limits = status.get('limits') or {}
+                pam_used = 0
+                try:
+                    pam_used = utilpro.count_pam_users()
+                except Exception:
+                    pass
+                res['license_usage'] = {
+                    'mikrotik': {'used': counts.get('mikrotik', 0), 'total': limits.get('mikrotik', 0)},
+                    'other': {'used': counts.get('other', 0), 'total': limits.get('other', 0)},
+                    'pam_seats': {'used': pam_used, 'total': limits.get('pam_seats', 10)},
+                }
+                if status['reason'] in ('mikrotik_limit', 'other_limit'):
+                    res['license_info']['status'] = "over_limit"
+                    res['license_info']['action_required'] = "reduce_devices"
+                    res['license_info']['reason'] = status['reason']
+                    res['license_info']['message'] = "Device limit exceeded. Delete devices or renew your license to continue."
+                elif status['reason'] == 'expired':
                     res['license_info']['status'] = "expired"
                     res['license_info']['action_required'] = "renew_license"
-                    res['license_info']['message'] = "Your Pro license has expired or max device limit reached. Please renew to continue receiving Pro features and updates."
+                    res['license_info']['message'] = "Your Pro license has expired. Please renew to continue receiving Pro features and updates."
+                elif status['reason'] == 'invalid':
+                    res['license_info']['status'] = "expired"
+                    res['license_info']['action_required'] = "renew_license"
+                    res['license_info']['message'] = "Your Pro license is not valid. Please renew to continue receiving Pro features and updates."
                 else:
-                    res['license_info']['message'] = f"Your Pro license is active. Valid until {local_exp.strftime('%Y-%m-%d %H:%M:%S')}."
-                    res['license_info']['expiration_date'] = local_exp.strftime('%Y-%m-%d %H:%M:%S')
+                    exp = status.get('expiration')
+                    res['license_info']['message'] = f"Your Pro license is active. Valid until {exp.strftime('%Y-%m-%d %H:%M:%S')}." if exp else "Your Pro license is active."
+                    res['license_info']['expiration_date'] = exp.strftime('%Y-%m-%d %H:%M:%S') if exp else None
             except Exception as e:
                 log.error(f"Error checking local license exp: {e}")
                 res['license_info']['message'] = "Error reading Pro license status locally."
