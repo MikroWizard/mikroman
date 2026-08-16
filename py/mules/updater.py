@@ -17,6 +17,7 @@ import hashlib
 import zipfile
 import subprocess
 import json
+import signal
 import uwsgi
 log = logging.getLogger("Updater_mule")
 import pip
@@ -141,7 +142,10 @@ def extract_zip_reload(filename,dst):
         log.error("Database migrations failed with status {}. Error: {}".format(p_status, err.decode().strip()))
     
     log.info("Post-update tasks completed. Cleaning up artifact {}.".format(filename))
-    os.remove(filename)
+    try:
+        os.remove(filename)
+    except OSError:
+        pass
     
     # Remove the startup locks so next boot re-verifies requirements
     for f in ["/tmp/mw_pro_lock", "/tmp/mw_pro_done",
@@ -152,9 +156,13 @@ def extract_zip_reload(filename,dst):
     # Kill the uWSGI master to force a clean, hard container restart.
     # PyArmor requires a clean Python interpreter for new files to prevent memory corruption. 
     masterpid=uwsgi.masterpid()
-    log.info("Triggering hard server restart (sending SIGTERM to masterpid: {}).".format(masterpid))
-    import signal
-    os.kill(masterpid, signal.SIGTERM)
+    log.info("Triggering hard server restart (sending SIGKILL to masterpid: {}).".format(masterpid))
+    os.kill(masterpid, signal.SIGKILL)
+    time.sleep(2)
+    try:
+        os.kill(1, signal.SIGKILL)
+    except Exception:
+        pass
 
 def main():
     while True:

@@ -137,8 +137,6 @@ def exec_snippet():
     
     # todo
     # add owner check devids and dev groups with owner
-    if not description:
-        return buildResponse({'status': 'failed'},200,error="Wrong name/desc")
     #check if cron is valid and correct
     taskdata={}
     if selection_type=="devices":
@@ -157,6 +155,8 @@ def exec_snippet():
         taskdata['snippet']={'id':snipet.id,'code':snipet.content,'description':snipet.description,'name':snipet.name}
     else:
         return buildResponse({'status': 'failed'}, 200, error="Wrong snippet")
+    if not description:
+        description=snipet.name
 
     if selection_type not in ["devices","groups"]:
         return buildResponse({'status': 'failed'}, 200, error="Wrong member type")

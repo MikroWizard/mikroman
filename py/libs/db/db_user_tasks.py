@@ -43,6 +43,7 @@ def update_snippet(id,name, description, content, template_command_key=None):
     snippet.content = content
     snippet.template_command_key = template_command_key
     snippet.save()
+    return snippet
 
 def create_snippet(name, description, content, template_command_key=None):
     snippet = Snippets()
@@ -51,6 +52,7 @@ def create_snippet(name, description, content, template_command_key=None):
     snippet.content = content
     snippet.template_command_key = template_command_key
     snippet.save()
+    return snippet
 
 def delete_snippet(id):
     snippet = get_object_or_none(Snippets, id=id)

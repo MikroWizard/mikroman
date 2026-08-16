@@ -39,25 +39,35 @@ else:
 print("Installing requirements from /app/reqs.txt...")
 os.system("python3 -m pip install -r /app/reqs.txt")
 
-# --- TRANSITION PATCH FOR 1.3.0 -> 1.3.1 ---
-# The old updater.py (1.3.0) contains a bugs (pip.main segfault & touch-reload PyArmor conflict).
-# Because the old updater.py is currently in RAM doing the update, it will crash itself if it continues.
-# To bypass this, we intercept the update physically *here* (using the newly extracted dbmigrate.py)
-# to clean up the zip and kill the uwsgi master. This forces a clean docker container restart 
-# with the fixed 1.3.1 files, fully sidestepping the old updater's remaining logic.
+# --- UPDATE RESTART PATCH ---
+# During an update the running updater mule is still the OLD version loaded in RAM.
+# It runs this freshly-extracted dbmigrate.py as a subprocess, so we do the final
+# "finish the update" steps HERE, then hard-kill uWSGI to force Docker to restart the
+# container with the new files (a clean interpreter is required for PyArmor).
+# This sidesteps the old updater's remaining logic (which would otherwise run stale code).
 try:
     import glob
     import time
-    zips = glob.glob("/app/mikroman-pro*.zip")
+    zips = glob.glob("/app/mikroman*.zip")
     if zips:
-        print("Update ZIP detected in /app/. Cleaning up and forcing hard restart to bypass old updater logic...")
+        print("Update ZIP detected in /app/. Cleaning up and forcing hard restart...")
         for z in zips:
             try:
                 os.remove(z)
             except:
                 pass
-        # Kill uwsgi to force Docker to restart the container cleanly
-        os.system("killall -15 uwsgi || kill -15 1")
-        time.sleep(10) # Block old updater.py from continuing before the KILL signal arrives
+        # Remove startup locks so the next boot re-verifies/installs requirements.
+        # (The old updater would have done this after dbmigrate; we must do it before killing it.)
+        for f in ["/tmp/mw_pro_lock", "/tmp/mw_pro_done",
+                  "/tmp/mw_init_ai_chat_pro", "/tmp/mw_init_speedtest_pro", "/tmp/mw_init_tickets_pro"]:
+            try:
+                if os.path.exists(f):
+                    os.remove(f)
+            except:
+                pass
+        # Hard-kill uWSGI (SIGKILL is unblockable) to force Docker to restart the container cleanly.
+        # Fallback to killing PID 1 if killall is missing or matches nothing.
+        os.system("killall -9 uwsgi || kill -9 1")
+        time.sleep(10) # Block the old updater mule from continuing before the kill signal arrives
 except Exception as e:
-    print(f"Error in transition patch: {e}")
+    print(f"Error in update restart patch: {e}")

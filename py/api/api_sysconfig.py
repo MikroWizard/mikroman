@@ -42,7 +42,11 @@ def sysconfig_save_all():
     now=time.time()
     for k, v in input.items():
         if k in ["default_password", "default_user", "smtp_password", "ai_api_key"]:
-            if v['value'] == "":
+            if v.get('value') == "":
+                # If empty on submit, preserve existing encrypted value from database
+                existing = db_sysconfig.get_sysconfig(k)
+                v['value'] = existing if existing else ""
+            elif v.get('value') == "__CLEAR__":
                 v['value'] = ""
             else:
                 v['value'] = util.crypt_data(v['value'])
@@ -59,6 +63,9 @@ def sysconfig_save_all():
                 v['value'] = json.dumps(v['value'])
             elif not isinstance(v['value'], str):
                 v['value'] = '[]'
+        elif k == "ai_model":
+            if isinstance(v.get('value'), str):
+                v['value'] = v['value'].strip()
         data.append({"key":k,"value":v['value'],"modified":"NOW"})
     db_syslog.add_syslog_event(get_myself(), "Sys Config","Update", get_ip(),get_agent(),json.dumps(input))
     db_sysconfig.save_all(data)
