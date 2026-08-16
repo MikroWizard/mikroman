@@ -152,13 +152,18 @@ def create_template():
     data = request.json or {}
     try:
         tdata = {
-            'display_name': data.get('name', 'Custom Template'),
-            'brand': data.get('brand_id', 'generic'),
+            'display_name': data.get('display_name', data.get('name', 'Custom Template')),
+            'brand': data.get('brand', data.get('brand_id', 'generic')),
             'os_type': data.get('os_type', 'generic'),
-            'prompt': data.get('prompt_pattern'),
-            'error_patterns': data.get('error_pattern'),
-            'pagination': data.get('pagination_disable_cmd'),
-            'privilege_escalation': data.get('privilege_escalation_cmd'),
+            'connection': data.get('connection'),
+            'prompt': data.get('prompt', data.get('prompt_pattern')),
+            'privilege_escalation': data.get('privilege_escalation', data.get('privilege_escalation_cmd')),
+            'commands': data.get('commands'),
+            'pagination': data.get('pagination', data.get('pagination_disable_cmd')),
+            'error_patterns': data.get('error_patterns', data.get('error_pattern')),
+            'post_login_commands': data.get('post_login_commands'),
+            'pre_logout_commands': data.get('pre_logout_commands'),
+            'is_active': data.get('is_active', True),
         }
         tid = TemplateService.create_template(tdata)
         return buildResponse({'status': 'success', 'id': tid}, 200)

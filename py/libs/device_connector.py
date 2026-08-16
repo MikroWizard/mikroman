@@ -67,6 +67,25 @@ class TemplateDrivenSSH(_NoAutoLogin, TerminalServerSSH):
     pass
 
 
+class TemplateDrivenMikrotikSSH(_NoAutoLogin, TerminalServerSSH):
+    """SSH driver for MikroTik RouterOS.
+
+    RouterOS's SSH console requires the login options appended to the username
+    (c=no colors, t=disable terminal auto-detection, 511w/4098h=term size) and
+    CRLF line endings; otherwise it emits a terminal-init handshake and never
+    shows the prompt.
+    """
+
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("default_enter", "\r\n")
+        super().__init__(*args, **kwargs)
+
+    def _modify_connection_params(self):
+        if "+" not in self.username:
+            self.username += "+ct511w4098h"
+        self.ansi_escape_codes = True
+
+
 # ---------------------------------------------------------------------------
 # Prompt regex builder (MANDATORY — see plan §3.2)
 # ...existing code until build_netmiko_params, unchanged...
@@ -190,7 +209,7 @@ def build_netmiko_params(device, connection, template, hook_context, legacy_cred
         conn_conf = (template.get("connection") or {}) if isinstance(template, dict) else {}
         port = conn_conf.get("default_port_ssh", 22) if protocol == "ssh" else conn_conf.get("default_port_telnet", 23)
 
-    host = device.peer_ip if getattr(device, "peer_ip", None) else device.ip
+    host = device.ip
 
     pam_user, pam_pass, _ = load_credentials(device.id, connection)
     username = pam_user or ""
@@ -350,7 +369,14 @@ def connect_device(device_id, template, connection, hook_context=None, legacy_cr
     device = Devices.get_by_id(device_id)
     params = build_netmiko_params(device, connection, template, hook_context, legacy_creds)
     protocol = params["device_type"]
-    conn_class = TemplateDrivenSSH if protocol == "generic" else TemplateDrivenTelnet
+    if protocol == "generic":
+        conn_class = (
+            TemplateDrivenMikrotikSSH
+            if getattr(device, "device_type", "") == "mikrotik"
+            else TemplateDrivenSSH
+        )
+    else:
+        conn_class = TemplateDrivenTelnet
     # Keep device_type — BaseConnection.__init__ uses it to determine self.protocol
     # (telnet vs SSH transport layer)
     kwargs = dict(params)
@@ -392,23 +418,32 @@ def execute_privilege_escalation(conn, template, enable_password):
         return
 
     cmd = priv["command"]
-    prompt_pattern = priv.get("prompt_pattern")
-    enable_prompt_re = priv.get("enable_prompt")
-    needs_pw = bool(prompt_pattern)
+    # Canonical schema (command/password_prompt/success_pattern) with legacy
+    # aliases (prompt_pattern/enable_prompt/prompt) so existing seeded templates
+    # keep working. sudo-based escalations always require a password prompt, so
+    # infer one when a (legacy) template omits it.
+    password_prompt = priv.get("password_prompt") or priv.get("prompt_pattern")
+    if not password_prompt and re.search(r"(^|\s)sudo\b", str(cmd)):
+        password_prompt = r"[Pp]assword:?"
+    success_pattern = priv.get("success_pattern") or priv.get("enable_prompt") or priv.get("prompt")
+    needs_pw = bool(password_prompt)
 
     # Skip if escalation password is required but not provided
     if needs_pw and not enable_password:
         return
 
-    # Send escalation command
+    # Send escalation command (keep raw output so password prompts survive the
+    # empty-base_prompt driver's strip_prompt)
     output = ""
     try:
-        output = conn.send_command_timing(cmd, read_timeout=10) or ""
+        output = conn.send_command_timing(
+            cmd, read_timeout=10, strip_prompt=False, strip_command=False
+        ) or ""
     except Exception:
         pass
 
     # If device prompts for escalation password, send it directly
-    if prompt_pattern and enable_password and re.search(prompt_pattern, output, re.IGNORECASE):
+    if password_prompt and enable_password and re.search(password_prompt, output, re.IGNORECASE):
         try:
             conn.write_channel(enable_password + "\r\n")
             post = conn.read_channel_timing(read_timeout=5) or ""
@@ -416,13 +451,20 @@ def execute_privilege_escalation(conn, template, enable_password):
         except Exception:
             pass
 
-    # Verify we're in privileged mode by matching the enable prompt
-    if enable_prompt_re and not re.search(enable_prompt_re, output):
+    # Verify we're in privileged mode by matching the enable prompt. Hard-fail
+    # only when a password was expected/supplied (a stuck sudo/enable prompt
+    # would otherwise swallow the next command). Non-password escalations keep
+    # the soft warning to avoid breaking devices with fuzzy success patterns.
+    if success_pattern and not re.search(success_pattern, output):
+        if needs_pw and enable_password:
+            raise DeviceCommandError(
+                "Privilege escalation failed for '{}': {}".format(cmd, output.strip()[:200])
+            )
         log.warning("Privilege escalation may have failed. Output: %s", output[:200])
 
 
 def _send_single_line(conn, command, prompt_re, read_timeout):
-    return conn.send_command(command, expect_string=prompt_re, read_timeout=read_timeout)
+    return conn.send_command(command, expect_string=prompt_re, read_timeout=read_timeout, cmd_verify=False)
 
 
 def _send_multiline_exec(conn, command, prompt_re, read_timeout):
@@ -451,7 +493,7 @@ def _send_config_mode(conn, command, template, prompt_re, enable_password, read_
     output_parts = []
 
     if enter_cmd:
-        out = conn.send_command(enter_cmd, expect_string=prompt_re, read_timeout=read_timeout)
+        out = conn.send_command(enter_cmd, expect_string=prompt_re, read_timeout=read_timeout, cmd_verify=False)
         output_parts.append(out)
 
     lines = command.splitlines()
@@ -459,16 +501,16 @@ def _send_config_mode(conn, command, template, prompt_re, enable_password, read_
         line = line.strip()
         if not line:
             continue
-        out = conn.send_command(line, expect_string=prompt_re, read_timeout=read_timeout)
+        out = conn.send_command(line, expect_string=prompt_re, read_timeout=read_timeout, cmd_verify=False)
         output_parts.append(out)
 
     if exit_cmd:
-        out = conn.send_command(exit_cmd, expect_string=prompt_re, read_timeout=read_timeout)
+        out = conn.send_command(exit_cmd, expect_string=prompt_re, read_timeout=read_timeout, cmd_verify=False)
         output_parts.append(out)
 
     if save_cmd:
         try:
-            out = conn.send_command(save_cmd, expect_string=prompt_re, read_timeout=read_timeout)
+            out = conn.send_command(save_cmd, expect_string=prompt_re, read_timeout=read_timeout, cmd_verify=False)
             output_parts.append(out)
         except Exception as e:
             log.warning("Config-mode save failed: %s", e)
@@ -479,7 +521,7 @@ def _send_config_mode(conn, command, template, prompt_re, enable_password, read_
 def _handle_pagination(conn, template, command, prompt_re, read_timeout):
     pagination = (template.get("pagination") or {}) if isinstance(template, dict) else {}
     if not pagination.get("enabled"):
-        return conn.send_command(command, expect_string=prompt_re, read_timeout=read_timeout)
+        return conn.send_command(command, expect_string=prompt_re, read_timeout=read_timeout, cmd_verify=False)
 
     # post_login_commands in execute_command already sent terminal length 0.
     # Skip the redundant attempt — if pagination is still active, handle it below.
@@ -518,6 +560,26 @@ def _scan_errors(output, template):
     for pattern in patterns:
         if re.search(pattern, output, re.IGNORECASE):
             log.warning("Error pattern '%s' matched in output", pattern)
+
+
+def _resolve_export_flags_ssh(conn, command):
+    """Fallback: detect RouterOS version over SSH to resolve {export_flags}.
+
+    Used when the routeros_api pre_connect hook could not run (API unreachable).
+    Resolution order: template hook (runtime) -> SSH version detection -> ''.
+    """
+    flags = ""
+    try:
+        out = conn.send_command_timing(
+            ":put [/system resource get version]",
+            read_timeout=10, strip_prompt=False, strip_command=False,
+        ) or ""
+        m = re.search(r"(\d+)\.\d+", out)
+        if m:
+            flags = " show-sensitive" if int(m.group(1)) >= 7 else ""
+    except Exception:
+        flags = ""
+    return command.replace("{export_flags}", flags)
 
 
 def execute_command(conn, command, template, prompt_re, is_config_mode, enable_password, read_timeout):
@@ -593,6 +655,10 @@ def connect_and_execute(device_id, command, template_id=None, template=None,
             conn_obj, device = connect_device(device_id, template, connection, hook_context, legacy_creds)
         else:
             device = Devices.get_by_id(device_id)
+
+        # Resolve any remaining {export_flags} over SSH (API hook may have failed).
+        if conn_obj is not None and command and "{export_flags}" in command:
+            command = _resolve_export_flags_ssh(conn_obj, command)
 
         output, duration_ms = execute_command(
             conn_obj, command, template, prompt_re, is_config_mode, enable_password, timeout
