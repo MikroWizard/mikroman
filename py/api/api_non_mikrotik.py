@@ -64,17 +64,26 @@ def get_non_mikrotik():
         dev["port"] = default_conn.port
         dev["agent_modes"] = default_conn.agent_modes
     
-    # Fetch credential (any device-scoped type)
+    # Fetch the primary (login) credential — exclude the enable/escalation credential
     cred = Credentials.select().where(
         Credentials.device_id == devid,
-        Credentials.scope == 'device'
+        Credentials.scope == 'device',
+        Credentials.credential_type != 'enable'
     ).order_by(Credentials.id.desc()).first()
     if cred:
         dev["username"] = cred.username or ''
-        dev["ssh_auth_mode"] = cred.auth_method
+        dev["ssh_auth_mode"] = 'key' if cred.auth_method == 'key' else 'credential'
     else:
         dev["username"] = ''
         dev["ssh_auth_mode"] = 'credential'
+
+    # Detect whether an enable/escalation credential is configured
+    enable_cred = Credentials.select().where(
+        Credentials.device_id == devid,
+        Credentials.scope == 'device',
+        Credentials.credential_type == 'enable'
+    ).first()
+    dev["has_enable"] = bool(enable_cred)
     
     dev.pop('user_name', None)
     dev.pop('password', None)
@@ -209,11 +218,12 @@ def edit_non_mikrotik():
         if update_fields:
             db_device.Devices.update(update_fields).where(db_device.Devices.id == devid).execute()
         if data.get('password') and data['password'] not in (None, '', 'Password is Hidden'):
-            from libs.db.db_pam import Credentials
             kek = kek_provider.get_kek()
             enc_bundle = envelope_crypto.full_encrypt(data['password'], kek)
             creds = list(Credentials.select().where(
-                Credentials.device_id == devid, Credentials.scope == 'device'
+                Credentials.device_id == devid,
+                Credentials.scope == 'device',
+                Credentials.credential_type != 'enable'
             ))
             auth_method = data.get('ssh_auth_mode', 'credential')
             if creds:
@@ -245,7 +255,54 @@ def edit_non_mikrotik():
                 else:
                     cred_kwargs['encrypted_password'] = enc_bundle['encrypted_payload']
                 Credentials.create(**cred_kwargs)
-        
+
+        # Sync username on the primary (login) credential when username is updated
+        if data.get('username') is not None:
+            now = datetime.datetime.now(datetime.timezone.utc)
+            for cred in Credentials.select().where(
+                Credentials.device_id == devid,
+                Credentials.scope == 'device',
+                Credentials.credential_type != 'enable'
+            ):
+                if cred.username != data['username']:
+                    cred.username = data['username']
+                    cred.modified = now
+                    cred.save()
+
+        # Handle enable/escalation password
+        enable_password = data.get('enable_password')
+        if enable_password and enable_password not in (None, ''):
+            now = datetime.datetime.now(datetime.timezone.utc)
+            kek = kek_provider.get_kek()
+            enable_enc = envelope_crypto.full_encrypt(enable_password, kek)
+            default_conn = DeviceConnections.get_or_none(
+                DeviceConnections.device_id == devid,
+                DeviceConnections.is_default == True
+            )
+            enable_cred = None
+            if default_conn and default_conn.privileged_credential_id:
+                enable_cred = Credentials.get_or_none(
+                    Credentials.id == default_conn.privileged_credential_id
+                )
+            if enable_cred:
+                enable_cred.encrypted_password = enable_enc['encrypted_payload']
+                enable_cred.dek_encrypted = enable_enc['dek_encrypted']
+                enable_cred.modified = now
+                enable_cred.save()
+            else:
+                enable_cred = Credentials.create(
+                    name=f"Device {devid} Enable", credential_type='enable',
+                    username='',
+                    encrypted_password=enable_enc['encrypted_payload'],
+                    dek_encrypted=enable_enc['dek_encrypted'],
+                    auth_method='password', scope='device',
+                    device_id=devid, owner_id=user.id,
+                    created=now, modified=now
+                )
+                if default_conn:
+                    default_conn.privileged_credential_id = enable_cred.id
+                    default_conn.save()
+
         if 'protocol' in data or 'port' in data:
             from libs.db.db_pam import DeviceConnections
             now = datetime.datetime.now(datetime.timezone.utc)
