@@ -7,8 +7,9 @@
 
 from peewee import *
 
-from libs.db.db import User,BaseModel,get_object_or_none
+from libs.db.db import User,BaseModel,get_object_or_none,database
 import logging
+import config
 from libs.db.db_device import Devices
 
 try:
@@ -170,7 +171,13 @@ def delete_device(devid):
         if PAM_PRO_AVAILABLE:
             ConnectionSessions.delete().where(ConnectionSessions.device_id == devid).execute()
             CredentialRotationHistory.delete().where(CredentialRotationHistory.device_id == devid).execute()
-            
+
+        # Delete rows from every table that FK-references devices with
+        # ON DELETE NO ACTION (account, auth, backups, events, device_radio,
+        # task_group_dev_rel, cloner, vault, dev_info, vpn_peer, ...). CASCADE
+        # and SET NULL references are handled by the database itself.
+        _delete_device_foreign_rows(devid)
+
         dev = get_object_or_none(Devices, id=devid)
         if dev:
             dev.delete_instance(recursive=True)
@@ -178,6 +185,51 @@ def delete_device(devid):
     except Exception as e:
         log.error(e)
         return False
+
+
+def _delete_device_foreign_rows(devid):
+    """Delete rows in tables that reference devices with ON DELETE NO ACTION.
+
+    Discovered dynamically from information_schema so future tables (including
+    pro-only tables) are handled automatically. PostgreSQL only; no-op on SQLite.
+    """
+    if getattr(config, "IS_SQLITE", False):
+        return
+    query = """
+        SELECT tc.table_name, kcu.column_name
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON tc.constraint_name = kcu.constraint_name
+         AND tc.table_schema = kcu.table_schema
+         AND tc.table_name = kcu.table_name
+        JOIN information_schema.referential_constraints rc
+          ON tc.constraint_name = rc.constraint_name
+         AND tc.constraint_schema = rc.constraint_schema
+        JOIN information_schema.constraint_column_usage ccu
+          ON rc.unique_constraint_name = ccu.constraint_name
+         AND rc.constraint_schema = ccu.constraint_schema
+        WHERE tc.constraint_type = 'FOREIGN KEY'
+          AND tc.table_schema = 'public'
+          AND ccu.table_name = 'devices'
+          AND rc.delete_rule = 'NO ACTION'
+    """
+    try:
+        with database.atomic():
+            try:
+                rows = database.execute_sql(query).fetchall()
+            except Exception as e:
+                log.warning("delete_device: FK discovery failed: %s", e)
+                rows = []
+            for table, column in rows:
+                safe_table = str(table).replace('"', '""')
+                safe_column = str(column).replace('"', '""')
+                sql = 'DELETE FROM "{}" WHERE "{}" = %s'.format(safe_table, safe_column)
+                try:
+                    database.execute_sql(sql, (devid,))
+                except Exception as e:
+                    log.warning("delete_device: cleanup %s.%s failed: %s", table, column, e)
+    except Exception as e:
+        log.warning("delete_device: FK cleanup failed: %s", e)
 
 
 # --------------------------------------------------------------------------

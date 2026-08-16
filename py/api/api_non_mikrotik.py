@@ -13,7 +13,11 @@ from libs.webutil import app, buildResponse, login_required, get_myself, get_ip,
 from libs.db import db_device, db_syslog, db_tasks
 from libs.db.db_groups import DevGroupRel
 from libs.db.db_pam import DeviceBrands, DeviceTemplates, DeviceConnections, Credentials
-from libs.agent_validation import validate_agent_modes
+try:
+    from libs.agent_validation import validate_agent_modes
+except ImportError:
+    def validate_agent_modes(agent_modes):
+        return True, None
 from libs import util, kek_provider, envelope_crypto
 import bgtasks_non_mikrotik
 try:
@@ -25,6 +29,26 @@ except ImportError:
 
 log = logging.getLogger('api_non_mikrotik')
 non_mikrotik_api = Blueprint('non_mikrotik_api', __name__)
+
+
+def _template_supports_escalation(template_id):
+    """True when the template defines a privilege escalation command.
+
+    Returns True for unknown/missing template_id to preserve legacy behavior
+    (the escalation credential is only meaningful when the template actually
+    defines an escalation command; templates without one must never store one).
+    """
+    if not template_id:
+        return True
+    try:
+        tpl = DeviceTemplates.get_or_none(DeviceTemplates.id == template_id)
+        if not tpl:
+            return True
+        priv = tpl.privilege_escalation or {}
+        return bool(isinstance(priv, dict) and priv.get("command"))
+    except Exception as e:
+        log.warning(f"_template_supports_escalation({template_id}) error: {e}")
+        return True
 
 
 @non_mikrotik_api.route('/api/non-mikrotik/devices/list', methods=['POST'])
@@ -129,7 +153,7 @@ def add_non_mikrotik():
             user_name=enc_user, password=enc_pass, port="",
             update_availble=False, current_firmware="", arch="", sensors="",
             router_type="", wifi_config="", upgrade_avail=False,
-            owner=user, created=now, modified=now, peer_ip="", failed_attempt=0,
+            owner=user, created=now, modified=now, peer_ip=util.resolve_peer_ip({"ip": ip}), failed_attempt=0,
             status="active", firmware_to_install="", syslog_configured=False, upgrade_device=False,
             device_type=device_type, device_model=device_model, template_id=template_id
         )
@@ -170,7 +194,7 @@ def add_non_mikrotik():
             default_conn = DeviceConnections.get(DeviceConnections.device_id == new_dev.id, DeviceConnections.is_default == True)
             default_conn.credential_id = new_cred.id
             default_conn.save()
-        if enable_password:
+        if enable_password and _template_supports_escalation(template_id):
             kek = kek_provider.get_kek()
             enable_enc = envelope_crypto.full_encrypt(enable_password, kek)
             priv_cred = Credentials.create(
@@ -269,42 +293,79 @@ def edit_non_mikrotik():
                     cred.modified = now
                     cred.save()
 
-        # Handle enable/escalation password
-        enable_password = data.get('enable_password')
-        if enable_password and enable_password not in (None, ''):
-            now = datetime.datetime.now(datetime.timezone.utc)
-            kek = kek_provider.get_kek()
-            enable_enc = envelope_crypto.full_encrypt(enable_password, kek)
+        # Link the primary credential to the default connection when it was
+        # never linked (e.g. device created without credentials then edited).
+        try:
             default_conn = DeviceConnections.get_or_none(
                 DeviceConnections.device_id == devid,
                 DeviceConnections.is_default == True
             )
-            enable_cred = None
-            if default_conn and default_conn.privileged_credential_id:
-                enable_cred = Credentials.get_or_none(
-                    Credentials.id == default_conn.privileged_credential_id
-                )
-            if enable_cred:
-                enable_cred.encrypted_password = enable_enc['encrypted_payload']
-                enable_cred.dek_encrypted = enable_enc['dek_encrypted']
-                enable_cred.modified = now
-                enable_cred.save()
-            else:
-                enable_cred = Credentials.create(
-                    name=f"Device {devid} Enable", credential_type='enable',
-                    username='',
-                    encrypted_password=enable_enc['encrypted_payload'],
-                    dek_encrypted=enable_enc['dek_encrypted'],
-                    auth_method='password', scope='device',
-                    device_id=devid, owner_id=user.id,
-                    created=now, modified=now
-                )
-                if default_conn:
-                    default_conn.privileged_credential_id = enable_cred.id
+            if default_conn and not default_conn.credential_id:
+                primary = Credentials.select().where(
+                    Credentials.device_id == devid,
+                    Credentials.scope == 'device',
+                    Credentials.credential_type != 'enable'
+                ).order_by(Credentials.id.desc()).first()
+                if primary:
+                    default_conn.credential_id = primary.id
                     default_conn.save()
+        except Exception as e:
+            log.error(f"Failed to link credential to connection: {e}")
+
+        # Handle enable/escalation password
+        enable_password = data.get('enable_password')
+        if data.get('clear_enable_password'):
+            # Explicitly remove a stale escalation credential (e.g. a previously
+            # auto-filled value the user never intended).
+            default_conn = DeviceConnections.get_or_none(
+                DeviceConnections.device_id == devid,
+                DeviceConnections.is_default == True
+            )
+            if default_conn and default_conn.privileged_credential_id:
+                try:
+                    Credentials.delete().where(
+                        Credentials.id == default_conn.privileged_credential_id
+                    ).execute()
+                except Exception as e:
+                    log.error(f"Failed to delete stale enable credential for device {devid}: {e}")
+                default_conn.privileged_credential_id = None
+                default_conn.save()
+        elif enable_password and enable_password not in (None, ''):
+            now = datetime.datetime.now(datetime.timezone.utc)
+            if not _template_supports_escalation(data.get('template_id')):
+                enable_password = None
+            if enable_password:
+                kek = kek_provider.get_kek()
+                enable_enc = envelope_crypto.full_encrypt(enable_password, kek)
+                default_conn = DeviceConnections.get_or_none(
+                    DeviceConnections.device_id == devid,
+                    DeviceConnections.is_default == True
+                )
+                enable_cred = None
+                if default_conn and default_conn.privileged_credential_id:
+                    enable_cred = Credentials.get_or_none(
+                        Credentials.id == default_conn.privileged_credential_id
+                    )
+                if enable_cred:
+                    enable_cred.encrypted_password = enable_enc['encrypted_payload']
+                    enable_cred.dek_encrypted = enable_enc['dek_encrypted']
+                    enable_cred.modified = now
+                    enable_cred.save()
+                else:
+                    enable_cred = Credentials.create(
+                        name=f"Device {devid} Enable", credential_type='enable',
+                        username='',
+                        encrypted_password=enable_enc['encrypted_payload'],
+                        dek_encrypted=enable_enc['dek_encrypted'],
+                        auth_method='password', scope='device',
+                        device_id=devid, owner_id=user.id,
+                        created=now, modified=now
+                    )
+                    if default_conn:
+                        default_conn.privileged_credential_id = enable_cred.id
+                        default_conn.save()
 
         if 'protocol' in data or 'port' in data:
-            from libs.db.db_pam import DeviceConnections
             now = datetime.datetime.now(datetime.timezone.utc)
             port_map = {'ssh': 22, 'telnet': 23, 'web': 80, 'api': 8728}
             
@@ -347,18 +408,11 @@ def delete_non_mikrotik():
     if not devid:
         return buildResponse({"status": "failed", "error": "id required"}, 400)
     try:
-        DevGroupRel.delete().where(DevGroupRel.device_id == devid).execute()
-        from libs.db.db_pam import DeviceConnections, Credentials
-        try:
-            from libs.db.db_pam_pro import ConnectionSessions
-            ConnectionSessions.delete().where(ConnectionSessions.device_id == devid).execute()
-        except ImportError:
-            pass
-        Credentials.delete().where(Credentials.device_id == devid).execute()
-        DeviceConnections.delete().where(DeviceConnections.device_id == devid).execute()
-        db_device.Devices.delete_by_id(devid)
-        db_syslog.add_syslog_event(user, "Device", "Delete", get_ip(), get_agent(), json.dumps(data))
-        return buildResponse({"status": "success"})
+        from libs.db import db_groups
+        if db_groups.delete_device(devid):
+            db_syslog.add_syslog_event(user, "Device", "Delete", get_ip(), get_agent(), json.dumps(data))
+            return buildResponse({"status": "success"})
+        return buildResponse({"status": "failed", "error": "Unable to delete device"}, 200)
     except Exception as e:
         log.error(f"delete_non_mikrotik error: {e}")
         return buildResponse({"status": "failed", "error": str(e)}, 200)
@@ -458,7 +512,8 @@ def _validate_device_row(device_info, index, brands_set, templates_map):
                 if protocol not in tmpl_protos:
                     errors.append(f"Template '{template.get('display_name')}' does not support protocol '{protocol}' (supports: {', '.join(tmpl_protos)})")
 
-            has_privilege_escalation = bool(template.get('privilege_escalation'))
+            priv_esc = template.get('privilege_escalation')
+            has_privilege_escalation = bool(isinstance(priv_esc, dict) and priv_esc.get('command'))
             enable_provided = bool(device_info.get('enable_password'))
             if has_privilege_escalation and not enable_provided:
                 errors.append(f"Template '{template.get('display_name')}' requires enable_password")
