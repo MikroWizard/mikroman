@@ -218,7 +218,7 @@ def save_editform():
         return buildResponse({"result": "failed", "err": str(e)}, 200)
 
 @app.route("/api/dev/add", methods=["POST"])
-@login_required(role="admin", perm={"device_manager": "write"})
+@login_required(role="admin", perm={"device": "write"})
 def add_device():
     """add a new device manually (Task 18.1)"""
     input = request.json

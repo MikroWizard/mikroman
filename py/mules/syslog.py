@@ -10,6 +10,7 @@ import time
 import logging
 import re
 import os
+import config
 
 from libs.db import db_device, db_AA, db_events, db_sysconfig
 from libs import util
@@ -21,6 +22,29 @@ except ImportError:
     pass
 
 log = logging.getLogger("SYSLOG")
+
+def _get_redis_client():
+    """Return the shared Redis client used by the rest of the backend."""
+    try:
+        if hasattr(config, 'SESSION_REDIS') and config.SESSION_REDIS:
+            return config.SESSION_REDIS
+    except Exception:
+        pass
+    try:
+        return config.flask_config["SESSION_REDIS"]
+    except Exception:
+        return None
+
+def _terminal_gateway_active(dev_id, username):
+    """True if a Terminal Gateway session is currently active for this device + device credential username."""
+    try:
+        client = _get_redis_client()
+        if not client:
+            return False
+        key = f"terminal_gw_active:{dev_id}:{username}"
+        return int(client.scard(key) or 0) > 0
+    except Exception:
+        return False
 
 # Cache for devices and users to reduce DB calls
 # NOTE: asyncio event loop is single-threaded — these dicts are safe
@@ -54,15 +78,25 @@ class SyslogUDPProtocol(asyncio.DatagramProtocol):
     async def get_cached_users(dev_id, opts):
         """Get users from cache or router API — awaits so event loop stays free."""
         now = time.time()
+        stale = None
         if dev_id in user_cache:
             users, timestamp = user_cache[dev_id]
             if now - timestamp < USER_CACHE_TTL:
                 return users
+            stale = users
         # Cache miss — run blocking API call in thread pool
         users = await asyncio.to_thread(util.get_local_users, opts)
         if users:
             user_cache[dev_id] = (users, now)
-        return users or []
+            return users
+        # get_local_users returns False on API error and [] when the router has no
+        # local users. On failure, fall back to the last-known-good list instead of
+        # silently returning [] (which would classify every login as radius).
+        if users is False:
+            log.warning(f"[Syslog] Local-user fetch failed for device {dev_id}; using cached list")
+            if stale is not None:
+                return stale
+        return []
     
     @staticmethod
     def is_duplicate_message(addr, message):
@@ -220,6 +254,13 @@ class SyslogUDPProtocol(asyncio.DatagramProtocol):
                             # Await async user lookup
                             users = await self.get_cached_users(dev.id, opts)
                         msg = 'local' if login_info[0] in users else 'radius'
+                        # Terminal Gateway sessions are tracked by the backend via lifecycle-based
+                        # Auth rows. Suppress the router's own local login/logout events so they
+                        # don't appear as confusing "local user" rows unrelated to the real customer.
+                        if msg == 'local':
+                            is_gw = await asyncio.to_thread(_terminal_gateway_active, dev.id, login_info[0])
+                            if is_gw:
+                                return
                         if 'logged in' in message and 'via api' not in message:
                             await asyncio.to_thread(
                                 db_AA.Auth.add_log, dev.id, 'loggedin',
@@ -418,3 +459,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         log.info("Server stopped")
+

@@ -9,6 +9,7 @@ import json
 import os
 import time
 
+from urllib.parse import quote
 import redis
 
 # first load config from a json file,
@@ -57,7 +58,9 @@ CRYPT_KEY = srvconf["PYSRV_CRYPT_KEY"]
 # Add as PYSRV_KEK in /opt/mikrowizard/server-conf.json.
 # The app starts normally without it; only credential encryption/decryption will fail.
 KEK = srvconf.get("PYSRV_KEK", "")
-TERMINAL_GATEWAY_URL = srvconf.get("PYSRV_TERMINAL_GATEWAY_URL", "http://terminal-gateway:8080")
+TERMINAL_GATEWAY_URL = srvconf.get("terminal_gateway_url") or srvconf.get("PYSRV_TERMINAL_GATEWAY_URL") or "http://127.0.0.1:8201"
+# Shared bearer secret for backend -> terminal gateway API auth (set by gateway install.sh)
+TERMINAL_GATEWAY_TOKEN = srvconf.get("terminal_gateway_token", "")
 BACKUP_DIR = srvconf["PYSRV_BACKUP_FOLDER"]
 FIRM_DIR = srvconf["PYSRV_FIRM_FOLDER"]
 
@@ -68,7 +71,13 @@ IS_SQLITE = DATABASE_HOST.startswith("/")
 # Flask + session config
 # http://flask.pocoo.org/docs/1.0/config/
 # https://pythonhosted.org/Flask-Session/
-redishost = srvconf["PYSRV_REDIS_HOST"]
+redishost = srvconf.get("PYSRV_REDIS_HOST", "127.0.0.1:6379")
+redispassword = srvconf.get("PYSRV_REDIS_PASSWORD", "")
+
+if redispassword:
+    redis_url = "redis://:{}@{}/0".format(quote(str(redispassword)), redishost)
+else:
+    redis_url = "redis://{}".format(redishost)
 
 flask_config = dict(
     # app config
@@ -76,7 +85,7 @@ flask_config = dict(
     SECRET_KEY=None,  # we have server-side sessions
     # session config - hardcoded to Redis
     SESSION_TYPE="redis",
-    SESSION_REDIS=redis.from_url("redis://{}".format(redishost)),
+    SESSION_REDIS=redis.from_url(redis_url),
     SESSION_COOKIE_NAME="Session-Id",
     SESSION_COOKIE_SECURE=srvconf["PYSRV_COOKIE_HTTPS_ONLY"]
     if not IS_LOCAL_DEV

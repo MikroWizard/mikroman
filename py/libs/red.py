@@ -33,10 +33,13 @@ class RedisDB(object):
         self.start_time = options.get('start_time',self.current_time + datetime.timedelta(days=-30))
         self.end_time =  options.get('end_time',self.current_time)
         self.retention = options.get('retention', 2629800000)
-        _redis_parts = app_config.redishost.split(':')
+        _redis_host = getattr(app_config, 'redishost', '127.0.0.1:6379')
+        _redis_pass = app_config.srvconf.get('PYSRV_REDIS_PASSWORD', None) or None
+        _redis_parts = _redis_host.split(':')
         self.r = redis.Redis(
             host=_redis_parts[0],
             port=int(_redis_parts[1]) if len(_redis_parts) > 1 else 6379,
+            password=_redis_pass,
             db=0
         )
         self.delta = options.get('delta','')

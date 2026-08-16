@@ -20,6 +20,7 @@ from pyrad.server import RemoteHost
 from libs.mschap3 import mschap,mppe
 from libs.db import db,db_user_group_perm,db_device,db_groups,db_device,db_AA,db_sysconfig
 from libs.util import FourcePermToRouter
+import config
 
 try:
     import uvloop
@@ -233,6 +234,17 @@ class RadServer(ServerAsync):
                     if reply and reply.code == AccessAccept:
                         matched_hash_type = 'normal'
 
+            # The temp hash is a one-time login credential for webfig proxy /
+            # user-based logins. Clear it once this authentication attempt has
+            # completed (success or failure) so it cannot be reused.
+            if tnthash:
+                try:
+                    from libs.db import db_pro
+                    UserpPro = db_pro.UserPoro
+                    UserpPro.update(temp_hash=None).where(UserpPro.id == u.id).execute()
+                except Exception as e:
+                    log.error("Failed to clear webfig proxy hash: %s", str(e))
+
             if reply and reply.code == AccessAccept:
                 if ISPRO:
                     is_proxy = (matched_hash_type == 'pth')
@@ -246,20 +258,21 @@ class RadServer(ServerAsync):
 
                     if is_proxy:
                         log.info("web-proxy User %s logged in from %s" % (u.username, userip))
+                        # Resolve the proxy session's MikroWizard UUID via the temp hash
+                        # so this login links to the correct recording/session row.
+                        proxy_sid = None
+                        try:
+                            _r = config.flask_config.get("SESSION_REDIS") if hasattr(config, 'flask_config') else None
+                            if _r:
+                                raw_sid = _r.get(f"proxy_temp_hash:{tnthash}")
+                                if raw_sid:
+                                    proxy_sid = raw_sid.decode('utf-8') if isinstance(raw_sid, bytes) else raw_sid
+                        except Exception as e:
+                            log.error("Failed to resolve proxy session id: %s", str(e))
                         db_AA.Auth.add_log(dev.id, 'proxy', u.username, userip,
-                                           by="proxy", sessionid=None, timestamp=tz,
+                                           by="proxy", sessionid=proxy_sid, timestamp=tz,
                                            message="proxy login")
                         self._proxy_users[(u.username, devip)] = tz
-
-                        if matched_hash_type == 'pth':
-                            try:
-                                from libs.db import db_pro
-                                UserpPro = db_pro.UserPoro
-                                user_pro = UserpPro.select().where(UserpPro.id == u.id).get()
-                                user_pro.thash = None
-                                user_pro.save()
-                            except Exception as e:
-                                log.error("Failed to clear webfig proxy hash: %s", str(e))
 
                 # send_response is thread-safe (UDP sendto)
                 protocol.send_response(reply, addr)
@@ -402,4 +415,5 @@ def main():
     
 if __name__ == '__main__':
     main()
+
 

@@ -19,6 +19,7 @@ from libs.red import RedisDB
 import feedparser
 import requests
 import json
+from urllib.parse import quote
 import concurrent.futures
 try:
     from libs import utilpro
@@ -28,7 +29,14 @@ except ImportError:
     ISPRO=False
     pass
 
+try:
+    from libs.db.db_terminal_pro import TerminalSessionPro
+except ImportError:
+    TerminalSessionPro = None
+
 log = logging.getLogger("logs")
+
+SCRIPT_VERSION = "2.0"
 
 import time
 import config
@@ -45,7 +53,11 @@ def _get_redis_client():
     except Exception:
         pass
     try:
-        return redis.from_url(f"redis://{config.redishost}")
+        _rhost = getattr(config, "redishost", "127.0.0.1:6379")
+        _rpass = config.srvconf.get("PYSRV_REDIS_PASSWORD", "")
+        if _rpass:
+            return redis.from_url(f"redis://:{quote(str(_rpass))}@{_rhost}/0")
+        return redis.from_url(f"redis://{_rhost}")
     except Exception:
         return None
 
@@ -142,6 +154,33 @@ def list_auth_log():
         except Exception as se:
             log.warning(f"[WebFig Debug list_auth_log] Cleanup exception: {se}")
 
+        # Auto-close stale Terminal-Gateway auth rows (reconcile against terminal_sessions_pro)
+        if TerminalSessionPro is not None:
+            try:
+                r_client = _get_redis_client()
+                stale_tg = list(auth.select().where(
+                    (auth.by == 'Terminal-Gateway') & (auth.ended == 0)
+                ))
+                for srow in stale_tg:
+                    sid = srow.sessionid
+                    if not sid:
+                        continue
+                    sess = TerminalSessionPro.get_or_none(id=sid)
+                    if sess is None or sess.ended is not None or sess.status != 'active':
+                        srow.ended = int(time.time())
+                        srow.save()
+                        if r_client:
+                            meta = r_client.get(f"terminal_gw_meta:{sid}")
+                            if meta:
+                                try:
+                                    m = json.loads(meta)
+                                    r_client.srem(f"terminal_gw_active:{m.get('device_id')}:{m.get('cred_username')}", sid)
+                                except Exception:
+                                    pass
+                                r_client.delete(f"terminal_gw_meta:{sid}")
+            except Exception as te:
+                log.warning(f"Terminal-Gateway cleanup exception: {te}")
+
         if len(clauses):
             expr = reduce(operator.and_, clauses)
             query=auth.select(*selector).join(devs).where(expr)
@@ -228,7 +267,7 @@ def list_account_log():
 
 
 @app.route('/api/devlogs/list', methods = ['POST'])
-@login_required(role='admin', perm={'device':'read'})
+@login_required(role='admin', perm={'device_log':'read'})
 def dev_events_list():
     """return Device Events"""
     input = request.json
@@ -304,7 +343,7 @@ def dev_events_list():
 
 
 @app.route('/api/syslog/list', methods = ['POST'])
-@login_required(role='admin', perm={'settings':'read'})
+@login_required(role='admin', perm={'system_log':'read'})
 def syslog_list():
     """return MikroWizard innternal syslog"""
     input = request.json
@@ -361,7 +400,7 @@ def syslog_list():
 
 
 @app.route('/api/devlogs/details/list', methods = ['POST'])
-@login_required(role='admin', perm={'device':'read'})
+@login_required(role='admin', perm={'device_log':'read'})
 def dev_events_details_list():
     """return list of event details(types) for filters"""
     input = request.json
@@ -495,7 +534,8 @@ def dashboard_stats():
                 "serial_number": res['serial'],
                 "username": username.strip() if username else "",
                 "version": __version__,
-                "ISPRO": ISPRO
+                "ISPRO": ISPRO,
+                "script_version": SCRIPT_VERSION
             }
             if versioncheck:
                 params['versioncheck'] = True 

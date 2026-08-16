@@ -45,17 +45,34 @@ class Auth(BaseModel):
         log.error(f"DEBUG add_log ENTRY: devid={devid}, type={type}, username={username}, ip={ip}, by={by}, sessionid={sessionid}, timestamp={timestamp}, message={message}")
         if by=='proxy' or by=='Web-Proxy':
             ts = timestamp or int(time.time())
-            cutoff = ts - 30
             u_str = username.strip() if username else ''
-            existing = Auth.select().where(
-                (Auth.devid == devid) &
-                (Auth.username == u_str) &
-                (Auth.by == 'Web-Proxy') &
-                (Auth.started >= cutoff)
-            ).order_by(Auth.id.desc()).first()
+            # Resolve the real session id (MikroWizard proxy UUID). Never fabricate a
+            # 'sessionid<timestamp>' value — such rows have no recording and break playback.
+            sid = str(sessionid) if (sessionid and sessionid != True) else None
+            if sid and sid.startswith('sessionid'):
+                sid = None
+
+            existing = None
+            # 1) Exact match on the session id (accurate link to the proxy_init row).
+            if sid:
+                existing = Auth.select().where(
+                    (Auth.sessionid == sid) &
+                    (Auth.by == 'Web-Proxy')
+                ).order_by(Auth.id.desc()).first()
+            # 2) Fallback: most recent Web-Proxy row for this user/device within 30s
+            #    (legacy callers that don't supply a session id).
+            if not existing:
+                cutoff = ts - 30
+                existing = Auth.select().where(
+                    (Auth.devid == devid) &
+                    (Auth.username == u_str) &
+                    (Auth.by == 'Web-Proxy') &
+                    (Auth.started >= cutoff)
+                ).order_by(Auth.id.desc()).first()
+
             if existing:
-                if sessionid and sessionid != True and not str(sessionid).startswith('sessionid'):
-                    existing.sessionid = str(sessionid)
+                if sid:
+                    existing.sessionid = sid
                     existing.save()
                 return True
 
@@ -67,7 +84,7 @@ class Auth(BaseModel):
                 by='Web-Proxy',
                 started=ts,
                 ended=0,
-                sessionid=str(sessionid) if (sessionid and sessionid != True) else ('sessionid'+str(ts)),
+                sessionid=sid,
                 message=message or 'proxy'
             )
             event.save()
@@ -156,7 +173,19 @@ class Auth(BaseModel):
                         a.by = by.strip()
                     a.save()
                 else:
-                    # RADIUS hasn't arrived yet — create row with connection details.
+                    # No RADIUS accounting row — likely a WebFig proxy login (MW-proxy
+                    # accounting creates no Auth row). Link to the active Web-Proxy
+                    # session instead of creating a no-sessionid row that renders as a
+                    # "local" login. Only reached for message=='radius' (non-local).
+                    active_proxy = Auth.select().where(
+                        (Auth.devid == devid) &
+                        (Auth.username == username.strip()) &
+                        (Auth.by == 'Web-Proxy') &
+                        ((Auth.ended.is_null(True)) | (Auth.ended == 0))
+                    ).order_by(Auth.started.desc()).first()
+                    if active_proxy:
+                        return True
+                    # Genuine RADIUS login whose accounting hasn't arrived yet — create row.
                     if by:
                         by = by.strip()
                     event = Auth(devid=devid, ltype=type, username=username.strip(), ip=ip.strip(), by=by, started=timestamp, message=message)
@@ -262,5 +291,6 @@ if __name__ == '__main__':
 
     # quick adhoc tests
     logging.basicConfig(level=logging.DEBUG)
+
 
 

@@ -41,7 +41,7 @@ def _user_can_access_device(user, device_id):
 # Device Brands
 # ==========================================
 @app.route("/api/pam/brands/list", methods=["POST"])
-@login_required(role="admin", perm={"connection_manager": "read"})
+@login_required(role="admin", perm={"pam_config": "read"})
 def list_brands():
     blocked = _license_blocked()
     if blocked:
@@ -50,7 +50,7 @@ def list_brands():
     return buildResponse(brands, 200)
 
 @app.route("/api/pam/brands/create", methods=["POST"])
-@login_required(role="admin", perm={"connection_manager": "full"})
+@login_required(role="admin", perm={"pam_config": "full"})
 def create_brand():
     if not ISPRO:
         return buildResponse({'status': 'failed', 'err': 'Pro license required'}, 200)
@@ -69,7 +69,7 @@ def create_brand():
         return buildResponse({'status': 'failed', 'err': str(e)}, 200)
 
 @app.route("/api/pam/brands/update", methods=["POST"])
-@login_required(role="admin", perm={"connection_manager": "full"})
+@login_required(role="admin", perm={"pam_config": "full"})
 def update_brand():
     if not ISPRO:
         return buildResponse({'status': 'failed', 'err': 'Pro license required'}, 200)
@@ -93,7 +93,7 @@ def update_brand():
         return buildResponse({'status': 'failed', 'err': str(e)}, 200)
 
 @app.route("/api/pam/brands/delete", methods=["POST"])
-@login_required(role="admin", perm={"connection_manager": "full"})
+@login_required(role="admin", perm={"pam_config": "full"})
 def delete_brand():
     if not ISPRO:
         return buildResponse({'status': 'failed', 'err': 'Pro license required'}, 200)
@@ -123,7 +123,7 @@ def delete_brand():
 # Device Templates
 # ==========================================
 @app.route("/api/pam/templates/list", methods=["POST"])
-@login_required(role="admin", perm={"connection_manager": "read"})
+@login_required(role="admin", perm={"pam_config": "read"})
 def list_templates():
     blocked = _license_blocked()
     if blocked:
@@ -133,7 +133,7 @@ def list_templates():
     return buildResponse(TemplateService.list_templates(brand=brand_id), 200)
 
 @app.route("/api/pam/templates/get", methods=["POST"])
-@login_required(role="admin", perm={"connection_manager": "read"})
+@login_required(role="admin", perm={"pam_config": "read"})
 def get_template():
     blocked = _license_blocked()
     if blocked:
@@ -145,7 +145,7 @@ def get_template():
     return buildResponse(t, 200)
 
 @app.route("/api/pam/templates/create", methods=["POST"])
-@login_required(role="admin", perm={"connection_manager": "full"})
+@login_required(role="admin", perm={"pam_config": "full"})
 def create_template():
     if not ISPRO:
         return buildResponse({'status': 'failed', 'err': 'Pro license required'}, 200)
@@ -166,7 +166,7 @@ def create_template():
         return buildResponse({'status': 'failed', 'err': str(e)}, 200)
 
 @app.route("/api/pam/templates/update", methods=["POST"])
-@login_required(role="admin", perm={"connection_manager": "full"})
+@login_required(role="admin", perm={"pam_config": "full"})
 def update_template():
     if not ISPRO:
         return buildResponse({'status': 'failed', 'err': 'Pro license required'}, 200)
@@ -180,7 +180,7 @@ def update_template():
         return buildResponse({'status': 'failed', 'err': str(e)}, 200)
 
 @app.route("/api/pam/templates/delete", methods=["POST"])
-@login_required(role="admin", perm={"connection_manager": "full"})
+@login_required(role="admin", perm={"pam_config": "full"})
 def delete_template():
     if not ISPRO:
         return buildResponse({'status': 'failed', 'err': 'Pro license required'}, 200)
@@ -193,7 +193,7 @@ def delete_template():
 # Credentials
 # ==========================================
 @app.route("/api/pam/credentials/list", methods=["POST"])
-@login_required(role="admin", perm={"connection_manager": "read"})
+@login_required(role="admin", perm={"pam_config": "read"})
 def list_credentials():
     blocked = _license_blocked()
     if blocked:
@@ -207,7 +207,7 @@ def list_credentials():
     return buildResponse(creds, 200)
 
 @app.route("/api/pam/credentials/create", methods=["POST"])
-@login_required(role="admin", perm={"connection_manager": "full"})
+@login_required(role="admin", perm={"pam_config": "full"})
 def create_credential():
     data = request.json or {}
     try:
@@ -230,7 +230,7 @@ def create_credential():
         return buildResponse({'status': 'failed', 'err': 'Error creating credential'}, 200)
 
 @app.route("/api/pam/credentials/update", methods=["POST"])
-@login_required(role="admin", perm={"connection_manager": "full"})
+@login_required(role="admin", perm={"pam_config": "full"})
 def update_credential():
     data = request.json or {}
     try:
@@ -246,7 +246,7 @@ def update_credential():
         return buildResponse({'status': 'failed', 'err': str(e)}, 200)
 
 @app.route("/api/pam/credentials/rotate", methods=["POST"])
-@login_required(role="admin", perm={"connection_manager": "full"})
+@login_required(role="admin", perm={"pam_config": "full"})
 def rotate_credential():
     data = request.json or {}
     try:
@@ -258,7 +258,7 @@ def rotate_credential():
         return buildResponse({'status': 'failed', 'err': 'Error rotating credential'}, 200)
 
 @app.route("/api/pam/credentials/delete", methods=["POST"])
-@login_required(role="admin", perm={"connection_manager": "full"})
+@login_required(role="admin", perm={"pam_config": "full"})
 def delete_credential():
     cid = (request.json or {}).get('id')
     if CredentialService.delete_credential(cid):
@@ -269,7 +269,7 @@ def delete_credential():
 # Device Connections
 # ==========================================
 @app.route("/api/pam/device-connections/list", methods=["POST"])
-@login_required(role="admin", perm={"connection_manager": "read"})
+@login_required(role="admin", perm={"pam_config": "read"})
 def list_device_connections():
     blocked = _license_blocked()
     if blocked:
@@ -281,7 +281,7 @@ def list_device_connections():
     return buildResponse(conns, 200)
 
 @app.route("/api/pam/device-connections/create", methods=["POST"])
-@login_required(role="admin", perm={"connection_manager": "full"})
+@login_required(role="admin", perm={"pam_config": "full"})
 def create_device_connection():
     data = request.json or {}
     try:
@@ -302,7 +302,7 @@ def create_device_connection():
         return buildResponse({'status': 'failed', 'err': str(e)}, 200)
 
 @app.route("/api/pam/device-connections/update", methods=["POST"])
-@login_required(role="admin", perm={"connection_manager": "full"})
+@login_required(role="admin", perm={"pam_config": "full"})
 def update_device_connection():
     data = request.json or {}
     try:
@@ -319,9 +319,9 @@ def update_device_connection():
     except Exception as e:
         return buildResponse({'status': 'failed', 'err': str(e)}, 200)
 
-@login_required(role="admin", perm={"connection_manager": "full"})
+@login_required(role="admin", perm={"pam_config": "full"})
 @app.route("/api/pam/credential-mapping/set", methods=["POST"])
-@login_required(role="admin", perm={"connection_manager": "full"})
+@login_required(role="admin", perm={"pam_config": "full"})
 def set_credential_mapping():
     data = request.json or {}
     device_id = data.get('device_id')
@@ -359,7 +359,7 @@ def set_credential_mapping():
         return buildResponse({'status': 'failed', 'err': str(e)}, 200)
 
 @app.route("/api/pam/device-connections/delete", methods=["POST"])
-@login_required(role="admin", perm={"connection_manager": "full"})
+@login_required(role="admin", perm={"pam_config": "full"})
 def delete_device_connection():
     try:
         DeviceConnections.delete_by_id((request.json or {}).get('id'))
@@ -371,7 +371,7 @@ def delete_device_connection():
 # Sessions
 # ==========================================
 @app.route("/api/pam/sessions/list", methods=["POST"])
-@login_required(role="admin", perm={"connection_manager": "read"})
+@login_required(role="admin", perm={"pam_session": "read"})
 def list_sessions():
     blocked = _license_blocked()
     if blocked:
@@ -391,7 +391,7 @@ def list_sessions():
     return buildResponse(sessions, 200)
 
 @app.route("/api/pam/sessions/initiate", methods=["POST"])
-@login_required(role="admin", perm={"connection_manager": "read"})
+@login_required(role="admin", perm={"pam_session": "write"})
 def initiate_session():
     data = request.json or {}
     device_id = data.get('device_id')
@@ -445,11 +445,11 @@ def initiate_session():
         return buildResponse({'status': 'failed', 'err': 'Connection failed'}, 200)
 
 @app.route("/api/pam/sessions/kill", methods=["POST"])
-@login_required(role="admin", perm={"connection_manager": "read"})
+@login_required(role="admin", perm={"pam_session": "full"})
 def kill_session():
     return buildResponse({'status': 'failed', 'error': 'Use PRO WebSocket to kill sessions.'}, 400)
 
 @app.route("/api/pam/sessions/info", methods=["POST"])
-@login_required(role="admin", perm={"connection_manager": "read"})
+@login_required(role="admin", perm={"pam_session": "read"})
 def get_session_info():
     return buildResponse({'status': 'failed', 'error': 'Use PRO /api/terminal/sessions.'}, 400)

