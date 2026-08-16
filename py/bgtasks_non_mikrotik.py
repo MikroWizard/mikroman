@@ -13,9 +13,14 @@ import ipaddress
 from libs.db import db_tasks, db_syslog, db_device
 from libs import util, kek_provider, envelope_crypto
 from libs.db.db_device import Devices
+from libs.db.db import reset_db
 from libs.db.db_groups import DevGroupRel
 from libs.db.db_pam import DeviceConnections, Credentials, DeviceTemplates
-from libs.agent_validation import validate_agent_modes
+try:
+    from libs.agent_validation import validate_agent_modes
+except ImportError:
+    def validate_agent_modes(agent_modes):
+        return True, None
 from libs.webutil import get_myself, get_ip, get_agent
 
 log = logging.getLogger("bgtasks_non_mikrotik")
@@ -29,6 +34,7 @@ PORT_MAP = {'ssh': 22, 'telnet': 23, 'web': 80, 'api': 8728}
 
 @spool(pass_arguments=True)
 def bulk_add_non_mikrotik_devices(*args, **kwargs):
+    reset_db()
     try:
         task_id = kwargs.get('task_id', '')
         task = db_tasks.get_bulk_add_task(task_id)
@@ -87,7 +93,7 @@ def bulk_add_non_mikrotik_devices(*args, **kwargs):
                     user_name=enc_user, password=enc_pass, port="",
                     update_availble=False, current_firmware="", arch="", sensors="",
                     router_type="", wifi_config="", upgrade_avail=False,
-                    owner=user_id, created=now, modified=now, peer_ip="", failed_attempt=0,
+                    owner=user_id, created=now, modified=now, peer_ip=util.resolve_peer_ip({"ip": ip}), failed_attempt=0,
                     status="active", firmware_to_install="", syslog_configured=False, upgrade_device=False,
                     device_type=device_type, device_model=device_model, template_id=template_id
                 )

@@ -37,6 +37,25 @@ else:
     )
 
 
+def reset_db():
+    """Close all pooled connections so the next query opens fresh sockets.
+
+    Called at the start of each uWSGI spool job to discard any connection
+    inherited across a fork (which would otherwise fail with
+    "could not receive data from server: Socket operation on non-socket").
+    This only affects the current process's pool, never other workers/spoolers.
+    """
+    try:
+        database.close_all()
+    except AttributeError:
+        try:
+            database.close()
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
 # --------------------------------------------------------------------------
 # Base model and common methods
 

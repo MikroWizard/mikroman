@@ -19,6 +19,7 @@ import queue
 import pexpect
 import re
 from libs.db.db_device import Devices,EXCLUDED,database
+from libs.db.db import reset_db
 import ipaddress
 import socket
 from libs.check_routeros.routeros_check.resource import RouterOSCheckResource
@@ -45,6 +46,11 @@ MAX_CONCURRENT_THREADS = getattr(config, "MAX_CONCURRENT_THREADS", 10)
 CANCEL_CHECK_INTERVAL = 10
 SOCKET_TIMEOUT = getattr(config, "SOCKET_SCAN_TIMEOUT", 0.2)
 
+# devices.mac is backed by a partial unique index (migration 054) that is unique
+# only where mac is non-empty.  ON CONFLICT must repeat that predicate to target
+# the partial index instead of a full column constraint.
+MAC_CONFLICT_WHERE = (Devices.mac.is_null(False) & (Devices.mac != ''))
+
 import logging
 log = logging.getLogger("bgtasks")
 
@@ -61,6 +67,7 @@ def cancel_task(task_name='',task=0):
 
 @spool(pass_arguments=True)
 def check_devices_for_update(*args, **kwargs):
+    reset_db()
     task=db_tasks.update_check_status()
     if task.action=='cancel':
         cancel_task('Firmware Check',task)
@@ -106,6 +113,7 @@ def check_devices_for_update(*args, **kwargs):
 
 @spool(pass_arguments=True)
 def update_device(*args, **kwargs):
+    reset_db()
     task=db_tasks.update_job_status()
     if task.action=='cancel':
         cancel_task('Firmware Update',task)
@@ -157,6 +165,7 @@ def update_device(*args, **kwargs):
 
 @spool(pass_arguments=True)
 def download_firmware(*args, **kwargs):
+    reset_db()
     task=db_tasks.downloader_job_status()
     if task.action=='cancel':
         cancel_task('Firmware Download',task)
@@ -197,6 +206,7 @@ def download_firmware(*args, **kwargs):
 
 @spool(pass_arguments=True)
 def backup_devices(*args, **kwargs):
+    reset_db()
     task=db_tasks.backup_job_status()
     if task.action=='cancel':
         cancel_task('Backup',task)
@@ -249,6 +259,7 @@ def extract_device_from_macdiscovery(line):
 
 @spool(pass_arguments=True)
 def scan_with_mac(timer=2):
+    reset_db()
     task=db_tasks.scanner_job_status()
     child = pexpect.spawn('mactelnet -l')
     child.expect("MAC-Address")
@@ -280,6 +291,7 @@ def scan_with_mac(timer=2):
             temp['uptime']=DevData[4]
             temp['license']=DevData[5]
             temp['interface']=DevData[6]
+            temp['device_type']='mikrotik'
             data.append(temp)
         except:
             #print("folowwing line is not valid")
@@ -299,13 +311,14 @@ def scan_with_mac(timer=2):
         #ugly hack to reset sequnce number if device id
         database.execute_sql("SELECT setval('devices_id_seq', MAX(id), true) FROM devices")
         # update device list
-        Devices.insert_many(data).on_conflict(conflict_target=Devices.mac,update={Devices.ip:EXCLUDED.ip,Devices.uptime:EXCLUDED.uptime,Devices.name:EXCLUDED.name,Devices.interface:EXCLUDED.interface,Devices.details:EXCLUDED.details}).execute()
+        Devices.insert_many(data).on_conflict(conflict_target=Devices.mac,conflict_where=MAC_CONFLICT_WHERE,update={Devices.ip:EXCLUDED.ip,Devices.uptime:EXCLUDED.uptime,Devices.name:EXCLUDED.name,Devices.interface:EXCLUDED.interface,Devices.details:EXCLUDED.details,Devices.device_type:EXCLUDED.device_type}).execute()
     return True
 
 
 
 @spool(pass_arguments=True)
 def scan_with_ip(*args, **kwargs):
+    reset_db()
     try:
         task=db_tasks.scanner_job_status()
         if task.action=='cancel':
@@ -364,7 +377,13 @@ def scan_with_ip(*args, **kwargs):
                         'password':password if password else default_pass,
                         'routeros_version':'auto',
                         'port':scan_port,
-                        'ssl':bool(ssl)
+                        'ssl':bool(ssl),
+                        'hostname':None,
+                        'ssl_cafile':None,
+                        'ssl_capath':None,
+                        'ssl_force_no_certificate':False,
+                        'ssl_verify':False,
+                        'ssl_verify_hostname':False
                     }
                     router=RouterOSCheckResource(options)
                     try:
@@ -487,6 +506,7 @@ def scan_with_ip(*args, **kwargs):
                         device['port']=options['port']
                         device['ssl']=options['ssl']
                         device['arch']=result['architecture-name']
+                        device['device_type']='mikrotik'
                         mikrotiks.append(device)
                         scan_results[dev_number]['added']=True
                         dev_number+=1
@@ -516,25 +536,29 @@ def scan_with_ip(*args, **kwargs):
                 log.info(f"Inserting/Updating {len(mikrotiks)} devices in database")
                 # Using on_conflict to update existing devices if they have the same MAC
                 Devices.insert_many(mikrotiks).on_conflict(conflict_target=Devices.mac,
+                                                        conflict_where=MAC_CONFLICT_WHERE,
                                                         update={Devices.ip:EXCLUDED.ip,
                                                                 Devices.uptime:EXCLUDED.uptime,
                                                                 Devices.name:EXCLUDED.name,
                                                                 Devices.interface:EXCLUDED.interface,
                                                                 Devices.details:EXCLUDED.details,
                                                                 Devices.ssl:EXCLUDED.ssl,
-                                                                Devices.port:EXCLUDED.port}).execute()
+                                                                Devices.port:EXCLUDED.port,
+                                                                Devices.device_type:EXCLUDED.device_type}).execute()
             except Exception as e:
                 if "ON CONFLICT DO UPDATE command cannot affect row a second time" in str(e):
                     log.warning("Duplicate MACs found in the same scan batch. This usually means multiple IPs for the same device. Retrying with deduplication...")
                     unique_mikrotiks = {dev['mac']: dev for dev in mikrotiks}
                     Devices.insert_many(list(unique_mikrotiks.values())).on_conflict(conflict_target=Devices.mac,
+                                                        conflict_where=MAC_CONFLICT_WHERE,
                                                         update={Devices.ip:EXCLUDED.ip,
                                                                 Devices.uptime:EXCLUDED.uptime,
                                                                 Devices.name:EXCLUDED.name,
                                                                 Devices.interface:EXCLUDED.interface,
                                                                 Devices.details:EXCLUDED.details,
                                                                 Devices.ssl:EXCLUDED.ssl,
-                                                                Devices.port:EXCLUDED.port}).execute()
+                                                                Devices.port:EXCLUDED.port,
+                                                                Devices.device_type:EXCLUDED.device_type}).execute()
                 else:
                     log.error(f"Database insertion failed: {e}")
                     task.status=0
@@ -550,6 +574,7 @@ def scan_with_ip(*args, **kwargs):
     
 @spool(pass_arguments=True)
 def exec_snipet(*args, **kwargs):
+    reset_db()
     task=db_tasks.exec_snipet_status()
     if task.action=='cancel':
         cancel_task('Snipet Exec',task)
@@ -575,7 +600,7 @@ def exec_snipet(*args, **kwargs):
                 q = queue.Queue()
                 eligible_devs = []
                 for dev in devs:
-                    peer_ip=dev.peer_ip if dev.peer_ip else default_ip
+                    peer_ip=util.resolve_peer_ip(dev)
                     if not peer_ip and '[mikrowizard]' in taskdata['snippet']['code']:
                         log.error("no peer ip")
                         num_threads=num_threads-1
@@ -614,6 +639,7 @@ def exec_snipet(*args, **kwargs):
 
 @spool(pass_arguments=True)
 def exec_multi_brand(*args, **kwargs):
+    reset_db()
     task = db_tasks.exec_multi_brand_status()
     if task.action == "cancel":
         cancel_task("Multi-Brand Exec", task)
@@ -663,6 +689,7 @@ def exec_multi_brand(*args, **kwargs):
 
 @spool(pass_arguments=True)
 def exec_sequence(*args, **kwargs):
+    reset_db()
     try:
         task = db_tasks.exec_sequence_status()
     except:
@@ -709,8 +736,12 @@ def exec_sequence(*args, **kwargs):
 
 @spool(pass_arguments=True)
 def exec_vault(*args, **kwargs):
+    reset_db()
     Tasks=db_tasks.Tasks
-    task=Tasks.select().where(Tasks.signal == 170).get()
+    try:
+        task=Tasks.select().where(Tasks.signal == 170).get()
+    except Tasks.DoesNotExist:
+        return False
     if(task.action=='cancel'):
         cancel_task('Vault Exec',task)
         return False
@@ -733,6 +764,7 @@ def exec_vault(*args, **kwargs):
 
 @spool(pass_arguments=True)
 def bulk_add_devices(*args, **kwargs):
+    reset_db()
     try:
         task_id=kwargs.get('task_id','')
         task=db_tasks.get_bulk_add_task(task_id)
@@ -799,7 +831,13 @@ def bulk_add_devices(*args, **kwargs):
                 'password':password,
                 'routeros_version':'auto',
                 'port':port,
-                'ssl':bool(ssl)
+                'ssl':bool(ssl),
+                'hostname':None,
+                'ssl_cafile':None,
+                'ssl_capath':None,
+                'ssl_force_no_certificate':False,
+                'ssl_verify':False,
+                'ssl_verify_hostname':False
             }
             
             try:
@@ -904,6 +942,7 @@ def bulk_add_devices(*args, **kwargs):
                 device['port']=options['port']
                 device['ssl']=options['ssl']
                 device['arch']=result['architecture-name']
+                device['device_type']='mikrotik'
                 device['peer_ip']=src_ip 
                 mikrotiks.append(device)
 
@@ -926,26 +965,30 @@ def bulk_add_devices(*args, **kwargs):
                 log.info(f"Bulk Add: Inserting/Updating {len(mikrotiks)} devices in database")
                 try:
                     Devices.insert_many(mikrotiks).on_conflict(conflict_target=Devices.mac,
+                                                            conflict_where=MAC_CONFLICT_WHERE,
                                                             update={Devices.ip:EXCLUDED.ip,
                                                                     Devices.uptime:EXCLUDED.uptime,
                                                                     Devices.name:EXCLUDED.name,
                                                                     Devices.interface:EXCLUDED.interface,
                                                                     Devices.details:EXCLUDED.details,
                                                                     Devices.ssl:EXCLUDED.ssl,
-                                                                    Devices.port:EXCLUDED.port}).execute()
+                                                                    Devices.port:EXCLUDED.port,
+                                                                    Devices.device_type:EXCLUDED.device_type}).execute()
                                                                     
                 except Exception as e:
                     if "ON CONFLICT DO UPDATE command cannot affect row a second time" in str(e):
                         log.warning("Bulk Add: Duplicate MACs in same batch. Retrying with deduplication...")
                         unique_mikrotiks = {dev['mac']: dev for dev in mikrotiks}
                         Devices.insert_many(list(unique_mikrotiks.values())).on_conflict(conflict_target=Devices.mac,
+                                                            conflict_where=MAC_CONFLICT_WHERE,
                                                             update={Devices.ip:EXCLUDED.ip,
                                                                     Devices.uptime:EXCLUDED.uptime,
                                                                     Devices.name:EXCLUDED.name,
                                                                     Devices.interface:EXCLUDED.interface,
                                                                     Devices.details:EXCLUDED.details,
                                                                     Devices.ssl:EXCLUDED.ssl,
-                                                                    Devices.port:EXCLUDED.port}).execute()
+                                                                    Devices.port:EXCLUDED.port,
+                                                                    Devices.device_type:EXCLUDED.device_type}).execute()
                                                                     
                     # --- Task 18.3 & 18.1: Create default DeviceConnections for auto-discovered devices ---
                     try:
