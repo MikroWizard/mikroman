@@ -703,7 +703,7 @@ def apply_firmware(packages,firm2,arch,dev,router,events,q):
     dev.status="updating"
     dev.save()
     try:
-        url=dev.peer_ip
+        url=util.resolve_peer_ip(dev)
         api = router._connect_api()
         if not url:
             url=db_sysconfig.get_sysconfig('system_url')

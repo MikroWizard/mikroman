@@ -157,7 +157,7 @@ def _execute_http_hook(hook, device, hook_type, context):
         log.warning("hook_runner: http_request hook missing 'url'")
         return {}
 
-    ip = device.peer_ip if getattr(device, "peer_ip", None) else device.ip
+    ip = device.ip
     url = url.replace("{ip}", ip).replace("{device_id}", str(device.id))
 
     try:

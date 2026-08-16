@@ -147,6 +147,11 @@ def save_editform():
     password = input.get("password", False)
     ip = input.get("ip", False)
     peer_ip = input.get("peer_ip", False)
+    # peer_ip is always the server's IP (device→server direction). Re-detect it
+    # from the (possibly updated) device IP so it stays correct across
+    # VLAN / multi-NIC moves.
+    if ip:
+        peer_ip = util.resolve_peer_ip({"ip": ip})
     name = input.get("name", False)
     ssl = input.get("ssl", False)
     port = input.get("port", None)
@@ -205,6 +210,22 @@ def save_editform():
             except Exception as sync_err:
                 log.error(f"Failed to sync credential to credentials table: {sync_err}")
 
+            # Sync the api connection row (port + ssl) so device_connections stays
+            # consistent with the device row — backup/API read these values.
+            try:
+                resolved_port = int(port) if port else (8729 if ssl else 8728)
+                api_conn = DeviceConnections.get_or_none(
+                    DeviceConnections.device_id == devid,
+                    DeviceConnections.protocol == 'api',
+                )
+                if api_conn:
+                    api_conn.port = resolved_port
+                    api_conn.ssl = bool(ssl)
+                    api_conn.modified = datetime.datetime.now(datetime.timezone.utc)
+                    api_conn.save()
+            except Exception as conn_sync_err:
+                log.error(f"Failed to sync api connection: {conn_sync_err}")
+
             db_syslog.add_syslog_event(
                 get_myself(), "Device", "Edit", get_ip(), get_agent(), json.dumps(input)
             )
@@ -244,7 +265,7 @@ def add_device():
             name=name, ip=ip, mac=mac, details="{}", uptime="", license="", interface="",
             user_name="", password="", port="", update_availble=False, current_firmware="",
             arch="", sensors="", router_type="", wifi_config="", upgrade_availble=False,
-            owner=get_myself(), created=now, modified=now, peer_ip="", failed_attempt=0,
+            owner=get_myself(), created=now, modified=now, peer_ip=util.resolve_peer_ip({"ip": ip}), failed_attempt=0,
             status="active", firmware_to_install="", syslog_configured=False, upgrade_device=False,
             device_type=device_type, device_model=""
         )
@@ -499,7 +520,7 @@ def dev_ping():
         if not devid or not isinstance(devid, int):
             return buildResponse({"status": "failed"}, 200, error="host or devid required")
         dev = db_device.get_device(devid)
-        host = dev.get("peer_ip") or dev.get("ip") or ""
+        host = dev.get("ip") or ""
     if not host:
         return buildResponse({"status": "failed"}, 200, error="No host resolved")
     try:
@@ -527,7 +548,7 @@ def dev_info():
         res["interfaces"] = []
         res["active_users"] = []
         res["is_radio"] = False
-        device_ip = res.get("peer_ip") or res.get("ip") or ""
+        device_ip = res.get("ip") or ""
         if device_ip:
             try:
                 from libs.ping import get_ping_results

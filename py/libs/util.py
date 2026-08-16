@@ -97,12 +97,57 @@ def get_default_user_pass():
 
 def get_device_port(dev):
     try:
+        if dev.port:
+            return int(dev.port)
         conn = get_device_connection(dev.id, 'api')
         if conn and conn.port:
             return int(conn.port)
-        return int(dev.port) if dev.port else (8729 if getattr(dev, 'ssl', False) else 8728)
+        return 8729 if getattr(dev, 'ssl', False) else 8728
     except:
         return 8729 if getattr(dev, 'ssl', False) else 8728
+
+def _detect_source_ip(target_ip):
+    """Local source IP the server uses to reach target_ip (UDP route lookup).
+
+    UDP connect resolves the route without sending any packets, so this is
+    multi-NIC/VLAN safe and instant.
+    """
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect((target_ip, 80))
+        src = s.getsockname()[0]
+        s.close()
+        if src and src != "0.0.0.0":
+            return src
+    except Exception:
+        pass
+    return None
+
+def resolve_peer_ip(dev):
+    """Resolve the server IP used for device→server callbacks (syslog/radius/
+    firmware/agent).
+
+    peer_ip is always the MikroWizard server's IP (device → server direction).
+    Uses the stored peer_ip; if empty, auto-detects the server's source IP for
+    reaching the device's IP, falling back to the configured default_ip.
+    Accepts a Devices model or a dict.
+    """
+    if isinstance(dev, dict):
+        peer = dev.get("peer_ip") or ""
+        target = dev.get("ip") or ""
+    else:
+        peer = getattr(dev, "peer_ip", "") or ""
+        target = getattr(dev, "ip", "") or ""
+    if peer:
+        return peer
+    if target:
+        detected = _detect_source_ip(target)
+        if detected:
+            return detected
+    try:
+        return db_sysconfig.get_sysconfig("default_ip") or ""
+    except Exception:
+        return ""
 
 def build_api_options(dev):
     default_user,default_pass= get_default_user_pass()
@@ -111,19 +156,16 @@ def build_api_options(dev):
     port=get_device_port(dev)
     ssl = bool(getattr(dev, 'ssl', False))
 
-    # Try fetching from new PAM structure (Task 18)
+    # Resolve credentials from the new PAM structure (Task 18).  Port/ssl come
+    # from the device row (authoritative) with the connection row used only as
+    # a fallback inside get_device_port — this keeps device-edit and scanner
+    # updates from being shadowed by a stale device_connections row.
     try:
         cred = CredentialService.get_credential_for_connection(dev.id, 'api')
         if cred and cred.get('username'):
             username = cred['username']
             if 'password' in cred:
                 password = cred['password']
-
-        conn = get_device_connection(dev.id, 'api')
-        if conn and conn.port:
-            port = conn.port
-        if conn and hasattr(conn, 'ssl'):
-            ssl = bool(conn.ssl)
     except Exception:
         pass
 
@@ -392,7 +434,7 @@ def grab_device_data(dev, q):
             force_radius=True if db_sysconfig.get_sysconfig('force_radius')=="True" else False
             if force_radius:
                 try:
-                    peer_ip=dev.peer_ip if dev.peer_ip else db_sysconfig.get_sysconfig('default_ip')
+                    peer_ip=resolve_peer_ip(dev)
                     secret = db_sysconfig.get_sysconfig('rad_secret')
                     res = configure_radius(router, peer_ip,secret)
                     check_or_fix_event(events,"config","radius configuration")
@@ -482,7 +524,7 @@ def check_syslog_config(dev,router,apply=False):
         if not router:
             options=build_api_options(dev)
             router=RouterOSCheckResource(options)
-        peer_ip=dev.peer_ip if dev.peer_ip else db_sysconfig.get_sysconfig('default_ip')
+        peer_ip=resolve_peer_ip(dev)
         devid=dev.id
         call = router.api.path(
             "/system/logging/action"
@@ -713,7 +755,7 @@ def FourcePermToRouter(dev,perm):
     try:
         options=build_api_options(dev)
         router=RouterOSCheckResource(options)
-        peer_ip=dev.peer_ip if dev.peer_ip else db_sysconfig.get_sysconfig('default_ip')
+        peer_ip=resolve_peer_ip(dev)
         secret = db_sysconfig.get_sysconfig('rad_secret')
         res = configure_radius(router, peer_ip,secret)
         try:
@@ -823,8 +865,7 @@ def run_snippet(dev, snippet, template_key=None):
                 
             # Execute standard string replacements like the legacy path
             if '[mikrowizard]' in command:
-                default_ip = db_sysconfig.get_sysconfig('default_ip')
-                command = command.replace('[mikrowizard]', dev.peer_ip if dev.peer_ip else default_ip)
+                command = command.replace('[mikrowizard]', resolve_peer_ip(dev))
                 
             # If the snippet is meant to be a script parameter rather than a standalone command, we format it here
             if snippet and '{snippet}' in command:

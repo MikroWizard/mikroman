@@ -178,8 +178,8 @@ def resolve_command_string(template, command_key=None, custom_command=None,
             is_config_mode = True
 
     if command and device:
-        name = device.peer_ip if getattr(device, "peer_ip", None) else device.ip
-        command = command.replace("[mikrowizard]", name)
+        server_ip = util.resolve_peer_ip(device)
+        command = command.replace("[mikrowizard]", server_ip)
 
     if command and hook_context:
         for key, value in hook_context.items():
