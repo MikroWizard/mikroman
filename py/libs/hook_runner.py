@@ -12,6 +12,7 @@
 
 import logging
 import importlib
+import re
 
 import requests
 
@@ -65,13 +66,34 @@ def run_hooks(hooks, hook_type, device, template, context=None):
 
 
 def _execute_routeros_api_hook(hook, device, hook_type, context):
+    out = {}
+
+    # 1. Resolve export_flags from DB current_firmware (cached by datagrabber / util.py)
+    if hook.get("capture_export_flags"):
+        version_str = getattr(device, "current_firmware", None)
+        if version_str:
+            try:
+                clean_ver = str(version_str).partition(" ")[0].strip()
+                m = re.match(r"^(\d+)", clean_ver)
+                if m:
+                    major = int(m.group(1))
+                    out["export_flags"] = " show-sensitive" if major >= 7 else ""
+                    log.info("hook_runner: RouterOS version from DB %s (device %s) => export_flags=%r", version_str, getattr(device, "ip", "?"), out["export_flags"])
+            except Exception as e:
+                log.warning("hook_runner: version parsing failed for %s: %s", version_str, e)
+
     api_options = context.get("api_options")
     if not api_options:
-        log.warning("hook_runner: routeros_api hook missing context['api_options'] — skipped")
-        return {}
+        if not out:
+            log.warning("hook_runner: routeros_api hook missing context[api_options] - skipped")
+        return out
 
-    resource = RouterOSCheckResource(api_options)
-    api = resource.api
+    try:
+        resource = RouterOSCheckResource(api_options)
+        api = resource.api
+    except Exception as e:
+        log.warning("hook_runner: routeros_api connection to %s failed: %s", getattr(device, "ip", "?"), e)
+        return out
 
     path = hook.get("path", "/ip/service")
     path_parts = path.strip("/").split("/")
@@ -92,9 +114,7 @@ def _execute_routeros_api_hook(hook, device, hook_type, context):
 
     if not target:
         log.warning("hook_runner: routeros_api no match for filter %s at %s", filter_criteria, path)
-        return {}
-
-    out = {}
+        return out
 
     if hook_type == "pre_connect":
         action = hook.get("action", "enable")
@@ -118,18 +138,28 @@ def _execute_routeros_api_hook(hook, device, hook_type, context):
             if save_key:
                 out[save_key] = is_disabled
 
-        if hook.get("capture_export_flags"):
-            try:
-                ver_call = api.path("/system", "package", "update", "print")
-                ver_results = tuple(ver_call)
-                if ver_results:
-                    ver_info = dict(ver_results[0])
-                    version_str = ver_info.get("installed-version", "0")
-                    major = int(version_str.split(".")[0]) if version_str else 0
-                    out["export_flags"] = " show-sensitive" if major >= 7 else ""
-                    log.info("hook_runner: RouterOS version %s => export_flags='%s'", version_str, out["export_flags"])
-            except Exception as e:
-                log.warning("hook_runner: version detection failed: %s", e)
+        if hook.get("capture_export_flags") and "export_flags" not in out:
+            version_str = None
+            if api:
+                try:
+                    ver_call = api.path("/system", "resource")
+                    ver_results = tuple(ver_call)
+                    if ver_results:
+                        version_str = dict(ver_results[0]).get("version")
+                except Exception as e:
+                    log.warning("hook_runner: version detection via API failed: %s", e)
+
+            if version_str:
+                try:
+                    clean_ver = str(version_str).partition(" ")[0].strip()
+                    m = re.match(r"^(\d+)", clean_ver)
+                    if m:
+                        major = int(m.group(1))
+                        out["export_flags"] = " show-sensitive" if major >= 7 else ""
+                        log.info("hook_runner: RouterOS version via API %s (device %s) => export_flags='%s'",
+                                 version_str, getattr(device, "ip", "?"), out["export_flags"])
+                except Exception as e:
+                    log.warning("hook_runner: version parsing failed for %s: %s", version_str, e)
 
     elif hook_type == "post_disconnect":
         action = hook.get("action", "restore")
