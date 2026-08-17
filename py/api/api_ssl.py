@@ -11,32 +11,46 @@ from flask import request
 from libs.webutil import app, login_required, buildResponse
 import config
 from libs.db.db_sysconfig import get_sysconfig
-from flask import request
-from libs.webutil import app, login_required, buildResponse
 
 log = logging.getLogger("api.ssl")
 
 SSL_AGENT_URL = "http://host.docker.internal/ssl-internal"
-
 TOKEN_KEY = "ssl_agent_token"
 
 
-def _get_token():
-    token = config.srvconf.get(TOKEN_KEY)
-    if token:
-        return token
+def _get_token(reload_disk=False):
+    if not reload_disk:
+        token = config.srvconf.get(TOKEN_KEY)
+        if token:
+            return token
 
+    # Check disk first
+    conf_path = os.environ.get("PYSRV_CONFIG_PATH", "/conf/server-conf.json")
+    try:
+        if os.path.exists(conf_path):
+            with open(conf_path, "r") as f:
+                disk_conf = json.load(f)
+            token = disk_conf.get(TOKEN_KEY)
+            if token:
+                config.srvconf[TOKEN_KEY] = token
+                log.info("Loaded ssl_agent_token from %s", conf_path)
+                return token
+    except Exception as e:
+        log.warning("Could not read %s for token: %s", conf_path, e)
+
+    # Generate and persist only if missing everywhere
     token = _secrets.token_hex(32)
     config.srvconf[TOKEN_KEY] = token
-
-    conf_path = os.environ["PYSRV_CONFIG_PATH"]
     try:
-        with open(conf_path, "r") as f:
-            disk_conf = json.load(f)
+        disk_conf = {}
+        if os.path.exists(conf_path):
+            with open(conf_path, "r") as f:
+                disk_conf = json.load(f)
         disk_conf[TOKEN_KEY] = token
+        os.makedirs(os.path.dirname(conf_path), exist_ok=True)
         with open(conf_path, "w") as f:
             json.dump(disk_conf, f, indent=2)
-        log.info("Persisted ssl_agent_token to server-conf.json")
+        log.info("Persisted ssl_agent_token to %s", conf_path)
     except Exception as e:
         log.warning("Could not persist token: %s", e)
     return token
@@ -48,6 +62,8 @@ def _proxy_request(endpoint, body=None, method="POST", timeout=5):
 
     urls = [
         ("http://127.0.0.1:8199/%s" % endpoint.lstrip("/"), min(3, timeout)),
+        ("http://127.0.0.1/ssl-internal/%s" % endpoint.lstrip("/"), timeout),
+        ("http://localhost/ssl-internal/%s" % endpoint.lstrip("/"), timeout),
         ("%s/%s" % (SSL_AGENT_URL, endpoint.lstrip("/")), timeout),
     ]
 
@@ -60,13 +76,24 @@ def _proxy_request(endpoint, body=None, method="POST", timeout=5):
                     resp = requests.post(url, json=body or {}, headers=headers, timeout=connect_timeout)
 
                 if resp.status_code == 401:
+                    log.warning("ssl-agent returned 401 on %s, reloading token from disk...", url)
+                    token = _get_token(reload_disk=True)
+                    headers["X-SSL-Agent-Token"] = token
                     continue
-                return resp.json(), resp.status_code
+
+                try:
+                    return resp.json(), resp.status_code
+                except Exception:
+                    log.warning("ssl-agent response from %s was not valid JSON (status %s): %s",
+                                url, resp.status_code, resp.text[:200])
+                    continue
+
             except requests.exceptions.ConnectionError:
                 continue
             except requests.exceptions.Timeout:
                 continue
-            except Exception:
+            except Exception as e:
+                log.warning("ssl-agent proxy request to %s error: %s", url, e)
                 continue
         time.sleep(1)
 
