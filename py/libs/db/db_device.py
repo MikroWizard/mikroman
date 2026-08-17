@@ -166,7 +166,7 @@ def update_devices_firmware_status(data):
     return True
 
 
-def update_device(devid, user_name, password, ip, peer_ip, name, ssl=False, port=None):
+def update_device(devid, user_name, password, ip, peer_ip, name, ssl=False, port=None, template_id=None):
     device = get_device(devid)
     if not device:
         return False
@@ -183,6 +183,8 @@ def update_device(devid, user_name, password, ip, peer_ip, name, ssl=False, port
         }
         if port is not None:
             update_data["port"] = port
+        if template_id is not None:
+            update_data["template_id"] = template_id
         query = Devices.update(**update_data).where(Devices.id == devid)
         query.execute()
     except:

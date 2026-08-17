@@ -52,8 +52,6 @@ def list_brands():
 @app.route("/api/pam/brands/create", methods=["POST"])
 @login_required(role="admin", perm={"pam_config": "full"})
 def create_brand():
-    if not ISPRO:
-        return buildResponse({'status': 'failed', 'err': 'Pro license required'}, 200)
     data = request.json or {}
     slug = data.get('brand', '').strip().lower().replace(' ', '_')
     display_name = data.get('display_name', '').strip()
@@ -71,8 +69,6 @@ def create_brand():
 @app.route("/api/pam/brands/update", methods=["POST"])
 @login_required(role="admin", perm={"pam_config": "full"})
 def update_brand():
-    if not ISPRO:
-        return buildResponse({'status': 'failed', 'err': 'Pro license required'}, 200)
     data = request.json or {}
     brand = data.get('brand', '').strip()
     if not brand:
@@ -95,8 +91,6 @@ def update_brand():
 @app.route("/api/pam/brands/delete", methods=["POST"])
 @login_required(role="admin", perm={"pam_config": "full"})
 def delete_brand():
-    if not ISPRO:
-        return buildResponse({'status': 'failed', 'err': 'Pro license required'}, 200)
     brand = (request.json or {}).get('brand', '').strip()
     if not brand:
         return buildResponse({'status': 'failed', 'err': 'brand slug required'}, 200)
@@ -147,8 +141,6 @@ def get_template():
 @app.route("/api/pam/templates/create", methods=["POST"])
 @login_required(role="admin", perm={"pam_config": "full"})
 def create_template():
-    if not ISPRO:
-        return buildResponse({'status': 'failed', 'err': 'Pro license required'}, 200)
     data = request.json or {}
     try:
         tdata = {
@@ -163,6 +155,10 @@ def create_template():
             'error_patterns': data.get('error_patterns', data.get('error_pattern')),
             'post_login_commands': data.get('post_login_commands'),
             'pre_logout_commands': data.get('pre_logout_commands'),
+            'diff_exclusions': data.get('diff_exclusions'),
+            'pre_connect': data.get('pre_connect'),
+            'post_disconnect': data.get('post_disconnect'),
+            'config_mode': data.get('config_mode'),
             'is_active': data.get('is_active', True),
         }
         tid = TemplateService.create_template(tdata)
@@ -173,23 +169,27 @@ def create_template():
 @app.route("/api/pam/templates/update", methods=["POST"])
 @login_required(role="admin", perm={"pam_config": "full"})
 def update_template():
-    if not ISPRO:
-        return buildResponse({'status': 'failed', 'err': 'Pro license required'}, 200)
     data = request.json or {}
     tid = data.get('id')
     try:
         if TemplateService.update_template(tid, data):
             return buildResponse({'status': 'success'}, 200)
-        return buildResponse({'status': 'failed', 'err': 'Cannot update system template or not found'}, 200)
+        return buildResponse({'status': 'failed', 'err': 'Template not found'}, 200)
     except Exception as e:
         return buildResponse({'status': 'failed', 'err': str(e)}, 200)
 
 @app.route("/api/pam/templates/delete", methods=["POST"])
 @login_required(role="admin", perm={"pam_config": "full"})
 def delete_template():
-    if not ISPRO:
-        return buildResponse({'status': 'failed', 'err': 'Pro license required'}, 200)
     tid = (request.json or {}).get('id')
+    template = DeviceTemplates.get_or_none(DeviceTemplates.id == tid)
+    if not template:
+        return buildResponse({'status': 'failed', 'err': 'Template not found'}, 200)
+    if template.is_system:
+        return buildResponse({'status': 'failed', 'err': 'System templates cannot be deleted'}, 200)
+    dev_count = Devices.select().where(Devices.template_id == tid).count()
+    if dev_count > 0:
+        return buildResponse({'status': 'failed', 'err': f'Cannot delete: {dev_count} device(s) use this template'}, 200)
     if TemplateService.delete_template(tid):
         return buildResponse({'status': 'success'}, 200)
     return buildResponse({'status': 'failed', 'err': 'Cannot delete'}, 200)

@@ -26,6 +26,14 @@ class TemplateService:
                 template = DeviceTemplates.get_or_none(DeviceTemplates.id == device.template_id)
             
             if not template:
+                brand = getattr(device, 'device_type', 'mikrotik') or 'mikrotik'
+                template = DeviceTemplates.select().where(
+                    DeviceTemplates.brand == brand,
+                    DeviceTemplates.is_system == True,
+                    DeviceTemplates.is_active == True,
+                ).first()
+
+            if not template:
                 # Fallback to generic if none assigned
                 template = DeviceTemplates.get_or_none(
                     DeviceTemplates.brand == 'generic', 
@@ -107,18 +115,20 @@ class TemplateService:
 
     @staticmethod
     def update_template(template_id: int, data: dict) -> bool:
-        """Update template — only non-system templates"""
+        """Update template — allow both system and user templates, but protect identity fields for system templates"""
         template = DeviceTemplates.get_or_none(DeviceTemplates.id == template_id)
         if not template:
             return False
 
-        if getattr(template, 'is_system', False):
-            log.warning(f"Attempted to update system template {template_id}")
-            return False
+        is_sys = getattr(template, 'is_system', False)
 
-        if 'brand' in data: template.brand = data['brand']
-        if 'os_type' in data: template.os_type = data['os_type']
-        if 'display_name' in data: template.display_name = data['display_name']
+        # For user-created templates only, allow changing brand, os_type, display_name
+        if not is_sys:
+            if 'brand' in data: template.brand = data['brand']
+            if 'os_type' in data: template.os_type = data['os_type']
+            if 'display_name' in data: template.display_name = data['display_name']
+
+        # Commands, connection, prompt, etc. can be updated for both system and custom templates
         if 'connection' in data: template.connection = data['connection']
         if 'prompt' in data: template.prompt = data['prompt']
         if 'privilege_escalation' in data: template.privilege_escalation = data['privilege_escalation']

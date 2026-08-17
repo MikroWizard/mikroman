@@ -20,7 +20,7 @@ from netmiko import NetmikoTimeoutException, NetmikoAuthenticationException
 from netmiko.terminal_server.terminal_server import TerminalServerTelnet, TerminalServerSSH
 from playhouse.shortcuts import model_to_dict as _peewee_dict
 
-from libs.db.db_pam import DeviceTemplates, DeviceConnections, Credentials
+from libs.db.db_pam import DeviceTemplates, DeviceConnections, Credentials, get_template_for_brand
 from libs.db.db_device import Devices
 from libs import kek_provider, envelope_crypto
 
@@ -468,16 +468,16 @@ def _send_single_line(conn, command, prompt_re, read_timeout):
 
 
 def _send_multiline_exec(conn, command, prompt_re, read_timeout):
-    lines = command.splitlines()
+    lines = [l.strip() for l in command.splitlines() if l.strip()]
+    if not lines:
+        return ""
     output_parts = []
     for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        out = conn.send_command_timing(line, read_timeout=read_timeout)
-        output_parts.append(out)
         if prompt_re:
-            conn.read_channel_timing()
+            out = conn.send_command(line, expect_string=prompt_re, read_timeout=read_timeout, cmd_verify=False)
+        else:
+            out = conn.send_command_timing(line, read_timeout=read_timeout)
+        output_parts.append(out)
     return "\n".join(output_parts)
 
 
@@ -533,7 +533,7 @@ def _handle_pagination(conn, template, command, prompt_re, read_timeout):
     page_count = 0
     while re.search(more_pattern, output) and page_count < max_pages:
         conn.send_command_timing(key_map.get(more_key, " "), read_timeout=5)
-        more_out = conn.read_channel_timing()
+        more_out = conn.read_channel_timing(read_timeout=5)
         if more_out:
             output += more_out
         page_count += 1
@@ -555,10 +555,17 @@ def _strip_pagination(output, pattern):
 
 
 def _scan_errors(output, template):
-    err_cfg = (template.get("error_patterns") or {}) if isinstance(template, dict) else {}
-    patterns = err_cfg.get("patterns") if isinstance(err_cfg, dict) else []
+    if not output or not template:
+        return
+    err_cfg = template.get("error_patterns") if isinstance(template, dict) else None
+    if isinstance(err_cfg, dict):
+        patterns = err_cfg.get("patterns") or []
+    elif isinstance(err_cfg, (list, tuple)):
+        patterns = err_cfg
+    else:
+        patterns = []
     for pattern in patterns:
-        if re.search(pattern, output, re.IGNORECASE):
+        if pattern and re.search(pattern, output, re.IGNORECASE):
             log.warning("Error pattern '%s' matched in output", pattern)
 
 
@@ -594,13 +601,14 @@ def execute_command(conn, command, template, prompt_re, is_config_mode, enable_p
 
     execute_privilege_escalation(conn, template, enable_password)
 
-    has_newline = "\n" in command
+    clean_command = (command or "").strip()
+    has_newline = "\n" in clean_command
     if has_newline and is_config_mode:
-        output = _send_config_mode(conn, command, template, prompt_re, enable_password, read_timeout)
+        output = _send_config_mode(conn, clean_command, template, prompt_re, enable_password, read_timeout)
     elif has_newline:
-        output = _send_multiline_exec(conn, command, prompt_re, read_timeout)
+        output = _send_multiline_exec(conn, clean_command, prompt_re, read_timeout)
     else:
-        output = _handle_pagination(conn, template, command, prompt_re, read_timeout)
+        output = _handle_pagination(conn, template, clean_command, prompt_re, read_timeout)
 
     if _is_login_failure(output):
         raise DeviceAuthError("Login failed: {}".format(output.strip()[:200]))
@@ -638,6 +646,11 @@ def connect_and_execute(device_id, command, template_id=None, template=None,
     try:
         if not template and template_id:
             template = DeviceTemplates.get_or_none(DeviceTemplates.id == template_id)
+        if not template and device_id:
+            dev_obj = Devices.get_or_none(Devices.id == device_id)
+            if dev_obj:
+                brand = getattr(dev_obj, "device_type", None) or "mikrotik"
+                template = get_template_for_brand(brand)
         if not template:
             template = {}
         if not isinstance(template, dict):
@@ -677,7 +690,7 @@ def connect_and_execute(device_id, command, template_id=None, template=None,
         output = None
         try:
             if conn_obj:
-                output = conn_obj.read_channel_timing()
+                output = conn_obj.read_channel_timing(read_timeout=2)
         except Exception:
             pass
         return {"output": output, "duration_ms": 0, "error": str(e), "error_type": "command", "session_conn": None}

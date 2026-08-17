@@ -44,7 +44,7 @@ except ImportError:
     pass
 
 try:
-    from libs.db.db_pam import Credentials, DeviceConnections
+    from libs.db.db_pam import Credentials, DeviceConnections, get_template_for_brand
     from libs import kek_provider, envelope_crypto
 except ImportError:
     pass
@@ -155,13 +155,14 @@ def save_editform():
     name = input.get("name", False)
     ssl = input.get("ssl", False)
     port = input.get("port", None)
+    template_id = input.get("template_id", None)
     try:
         if password == "Password is Hidden":
             password = False
         else:
             password = util.crypt_data(password)
         if db_device.update_device(
-            devid, util.crypt_data(user_name), password, ip, peer_ip, name, ssl, port
+            devid, util.crypt_data(user_name), password, ip, peer_ip, name, ssl, port, template_id=template_id
         ):
             # Synchronize to the Credentials table (Task 18.1 / PAM Sync)
             try:
@@ -247,6 +248,14 @@ def add_device():
     name = input.get("name", "Unknown Device")
     mac = input.get("mac", "")
     device_type = input.get("device_type", "mikrotik")
+    template_id = input.get("template_id")
+    if not template_id:
+        try:
+            tmpl = get_template_for_brand(device_type or "mikrotik")
+            if tmpl:
+                template_id = tmpl.id
+        except Exception:
+            pass
     
     if db_device.query_device_by_ip(ip):
         return buildResponse({"result": "failed", "err": "IP already exists"}, 200)
@@ -267,7 +276,7 @@ def add_device():
             arch="", sensors="", router_type="", wifi_config="", upgrade_availble=False,
             owner=get_myself(), created=now, modified=now, peer_ip=util.resolve_peer_ip({"ip": ip}), failed_attempt=0,
             status="active", firmware_to_install="", syslog_configured=False, upgrade_device=False,
-            device_type=device_type, device_model=""
+            device_type=device_type, device_model="", template_id=template_id
         )
         
         # Create default DeviceConnections based on brand_id (device_type) — pro-only, skip silently on free
