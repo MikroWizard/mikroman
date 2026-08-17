@@ -33,6 +33,7 @@ def migrate(migrator, database, fake=False, **kwargs):
     migrator.sql("ALTER TABLE snippets ADD COLUMN IF NOT EXISTS brand VARCHAR(50) NOT NULL DEFAULT 'mikrotik'")
     migrator.sql("ALTER TABLE snippets ADD COLUMN IF NOT EXISTS is_default BOOLEAN NOT NULL DEFAULT FALSE")
     migrator.sql("ALTER TABLE snippets ADD COLUMN IF NOT EXISTS is_config_mode BOOLEAN NOT NULL DEFAULT FALSE")
+    migrator.sql("ALTER TABLE snippets ADD COLUMN IF NOT EXISTS store_in_backup BOOLEAN NOT NULL DEFAULT FALSE")
     migrator.sql("UPDATE snippets SET brand = 'mikrotik' WHERE brand IS NULL OR brand = ''")
 
     # ----------------------------------------------------------------
@@ -223,6 +224,7 @@ def rollback(migrator, database, fake=False, **kwargs):
     migrator.sql("DROP TABLE IF EXISTS public.config_versions CASCADE")
 
     # 2
+    migrator.sql("ALTER TABLE snippets DROP COLUMN IF EXISTS store_in_backup")
     migrator.sql("ALTER TABLE snippets DROP COLUMN IF EXISTS is_config_mode")
     migrator.sql("ALTER TABLE snippets DROP COLUMN IF EXISTS is_default")
     migrator.sql("ALTER TABLE snippets DROP COLUMN IF EXISTS brand")

@@ -82,6 +82,10 @@ def user_tasks_create():
     sequence_id = input.get('sequence_id', False)
     if task_type == 'sequence' and sequence_id:
         taskdata['sequence_id'] = sequence_id
+    if input.get('store_in_backup') is not None:
+        taskdata['store_in_backup'] = bool(input.get('store_in_backup'))
+    if input.get('store_in_backup') is not None:
+        taskdata['store_in_backup'] = bool(input.get('store_in_backup'))
         
     utasks=db_user_tasks.UserTasks
     

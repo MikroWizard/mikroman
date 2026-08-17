@@ -26,12 +26,21 @@ from playhouse.shortcuts import model_to_dict as peewee_model_to_dict
 
 from libs.db.db import database
 from libs.db.db_device import Devices
-from libs.db.db_pam import DeviceTemplates, DeviceConnections
+from libs.db.db_pam import DeviceTemplates, DeviceConnections, get_template_for_brand
 from libs.db.db_user_tasks import Snippets
-from libs.db.db_config_versions import CommandExecutionLog
+from libs.db.db_config_versions import CommandExecutionLog, ConfigVersions
 from libs.db import db_backups
 from libs import util
 import config
+
+try:
+    from libs.diff_exclusions import compile_exclusions, apply_exclusions
+except ImportError:
+    def compile_exclusions(canonical):
+        return {}
+
+    def apply_exclusions(text, compiled_excl, section=None):
+        return text
 
 try:
     from libs.config_runner_pro import normalize_output, run_versioning
@@ -43,8 +52,9 @@ except ImportError:
     def run_versioning(config, execution_run_id, device_id, template_id, device,
                        command_string, raw_size, normalized, content_hash,
                        raw_path, raw_hash, norm_path, duration_ms, skip_versioning):
-        command_key = config.get("command_key") or "show_config"
-        if command_key == "show_config":
+        command_key = config.get("command_key")
+        should_store_backup = (not skip_versioning and command_key == "show_config") or bool(config.get("store_in_backup", False))
+        if should_store_backup:
             try:
                 db_backups.create(
                     dev=device,
@@ -52,7 +62,7 @@ except ImportError:
                     size=raw_size,
                 )
             except Exception as e:
-                log.warning("config_runner: legacy Backups create failed: %s", e)
+                log.warning("config_runner: Backups create failed: %s", e)
         exec_log_id = _log_execution(
             config.get("user_task_id"), execution_run_id, device_id, template_id,
             command_key, command_string, raw_size, content_hash, norm_path,
@@ -75,7 +85,10 @@ log = logging.getLogger("config_runner")
 VERSIONS_DIR = os.path.join(getattr(config, "BACKUP_DIR", "/opt/mikrowizard/backups"), "versions")
 _DEVMODE = os.environ.get("DEV_MODE") == "true"
 
-os.makedirs(VERSIONS_DIR, exist_ok=True)
+try:
+    os.makedirs(VERSIONS_DIR, exist_ok=True)
+except Exception:
+    pass
 
 # ---------------------------------------------------------------------------
 # Blob store (content-addressed, atomic writes)
@@ -142,7 +155,7 @@ def _template_to_dict(template):
             except (json.JSONDecodeError, TypeError):
                 pass
         elif val is None:
-            data[key] = {} if key in ("diff_exclusions", "commands") else []
+            data[key] = {} if key in ("diff_exclusions", "commands", "error_patterns", "prompt", "connection", "pagination", "privilege_escalation", "config_mode") else []
     return data
 
 
@@ -236,8 +249,13 @@ def run_device_job(config):
                      device.name, device_id, getattr(device, "device_type", "?"),
                      getattr(device, "template_id", None))
 
-        template_id = config.get("template_id") or device.template_id
+        template_id = config.get("template_id") or getattr(device, "template_id", None)
         template = DeviceTemplates.get_or_none(DeviceTemplates.id == template_id) if template_id else None
+        if not template:
+            brand = getattr(device, "device_type", None) or "mikrotik"
+            template = get_template_for_brand(brand)
+            if template:
+                template_id = template.id
         t_dict = _template_to_dict(template)
 
         # Fail loudly on missing template when template-driven
@@ -315,32 +333,13 @@ def run_device_job(config):
             )
             return result
 
-        # --- Session reuse fast-path ---
-        if session_conn:
-            exec_result = connect_and_execute(
-                device_id, command_string, template=template,
-                prompt_re=config.get("session_prompt_re"),
-                is_config_mode=is_config_mode, timeout=config.get("timeout", 60),
-                session_conn=session_conn,
-            )
-            result["duration_ms"] = exec_result.get("duration_ms", 0)
-            if exec_result.get("error"):
-                result["error"] = exec_result["error"]
-                result["status"] = "error"
-                return result
-            raw_output = exec_result["output"]
-            if capture_output:
-                result["output_raw"] = raw_output
-            result["status"] = "ok"
-            result["session_conn"] = exec_result.get("session_conn")
-            return result
-
         # --- 7. CONNECT + EXECUTE (single attempt; retry handled by caller or wrapper) ---
+        job_timeout = config.get("timeout") or (t_dict.get("connection") or {}).get("timeout") or 120
         exec_result = connect_and_execute(
             device_id, command_string, template=template, hook_context=hook_context,
-            legacy_creds=legacy_creds, prompt_re=prompt_re,
-            is_config_mode=is_config_mode, timeout=config.get("timeout", 60),
-            keep_session=keep_session,
+            legacy_creds=legacy_creds, prompt_re=config.get("session_prompt_re") or prompt_re,
+            is_config_mode=is_config_mode, timeout=job_timeout,
+            session_conn=session_conn, keep_session=keep_session or bool(session_conn),
         )
         if _DEVMODE:
             log.info("[DEV] exec result: dur=%sms err=%s err_type=%s output_len=%s",
@@ -392,13 +391,14 @@ def run_device_job(config):
         )
 
         # --- 13. POST-HOOKS ---
-        run_hooks(post_hooks, "post_disconnect", device, t_dict, hook_context)
+        if not session_conn:
+            run_hooks(post_hooks, "post_disconnect", device, t_dict, hook_context)
 
         result.update({
             "status": "ok", "is_changed": is_versioned, "version_num": version_num,
             "version_id": version_id, "execution_log_id": exec_log_id, "error": None,
-            "session_conn": exec_result.get("session_conn"),
-            "session_prompt_re": prompt_re,
+            "session_conn": exec_result.get("session_conn") or session_conn,
+            "session_prompt_re": config.get("session_prompt_re") or prompt_re,
         })
         return result
 

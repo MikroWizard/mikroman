@@ -41,7 +41,7 @@ def user_snippet_list():
 
     expr=""
     logs = []
-    selector=[snips.id,snips.name,snips.description,snips.content,snips.created,snips.template_command_key,snips.brand,snips.is_default,snips.is_config_mode]
+    selector=[snips.id,snips.name,snips.description,snips.content,snips.created,snips.template_command_key,snips.brand,snips.is_default,snips.is_config_mode,snips.store_in_backup]
 
     brand = input.get('brand', False)
     if brand:
@@ -75,6 +75,7 @@ def user_snippet_save():
     brand = input.get('brand', 'mikrotik')
     is_default = input.get('is_default', False)
     is_config_mode = input.get('is_config_mode', False)
+    store_in_backup = bool(input.get('store_in_backup', False))
 
     # if id is 0 then we are creating new snippet
     # else edit the snippet with provided id
@@ -82,14 +83,8 @@ def user_snippet_save():
         snippet=db_user_tasks.get_snippet_by_name(name)
         if snippet:
             return buildResponse({"result":"failed","err":"Snippet already exists"}, 200)
-        snippet=db_user_tasks.create_snippet(name,description,content,template_command_key)
+        snippet=db_user_tasks.create_snippet(name, description, content, template_command_key, brand=brand, is_default=is_default, is_config_mode=is_config_mode, store_in_backup=store_in_backup)
         if snippet:
-            snip_obj = db_user_tasks.get_snippet_by_name(name)
-            if snip_obj:
-                snip_obj.brand = brand
-                snip_obj.is_default = is_default
-                snip_obj.is_config_mode = is_config_mode
-                snip_obj.save()
             db_syslog.add_syslog_event(get_myself(), "Snippet","Create", get_ip(),get_agent(),json.dumps(input))
             return buildResponse({"result":"success"}, 200)
         else:
@@ -98,13 +93,7 @@ def user_snippet_save():
         snippet=db_user_tasks.get_snippet(id)
         if snippet:
             db_syslog.add_syslog_event(get_myself(), "Snippet","Update", get_ip(),get_agent(),json.dumps(input))
-            snippet=db_user_tasks.update_snippet(id, name, description, content, template_command_key)
-            snip_obj = db_user_tasks.get_snippet(id)
-            if snip_obj:
-                snip_obj.brand = brand
-                snip_obj.is_default = is_default
-                snip_obj.is_config_mode = is_config_mode
-                snip_obj.save()
+            snippet=db_user_tasks.update_snippet(id, name, description, content, template_command_key, brand=brand, is_default=is_default, is_config_mode=is_config_mode, store_in_backup=store_in_backup)
             return buildResponse({"result":"success"}, 200)
         else:
             return buildResponse({"result":"failed","err":"Snippet not found"}, 200)
@@ -151,10 +140,11 @@ def exec_snippet():
     taskdata['owner']=str(uid)
     default_ip=db_sysconfig.get_sysconfig('default_ip')
     snipet=db_user_tasks.get_snippet(snippetid)
-    if snipet:
-        taskdata['snippet']={'id':snipet.id,'code':snipet.content,'description':snipet.description,'name':snipet.name}
-    else:
+    if not snipet:
         return buildResponse({'status': 'failed'}, 200, error="Wrong snippet")
+    store_in_backup = bool(getattr(snipet, 'store_in_backup', False))
+    taskdata['store_in_backup'] = store_in_backup
+    taskdata['snippet']={'id':snipet.id,'code':snipet.content,'description':snipet.description,'name':snipet.name, 'store_in_backup': store_in_backup}
     if not description:
         description=snipet.name
 

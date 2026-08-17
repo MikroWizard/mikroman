@@ -23,8 +23,10 @@ import queue
 import datetime
 try:
     from libs import utilpro
+    import task_run_pro
     ISPRO = True
 except ImportError:
+    task_run_pro = None
     ISPRO = False
 
 try:
@@ -103,7 +105,7 @@ def backup_devs(devices):
         futures = {executor.submit(thread_worker, dev, q): dev for dev in devices}
         for future in as_completed(futures):
             try:
-                future.result(timeout=300)
+                future.result(timeout=600)
             except Exception as e:
                 log.error(f"Backup thread failure: {e}")
 
@@ -117,19 +119,19 @@ def backup_devs(devices):
     return res
 
 
-def run_snippets(devices, snippet, template_key=None):
+def run_snippets(devices, snippet, template_key=None, user_task_id=None, snippet_id=None, store_in_backup=False):
     num_threads = len(devices)
     q = queue.Queue()
 
     def thread_worker(dev, snippet_content, q_obj, tmpl_key):
         with database.connection_context():
-            compat_runner.run_snippets(dev, snippet_content, q_obj, tmpl_key)
+            compat_runner.run_snippets(dev, snippet_content, q_obj, tmpl_key, user_task_id=user_task_id, snippet_id=snippet_id, store_in_backup=store_in_backup)
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {executor.submit(thread_worker, dev, snippet, q, template_key): dev for dev in devices}
         for future in as_completed(futures):
             try:
-                future.result(timeout=300)
+                future.result(timeout=600)
             except Exception as e:
                 log.error(f"Snippet thread failure: {e}")
 
@@ -183,8 +185,11 @@ if __name__ == "__main__":
             if not snippet:
                 log.error("no snippet")
             else:
+                data = json.loads(utask.data) if utask.data else {}
+                store_in_backup = bool(data.get("store_in_backup", False) or getattr(utask.snippetid, "store_in_backup", False))
                 template_key = getattr(utask.snippetid, "template_command_key", None)
-                res = run_snippets(devices=devices, snippet=snippet, template_key=template_key)
+                snippet_id = utask.snippetid.id if utask.snippetid else None
+                res = run_snippets(devices=devices, snippet=snippet, template_key=template_key, user_task_id=utask.id, snippet_id=snippet_id, store_in_backup=store_in_backup)
 
         elif utask.task_type == "config_backup":
             log.error("TASK TYPE CONFIG BACKUP")
@@ -230,9 +235,8 @@ if __name__ == "__main__":
 
         elif utask.task_type == "sequence":
             log.error("sequence task")
-            if not ISPRO:
+            if not ISPRO or not task_run_pro:
                 exit()
-            import task_run_pro
             res = task_run_pro.run_sequence_task(utask)
 
     finally:

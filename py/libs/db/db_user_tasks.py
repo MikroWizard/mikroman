@@ -22,6 +22,7 @@ class Snippets(BaseModel):
     brand = CharField(max_length=50, default='mikrotik')
     is_default = BooleanField(default=False)
     is_config_mode = BooleanField(default=False)
+    store_in_backup = BooleanField(default=False)
     created = DateTimeField()
 
     class Meta:
@@ -36,21 +37,29 @@ def get_snippet_by_name(name):
 def get_snippet(id):
     return get_object_or_none(Snippets, id=id)
 
-def update_snippet(id,name, description, content, template_command_key=None):
+def update_snippet(id, name, description, content, template_command_key=None, brand="mikrotik", is_default=False, is_config_mode=False, store_in_backup=False):
     snippet = get_object_or_none(Snippets, id=id)
     snippet.name = name
     snippet.description = description
     snippet.content = content
     snippet.template_command_key = template_command_key
+    snippet.brand = brand or "mikrotik"
+    snippet.is_default = bool(is_default)
+    snippet.is_config_mode = bool(is_config_mode)
+    snippet.store_in_backup = bool(store_in_backup)
     snippet.save()
     return snippet
 
-def create_snippet(name, description, content, template_command_key=None):
+def create_snippet(name, description, content, template_command_key=None, brand="mikrotik", is_default=False, is_config_mode=False, store_in_backup=False):
     snippet = Snippets()
     snippet.name = name
     snippet.description = description
     snippet.content = content
     snippet.template_command_key = template_command_key
+    snippet.brand = brand or "mikrotik"
+    snippet.is_default = bool(is_default)
+    snippet.is_config_mode = bool(is_config_mode)
+    snippet.store_in_backup = bool(store_in_backup)
     snippet.save()
     return snippet
 
