@@ -28,13 +28,15 @@ import json
 import datetime
 try:
     from libs import utilpro
+    import task_run_pro
     ISPRO=True
 except ImportError:
+    task_run_pro = None
     ISPRO=False
     pass
 
 try:
-    from libs.db.db_pam import DeviceConnections
+    from libs.db.db_pam import DeviceConnections, get_template_for_brand
 except ImportError:
     pass
 
@@ -72,42 +74,42 @@ def check_devices_for_update(*args, **kwargs):
     if task.action=='cancel':
         cancel_task('Firmware Check',task)
         return False
-    if not task.status:
-        task.status=1
-        task.save()
-        try:
-            #check only one device for update
-            if kwargs.get('devices',False):
-                devids=kwargs.get('devices',False)
-                uid=kwargs.get('uid',False)
-                devs=False
-                if "0" == devids:
-                    devs=list(db_user_group_perm.DevUserGroupPermRel.get_user_devices(uid))
-                else:
-                    devids=devids.split(",")
-                    devs=list(db_user_group_perm.DevUserGroupPermRel.get_user_devices_by_ids(uid,devids))
-                num_threads = len(devs)
-                q = queue.Queue()
-                if devs:
-                    with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_THREADS, len(devs))) as executor:
-                        futures = [executor.submit(util.check_device_firmware_update, dev, q) for dev in devs]
-                        for future in futures:
-                            future.result()
-                res=[]
-                for _ in range(num_threads):
-                    qres=q.get()
-                    if not qres.get("reason",False):
-                        res.append(qres)
-                    else:
-                        db_events.connection_event(qres['id'],'Firmware updater',qres.get("detail","connection"),"Critical",0,qres.get("reason","problem in Firmware updater"))
-                db_device.update_devices_firmware_status(res)
-        except Exception as e:
-            log.error(e)
-            task.status=0
-            task.save()
-            return False
-    task.status=0
+    if task.status:
+        return False
+    task.status=1
     task.save()
+    try:
+        #check only one device for update
+        if kwargs.get('devices',False):
+            devids=kwargs.get('devices',False)
+            uid=kwargs.get('uid',False)
+            devs=False
+            if "0" == devids:
+                devs=list(db_user_group_perm.DevUserGroupPermRel.get_user_devices(uid))
+            else:
+                devids=devids.split(",")
+                devs=list(db_user_group_perm.DevUserGroupPermRel.get_user_devices_by_ids(uid,devids))
+            num_threads = len(devs)
+            q = queue.Queue()
+            if devs:
+                with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_THREADS, len(devs))) as executor:
+                    futures = [executor.submit(util.check_device_firmware_update, dev, q) for dev in devs]
+                    for future in futures:
+                        future.result()
+            res=[]
+            for _ in range(num_threads):
+                qres=q.get()
+                if not qres.get("reason",False):
+                    res.append(qres)
+                else:
+                    db_events.connection_event(qres['id'],'Firmware updater',qres.get("detail","connection"),"Critical",0,qres.get("reason","problem in Firmware updater"))
+            db_device.update_devices_firmware_status(res)
+    except Exception as e:
+        log.error(e)
+        return False
+    finally:
+        task.status=0
+        task.save()
     return False
 
 
@@ -118,49 +120,48 @@ def update_device(*args, **kwargs):
     if task.action=='cancel':
         cancel_task('Firmware Update',task)
         return False
-    if not task.status:
-        task.status=1
-        task.save()
-        try:
-            if kwargs.get('devices',False):
-                devids=kwargs.get('devices',False)
-                devs=False
-                uid=kwargs.get('uid',False)
-                current_task=kwargs.get('task',"update")
-                if "0" == devids:
-                    devs=list(db_user_group_perm.DevUserGroupPermRel.get_user_devices(uid))
-                else:
-                    devids=devids.split(",")
-                    devs=list(db_user_group_perm.DevUserGroupPermRel.get_user_devices_by_ids(uid,devids))
-                num_threads = len(devs)
-                q = queue.Queue()
-                eligible_devs = []
-                for dev in devs:
-                    if current_task=='upgrade':
-                        if not dev.upgrade_device:
-                            dev.upgrade_device = True
-                            dev.save()
-                    if dev.failed_attempt>0:
-                        dev.failed_attempt=0
-                        dev.save()
-                    if(not dev.update_availble and current_task != "upgrade"):
-                        continue
-                    eligible_devs.append(dev)
-                if eligible_devs:
-                    with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_THREADS, len(eligible_devs))) as executor:
-                        futures = [executor.submit(firm_lib.update_device, dev, q) for dev in eligible_devs]
-                        for future in futures:
-                            future.result()
-                res=[]
-                for _ in range(num_threads):
-                    qres=q.get()
-        except Exception as e:
-            log.error(e)
-            task.status=0
-            task.save()
-            return False
-    task.status=0
+    if task.status:
+        return False
+    task.status=1
     task.save()
+    try:
+        if kwargs.get('devices',False):
+            devids=kwargs.get('devices',False)
+            devs=False
+            uid=kwargs.get('uid',False)
+            current_task=kwargs.get('task',"update")
+            if "0" == devids:
+                devs=list(db_user_group_perm.DevUserGroupPermRel.get_user_devices(uid))
+            else:
+                devids=devids.split(",")
+                devs=list(db_user_group_perm.DevUserGroupPermRel.get_user_devices_by_ids(uid,devids))
+            q = queue.Queue()
+            eligible_devs = []
+            for dev in devs:
+                if current_task=='upgrade':
+                    if not dev.upgrade_device:
+                        dev.upgrade_device = True
+                        dev.save()
+                if dev.failed_attempt>0:
+                    dev.failed_attempt=0
+                    dev.save()
+                if(not dev.update_availble and current_task != "upgrade"):
+                    continue
+                eligible_devs.append(dev)
+            if eligible_devs:
+                with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_THREADS, len(eligible_devs))) as executor:
+                    futures = [executor.submit(firm_lib.update_device, dev, q) for dev in eligible_devs]
+                    for future in futures:
+                        future.result()
+            res=[]
+            for _ in range(len(eligible_devs)):
+                qres=q.get()
+    except Exception as e:
+        log.error(e)
+        return False
+    finally:
+        task.status=0
+        task.save()
     return False
 
 @spool(pass_arguments=True)
@@ -170,38 +171,37 @@ def download_firmware(*args, **kwargs):
     if task.action=='cancel':
         cancel_task('Firmware Download',task)
         return False
-    if not task.status:
-        task.status=1
-        task.save()
-        # time.sleep(5)
-        try:
-            if kwargs.get('version',False):
-                ver=kwargs.get('version',False)
-                num_threads = 1
-                q = queue.Queue()
-                threads = []
-                t = Thread(target=firm_lib.download_firmware_to_repository, args=(ver, q))
-                t.start()
-                threads.append(t)
-                for t in threads:
-                    t.join()
-                res=[]
-                for _ in range(num_threads):
-                    action=db_tasks.downloader_job_status().action
-                    if action=='cancel':
-                        cancel_task('Firmware Download',task)
-                        return False
-                    qres=q.get()
-                # db_device.update_devices_firmware_status(res)
-        except Exception as e:
-            log.error(e)
-            task.status=0
-            task.action='None'
-            task.save()
-            return False
-    task.status=0
-    task.action='None'
+    if task.status:
+        return False
+    task.status=1
     task.save()
+    # time.sleep(5)
+    try:
+        if kwargs.get('version',False):
+            ver=kwargs.get('version',False)
+            num_threads = 1
+            q = queue.Queue()
+            threads = []
+            t = Thread(target=firm_lib.download_firmware_to_repository, args=(ver, q))
+            t.start()
+            threads.append(t)
+            for t in threads:
+                t.join()
+            res=[]
+            for _ in range(num_threads):
+                action=db_tasks.downloader_job_status().action
+                if action=='cancel':
+                    cancel_task('Firmware Download',task)
+                    return False
+                qres=q.get()
+            # db_device.update_devices_firmware_status(res)
+    except Exception as e:
+        log.error(e)
+        return False
+    finally:
+        task.status=0
+        task.action='None'
+        task.save()
     return False
 
 @spool(pass_arguments=True)
@@ -211,39 +211,37 @@ def backup_devices(*args, **kwargs):
     if task.action=='cancel':
         cancel_task('Backup',task)
         return False
-    if not task.status:
-        task.status=1
-        task.save()
-        # time.sleep(5)
-        try:
-            if kwargs.get('devices',False):
-                devices=kwargs.get('devices',False)
-                if len(devices):
-                    num_threads = len(devices)
-                    q = queue.Queue()
-                    if devices:
-                        with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_THREADS, len(devices))) as executor:
-                            futures = [executor.submit(compat_runner.backup_routers, dev, q) for dev in devices]
-                            for future in futures:
-                                future.result()
-                    res=[]
-                    for _ in range(num_threads):
-                        qres=q.get()
-                        if not qres['status']:
-                            if 'id' in qres:
-                                db_events.connection_event(qres['id'], 'Backup', qres.get("detail", "connection"), "Critical", 0, qres.get("reason", "problem in getting backup for device"))
-                        res.append(qres)
-                else:
-                    task.status=0
-                    task.save()
-                    return False
-        except Exception as e:
-            log.error(e)
-            task.status=0
-            task.save()
-            return False
-    task.status=0
+    if task.status:
+        return False
+    task.status=1
     task.save()
+    # time.sleep(5)
+    try:
+        if kwargs.get('devices',False):
+            devices=kwargs.get('devices',False)
+            if len(devices):
+                num_threads = len(devices)
+                q = queue.Queue()
+                if devices:
+                    with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_THREADS, len(devices))) as executor:
+                        futures = [executor.submit(compat_runner.backup_routers, dev, q) for dev in devices]
+                        for future in futures:
+                            future.result()
+                res=[]
+                for _ in range(num_threads):
+                    qres=q.get()
+                    if not qres['status']:
+                        if 'id' in qres:
+                            db_events.connection_event(qres['id'], 'Backup', qres.get("detail", "connection"), "Critical", 0, qres.get("reason", "problem in getting backup for device"))
+                    res.append(qres)
+            else:
+                return False
+    except Exception as e:
+        log.error(e)
+        return False
+    finally:
+        task.status=0
+        task.save()
     return False
 
 def extract_device_from_macdiscovery(line):
@@ -319,6 +317,7 @@ def scan_with_mac(timer=2):
 @spool(pass_arguments=True)
 def scan_with_ip(*args, **kwargs):
     reset_db()
+    task=None
     try:
         task=db_tasks.scanner_job_status()
         if task.action=='cancel':
@@ -568,10 +567,12 @@ def scan_with_ip(*args, **kwargs):
         return True
     except Exception as e:
         log.error(e)
-        task.status=0
-        task.save()
         return True
-    
+    finally:
+        if task:
+            task.status=0
+            task.save()
+
 @spool(pass_arguments=True)
 def exec_snipet(*args, **kwargs):
     reset_db()
@@ -579,62 +580,67 @@ def exec_snipet(*args, **kwargs):
     if task.action=='cancel':
         cancel_task('Snipet Exec',task)
         return False
-    if not task.status:
-        task.status=1
-        task.save()
-        now=datetime.datetime.now()
-        default_ip=kwargs.get('default_ip',False)
-        try:
-            if kwargs.get('devices',False) and kwargs.get('task',False):
-                devids=kwargs.get('devices',False)
-                devs=False
-                uid=kwargs.get('uid',False)
-                utask=kwargs.get('task',False)
-                taskdata=json.loads(utask.data)
-                if "0" == devids:
-                    devs=list(db_user_group_perm.DevUserGroupPermRel.get_user_devices(uid))
-                else:
-                    devids=devids
-                    devs=list(db_user_group_perm.DevUserGroupPermRel.get_user_devices_by_ids(uid,devids))
-                num_threads = len(devs)
-                q = queue.Queue()
-                eligible_devs = []
-                for dev in devs:
-                    peer_ip=util.resolve_peer_ip(dev)
-                    if not peer_ip and '[mikrowizard]' in taskdata['snippet']['code']:
-                        log.error("no peer ip")
-                        num_threads=num_threads-1
-                        continue
-                    snipet_code=taskdata['snippet']['code']
-                    if '[mikrowizard]' in taskdata['snippet']['code']:
-                        snipet_code=snipet_code.replace('[mikrowizard]', peer_ip)
-                    eligible_devs.append((dev, snipet_code))
-                
-                if eligible_devs:
-                    def _snipet_worker(dev, code, q):
-                        with database.connection_context():
-                            compat_runner.run_snippets(dev, code, q)
-                    with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_THREADS, len(eligible_devs))) as executor:
-                        futures = [executor.submit(_snipet_worker, dev, code, q) for dev, code in eligible_devs]
-                        for future in futures:
-                            future.result()
-                res=[]
-                for _ in range(num_threads):
-                    qres=q.get()
-                    res.append(qres)
-                
-                try:
-                    db_tasks.add_task_result('snipet_exec', json.dumps(res),json.dumps(model_to_dict(utask),default=serialize_datetime),utask.id)
-                except Exception as e:
-                    log.error(e)
-                    pass
-        except Exception as e:
-            log.error(e)
-            task.status=0
-            task.save()
-            return False
-    task.status=0
+    if task.status:
+        return False
+    task.status=1
     task.save()
+    now=datetime.datetime.now()
+    default_ip=kwargs.get('default_ip',False)
+    try:
+        if kwargs.get('devices',False) and kwargs.get('task',False):
+            devids=kwargs.get('devices',False)
+            devs=False
+            uid=kwargs.get('uid',False)
+            utask=kwargs.get('task',False)
+            taskdata=json.loads(utask.data)
+            if "0" == devids:
+                devs=list(db_user_group_perm.DevUserGroupPermRel.get_user_devices(uid))
+            else:
+                devids=devids
+                devs=list(db_user_group_perm.DevUserGroupPermRel.get_user_devices_by_ids(uid,devids))
+            q = queue.Queue()
+            eligible_devs = []
+            for dev in devs:
+                peer_ip=util.resolve_peer_ip(dev)
+                if not peer_ip and '[mikrowizard]' in taskdata['snippet']['code']:
+                    log.error("no peer ip")
+                    continue
+                snipet_code=taskdata['snippet']['code']
+                if '[mikrowizard]' in taskdata['snippet']['code']:
+                    snipet_code=snipet_code.replace('[mikrowizard]', peer_ip)
+                eligible_devs.append((dev, snipet_code))
+            
+            if eligible_devs:
+                store_in_backup = bool(taskdata.get('store_in_backup', False))
+                snippet_id = taskdata.get('snippet', {}).get('id')
+                def _snipet_worker(dev, code, q):
+                    with database.connection_context():
+                        compat_runner.run_snippets(dev, code, q, user_task_id=utask.id, snippet_id=snippet_id, store_in_backup=store_in_backup)
+                with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_THREADS, len(eligible_devs))) as executor:
+                    futures = [executor.submit(_snipet_worker, dev, code, q) for dev, code in eligible_devs]
+                    for future in futures:
+                        try:
+                            future.result(timeout=600)
+                        except Exception as e:
+                            log.error("Snippet worker failure: %s", e)
+            res=[]
+            while not q.empty():
+                try:
+                    res.append(q.get_nowait())
+                except queue.Empty:
+                    break
+            
+            try:
+                db_tasks.add_task_result('snipet_exec', json.dumps(res),json.dumps(model_to_dict(utask),default=serialize_datetime),utask.id)
+            except Exception as e:
+                log.error(e)
+                pass
+    except Exception as e:
+        log.error(e)
+        return False
+    finally:
+        task.status=0
+        task.save()
     return False
 
 @spool(pass_arguments=True)
@@ -644,47 +650,45 @@ def exec_multi_brand(*args, **kwargs):
     if task.action == "cancel":
         cancel_task("Multi-Brand Exec", task)
         return False
-    if not task.status:
-        task.status = 1
-        task.save()
-        try:
-            now = datetime.datetime.now()
-            devices = kwargs.get("devices", [])
-            device_ids = kwargs.get("device_ids", [])
-            if not device_ids and devices:
-                device_ids = [d.id for d in devices]
-            if not device_ids:
-                task.status = 0
-                task.save()
-                return False
-            user_task_id = kwargs.get("user_task_id")
-            job_config = {
-                "device_ids": device_ids,
-                "command_key": kwargs.get("command_key"),
-                "custom_command": kwargs.get("custom_command"),
-                "snippet_id": kwargs.get("snippet_id"),
-                "snippet_content": kwargs.get("snippet_content"),
-                "is_config_mode": kwargs.get("is_config_mode", False),
-                "user_task_id": user_task_id,
-                "max_workers": MAX_CONCURRENT_THREADS,
-            }
-            results = cfg_runner.run_bulk_job(job_config)
-            try:
-                db_tasks.add_task_result(
-                    "multi_brand_exec",
-                    json.dumps(results),
-                    json.dumps({"device_ids": device_ids, "user_task_id": user_task_id}, default=serialize_datetime),
-                    user_task_id,
-                )
-            except Exception as e:
-                log.error("exec_multi_brand add_task_result failed: %s", e)
-        except Exception as e:
-            log.error("exec_multi_brand: %s", e)
-            task.status = 0
-            task.save()
-            return False
-    task.status = 0
+    if task.status:
+        return False
+    task.status = 1
     task.save()
+    try:
+        now = datetime.datetime.now()
+        devices = kwargs.get("devices", [])
+        device_ids = kwargs.get("device_ids", [])
+        if not device_ids and devices:
+            device_ids = [d.id for d in devices]
+        if not device_ids:
+            return False
+        user_task_id = kwargs.get("user_task_id")
+        job_config = {
+            "device_ids": device_ids,
+            "command_key": kwargs.get("command_key"),
+            "custom_command": kwargs.get("custom_command"),
+            "snippet_id": kwargs.get("snippet_id"),
+            "snippet_content": kwargs.get("snippet_content"),
+            "is_config_mode": kwargs.get("is_config_mode", False),
+            "user_task_id": user_task_id,
+            "max_workers": MAX_CONCURRENT_THREADS,
+        }
+        results = cfg_runner.run_bulk_job(job_config)
+        try:
+            db_tasks.add_task_result(
+                "multi_brand_exec",
+                json.dumps(results),
+                json.dumps({"device_ids": device_ids, "user_task_id": user_task_id}, default=serialize_datetime),
+                user_task_id,
+            )
+        except Exception as e:
+            log.error("exec_multi_brand add_task_result failed: %s", e)
+    except Exception as e:
+        log.error("exec_multi_brand: %s", e)
+        return False
+    finally:
+        task.status = 0
+        task.save()
     return False
 
 @spool(pass_arguments=True)
@@ -699,39 +703,34 @@ def exec_sequence(*args, **kwargs):
         cancel_task('Sequence Exec',task)
         return False
         
-    if not task or not task.status:
-        if task:
-            task.status=1
-            task.save()
-        if not ISPRO:
-            if task:
-                task.status=0
-                task.save()
-            return False
-            
-        try:
-            utask=kwargs.get('utask',False)
-            if utask:
-                import task_run_pro
-                res = task_run_pro.run_sequence_task(utask)
-                
-                try:
-                    log.info("Sequence Executed: {}".format(utask.id))      
-                    log.info("Sequence Result: {}".format(res))
-                    db_tasks.add_task_result('sequence_exec', json.dumps(res), json.dumps(model_to_dict(utask), default=serialize_datetime), utask.id)
-                except Exception as e:
-                    log.error(e)
-                    pass
-        except Exception as e:
-            log.error(e)
-            if task:
-                task.status=0
-                task.save()
-            return False
-            
+    if task and task.status:
+        return False
+        
     if task:
-        task.status=0
+        task.status=1
         task.save()
+    try:
+        if not ISPRO:
+            return False
+            
+        utask=kwargs.get('utask',False)
+        if utask and task_run_pro:
+            res = task_run_pro.run_sequence_task(utask)
+            
+            try:
+                log.info("Sequence Executed: {}".format(utask.id))      
+                log.info("Sequence Result: {}".format(res))
+                db_tasks.add_task_result('sequence_exec', json.dumps(res), json.dumps(model_to_dict(utask), default=serialize_datetime), utask.id)
+            except Exception as e:
+                log.error(e)
+                pass
+    except Exception as e:
+        log.error(e)
+        return False
+    finally:
+        if task:
+            task.status=0
+            task.save()
     return False
 
 @spool(pass_arguments=True)
@@ -747,24 +746,25 @@ def exec_vault(*args, **kwargs):
         return False
     if not ISPRO:
         return False
-    if not task.status:
-        try:
-            task.status=1
-            task.save()
-            utask=kwargs.get('utask',False)
-            res=utilpro.run_vault_task(utask)
-        except Exception as e:
-            log.error(e)
-            task.status=0
-            task.save()
-            return False
-    task.status=0
+    if task.status:
+        return False
+    task.status=1
     task.save()
+    try:
+        utask=kwargs.get('utask',False)
+        res=utilpro.run_vault_task(utask)
+    except Exception as e:
+        log.error(e)
+        return False
+    finally:
+        task.status=0
+        task.save()
     return False
 
 @spool(pass_arguments=True)
 def bulk_add_devices(*args, **kwargs):
     reset_db()
+    task=None
     try:
         task_id=kwargs.get('task_id','')
         task=db_tasks.get_bulk_add_task(task_id)
@@ -780,8 +780,6 @@ def bulk_add_devices(*args, **kwargs):
         task_id=kwargs.get('task_id','')
         
         if not devices:
-            task.status=0
-            task.save()
             return True
             
         now=datetime.datetime.now(datetime.timezone.utc)
@@ -794,6 +792,13 @@ def bulk_add_devices(*args, **kwargs):
         
         mikrotiks=[]
         scan_results=[]
+        default_template_id = None
+        try:
+            mikrotik_template = get_template_for_brand("mikrotik")
+            if mikrotik_template:
+                default_template_id = mikrotik_template.id
+        except Exception:
+            pass
         
         for idx, device_info in enumerate(devices):
             task=db_tasks.get_bulk_add_task(task_id)
@@ -943,6 +948,8 @@ def bulk_add_devices(*args, **kwargs):
                 device['ssl']=options['ssl']
                 device['arch']=result['architecture-name']
                 device['device_type']='mikrotik'
+                if default_template_id:
+                    device['template_id'] = default_template_id
                 device['peer_ip']=src_ip 
                 mikrotiks.append(device)
 
@@ -973,7 +980,8 @@ def bulk_add_devices(*args, **kwargs):
                                                                     Devices.details:EXCLUDED.details,
                                                                     Devices.ssl:EXCLUDED.ssl,
                                                                     Devices.port:EXCLUDED.port,
-                                                                    Devices.device_type:EXCLUDED.device_type}).execute()
+                                                                    Devices.device_type:EXCLUDED.device_type,
+                                                                    Devices.template_id:EXCLUDED.template_id}).execute()
                                                                     
                 except Exception as e:
                     if "ON CONFLICT DO UPDATE command cannot affect row a second time" in str(e):
@@ -1017,12 +1025,12 @@ def bulk_add_devices(*args, **kwargs):
         except Exception as e:
             log.error(e)
             
-        task.status=0
-        task.save()
         return True
         
     except Exception as e:
         log.error(e)
-        task.status=0
-        task.save()
         return True
+    finally:
+        if task:
+            task.status=0
+            task.save()

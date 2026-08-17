@@ -35,6 +35,7 @@ PORT_MAP = {'ssh': 22, 'telnet': 23, 'web': 80, 'api': 8728}
 @spool(pass_arguments=True)
 def bulk_add_non_mikrotik_devices(*args, **kwargs):
     reset_db()
+    task = None
     try:
         task_id = kwargs.get('task_id', '')
         task = db_tasks.get_bulk_add_task(task_id)
@@ -181,13 +182,12 @@ def bulk_add_non_mikrotik_devices(*args, **kwargs):
         except Exception as e:
             log.error(f"Error saving bulk add results: {e}")
 
-        task.status = 0
-        task.save()
         return True
 
     except Exception as e:
         log.error(f"bulk_add_non_mikrotik_devices error: {e}")
-        if 'task' in locals():
+        return False
+    finally:
+        if task:
             task.status = 0
             task.save()
-        return False

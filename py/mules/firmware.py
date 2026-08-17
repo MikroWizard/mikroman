@@ -60,41 +60,40 @@ def process_routerboot_upgrades(devices):
 
 def updater():
     task = db_tasks.firmware_service_status()
-    if not task.status:
-        if os.getenv("DEV_MODE") == "true":
-            log.info("Firmware updater started")
-        task.status = 1
-        task.save()
-        try:
-            # Process firmware updates
-            devs = list(db_device.Devices.select().where(
-                db_device.Devices.firmware_to_install.is_null(False) & 
-                (db_device.Devices.failed_attempt < 4) &
-                ((db_device.Devices.status == 'updated') | (db_device.Devices.status == 'failed'))
-            ))
-            
-            if devs:
-                log.info(f"Processing firmware updates for {len(devs)} devices")
-                process_firmware_updates(devs)
-            
-            # Process RouterBOOT upgrades
-            devs_upgrade = list(db_device.Devices.select().where(
-                (db_device.Devices.failed_attempt < 4) & 
-                (db_device.Devices.upgrade_device == True)
-            ))
-            
-            if devs_upgrade:
-                log.info(f"Processing RouterBOOT upgrades for {len(devs_upgrade)} devices")
-                process_routerboot_upgrades(devs_upgrade)
-                
-        except Exception as e:
-            log.error(f"Firmware updater error: {e}")
-            task.status = 0
-            task.save()
-            return False
-    
-    task.status = 0
+    if task.status:
+        return False
+    if os.getenv("DEV_MODE") == "true":
+        log.info("Firmware updater started")
+    task.status = 1
     task.save()
+    try:
+        # Process firmware updates
+        devs = list(db_device.Devices.select().where(
+            db_device.Devices.firmware_to_install.is_null(False) & 
+            (db_device.Devices.failed_attempt < 4) &
+            ((db_device.Devices.status == 'updated') | (db_device.Devices.status == 'failed'))
+        ))
+        
+        if devs:
+            log.info(f"Processing firmware updates for {len(devs)} devices")
+            process_firmware_updates(devs)
+        
+        # Process RouterBOOT upgrades
+        devs_upgrade = list(db_device.Devices.select().where(
+            (db_device.Devices.failed_attempt < 4) & 
+            (db_device.Devices.upgrade_device == True)
+        ))
+        
+        if devs_upgrade:
+            log.info(f"Processing RouterBOOT upgrades for {len(devs_upgrade)} devices")
+            process_routerboot_upgrades(devs_upgrade)
+            
+    except Exception as e:
+        log.error(f"Firmware updater error: {e}")
+        return False
+    finally:
+        task.status = 0
+        task.save()
     return False
 
 def main():
