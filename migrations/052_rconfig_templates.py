@@ -451,19 +451,19 @@ RCONFIG_TEMPLATES = [
     # ---- MikroTik additional variants (3) ----
     _t("mikrotik", "routeros-banner", "MikroTik RouterOS - SSH - Banner",
        SSH_ONLY(timeout=10),
-       {"patterns": [r"\] ?>", r"\] ?#"], "login_pattern": r"Login:", "password_pattern": r"Password:"},
+       {"patterns": [r"\[[^\]\r\n]+@[^\]\r\n]+\][^\r\n]*?[>#]\s*$"], "login_pattern": r"Login:", "password_pattern": r"Password:"},
        None, MIKROTIK_CMDS, {"enabled": False}, MIKROTIK_ERRORS,
        [], ["/quit"]),
 
     _t("mikrotik", "routeros-noninteractive", "MikroTik RouterOS - SSH - NonInteractive",
        {"default_port_ssh": 22, "default_port_telnet": 23, "timeout": 10, "protocols": ["ssh"], "is_non_interactive": True},
-       {"patterns": [r"\] ?>", r"\] ?#"], "login_pattern": r"Login:", "password_pattern": r"Password:"},
+       {"patterns": [r"\[[^\]\r\n]+@[^\]\r\n]+\][^\r\n]*?[>#]\s*$"], "login_pattern": r"Login:", "password_pattern": r"Password:"},
        None, MIKROTIK_CMDS, {"enabled": False}, MIKROTIK_ERRORS,
        [], ["/quit"]),
 
     _t("mikrotik", "routeros-v2", "MikroTik RouterOS - SSH v2",
        SSH_ONLY(timeout=10),
-       {"patterns": [r"\] ?>", r"\] ?#"], "login_pattern": r"Login:", "password_pattern": r"Password:"},
+       {"patterns": [r"\[[^\]\r\n]+@[^\]\r\n]+\][^\r\n]*?[>#]\s*$"], "login_pattern": r"Login:", "password_pattern": r"Password:"},
        None, MIKROTIK_CMDS, {"enabled": False}, MIKROTIK_ERRORS,
        [], ["/quit"]),
 

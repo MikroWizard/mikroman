@@ -100,7 +100,21 @@ def build_prompt_re(template):
     patterns = prompt_config.get("patterns") or []
     if not patterns:
         return None
-    return "(" + "|".join(patterns) + ")"
+    # Sanitize legacy/unsafe MikroTik patterns (e.g. r"\] ?>", r"\] ?#")
+    # that lack line anchors and falsely match script expressions like "[:find ...] >= 0"
+    safe_patterns = []
+    for pat in patterns:
+        if pat in (r"\] ?>", r"\] ?#", r"\]\s*>", r"\]\s*#", r"\]>", r"\]#"):
+            safe_patterns.append(r"\[[^\]\r\n]+@[^\]\r\n]+\][^\r\n]*?[>#]\s*$")
+        else:
+            safe_patterns.append(pat)
+    seen = set()
+    deduped = []
+    for p in safe_patterns:
+        if p not in seen:
+            seen.add(p)
+            deduped.append(p)
+    return "(" + "|".join(deduped) + ")"
 
 
 # Cross-vendor login failure patterns — applied post-output so we catch
@@ -369,10 +383,11 @@ def connect_device(device_id, template, connection, hook_context=None, legacy_cr
     device = Devices.get_by_id(device_id)
     params = build_netmiko_params(device, connection, template, hook_context, legacy_creds)
     protocol = params["device_type"]
+    brand = getattr(device, "device_type", None) or (template.get("brand") if isinstance(template, dict) else getattr(template, "brand", None)) or "mikrotik"
     if protocol == "generic":
         conn_class = (
             TemplateDrivenMikrotikSSH
-            if getattr(device, "device_type", "") == "mikrotik"
+            if brand == "mikrotik"
             else TemplateDrivenSSH
         )
     else:

@@ -24,7 +24,7 @@ SYSTEM_TEMPLATES = [
             "protocols": ["ssh", "telnet", "webfig"],
         },
         "prompt": {
-            "patterns": [r"\] ?>", r"\] ?#"],
+            "patterns": [r"\[[^\]\r\n]+@[^\]\r\n]+\][^\r\n]*?[>#]\s*$"],
             "login_pattern": r"Login:",
             "password_pattern": r"Password:",
         },
