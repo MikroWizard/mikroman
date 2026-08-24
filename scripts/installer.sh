@@ -186,10 +186,22 @@ _cleanup_spinner() {
 DOCKER_EXEC_FLAGS="-i"
 if [ -t 0 ] && [ -t 1 ]; then
     IS_INTERACTIVE=true
-    DOCKER_EXEC_FLAGS="-it"
+elif [ -r /dev/tty ] && [ -w /dev/tty ]; then
+    IS_INTERACTIVE=true
 else
     IS_INTERACTIVE=false
 fi
+
+# TTY-aware read helper: reads from /dev/tty if stdin is connected to a pipe (e.g. curl ... | sudo bash)
+prompt_read() {
+    if [ -t 0 ]; then
+        read "$@"
+    elif [ -r /dev/tty ]; then
+        read "$@" < /dev/tty
+    else
+        read "$@"
+    fi
+}
 
 # -----------------------------------------------------------------------------
 # Cleanup Trap on Error
@@ -483,7 +495,7 @@ check_ports_and_existing_install() {
             log_info "NONINTERACTIVE/FORCE_OVERWRITE enabled. Existing containers will be safely updated."
         else
             if [ "$IS_INTERACTIVE" = true ]; then
-                read -p "Do you want to proceed and update existing MikroWizard containers? [y/N]: " confirm_overwrite
+                prompt_read -p "Do you want to proceed and update existing MikroWizard containers? [y/N]: " confirm_overwrite
                 if [[ ! "$confirm_overwrite" =~ ^[Yy]$ ]]; then
                     log_info "Installation aborted by user to preserve existing containers."
                     exit 0
@@ -550,7 +562,7 @@ prompt_inputs() {
         _log_raw "[INPUT] PostgreSQL username (from env): $username"
     else
         while true; do
-            read -p "Enter PostgreSQL Database Username [default: postgres]: " input_user
+            prompt_read -p "Enter PostgreSQL Database Username [default: postgres]: " input_user
             username="${input_user:-postgres}"
             if validate_username "$username"; then
                 _log_raw "[INPUT] PostgreSQL username set to: $username"
@@ -567,7 +579,7 @@ prompt_inputs() {
         log_info "Using PostgreSQL Password from environment."
     else
         while true; do
-            read -s -p "Enter secure PostgreSQL Password (min 8 chars, uppercase, lowercase, digit): " password
+            prompt_read -s -p "Enter secure PostgreSQL Password (min 8 chars, uppercase, lowercase, digit): " password
             echo ""
             if validate_secret "$password"; then
                 log_success "PostgreSQL password validated."
@@ -589,7 +601,7 @@ prompt_inputs() {
         _log_raw "[INPUT] Server IP (from env): $serverip"
     else
         while true; do
-            read -p "Enter Primary Server IP address [default: $default_detected_ip]: " input_ip
+            prompt_read -p "Enter Primary Server IP address [default: $default_detected_ip]: " input_ip
             serverip="${input_ip:-$default_detected_ip}"
             if validate_ip "$serverip"; then
                 _log_raw "[INPUT] Server IP set to: $serverip"
@@ -606,7 +618,7 @@ prompt_inputs() {
         log_info "Using RADIUS Secret from environment."
     else
         while true; do
-            read -s -p "Enter secure RADIUS Secret (min 8 chars, uppercase, lowercase, digit): " secret
+            prompt_read -s -p "Enter secure RADIUS Secret (min 8 chars, uppercase, lowercase, digit): " secret
             echo ""
             if validate_secret "$secret"; then
                 log_success "RADIUS secret validated."
@@ -623,13 +635,13 @@ prompt_inputs() {
     if [ -n "$FIRMWARE_PATH" ]; then
         firmpath="$FIRMWARE_PATH"
     else
-        read -p "Enter path for firmware storage [default: $default_firmpath]: " input_firmpath
+        prompt_read -p "Enter path for firmware storage [default: $default_firmpath]: " input_firmpath
         firmpath="${input_firmpath:-$default_firmpath}"
     fi
 
     while ! [[ "$firmpath" == /* ]] || ! is_valid_path "$firmpath"; do
         log_warn "Invalid path format. Path must start with /."
-        read -p "Enter valid absolute path for firmware storage: " firmpath
+        prompt_read -p "Enter valid absolute path for firmware storage: " firmpath
     done
     mkdir -p "$firmpath"
     log_success "Firmware directory configured: ${firmpath}"
@@ -640,13 +652,13 @@ prompt_inputs() {
     if [ -n "$BACKUP_PATH" ]; then
         backuppath="$BACKUP_PATH"
     else
-        read -p "Enter path for backup storage [default: $default_backuppath]: " input_backuppath
+        prompt_read -p "Enter path for backup storage [default: $default_backuppath]: " input_backuppath
         backuppath="${input_backuppath:-$default_backuppath}"
     fi
 
     while ! [[ "$backuppath" == /* ]] || ! is_valid_path "$backuppath"; do
         log_warn "Invalid path format. Path must start with /."
-        read -p "Enter valid absolute path for backup storage: " backuppath
+        prompt_read -p "Enter valid absolute path for backup storage: " backuppath
     done
     mkdir -p "$backuppath"
     log_success "Backup directory configured: ${backuppath}"
@@ -769,7 +781,7 @@ deploy_containers_and_initialize() {
 
     # Enable Postgres Extensions
     log_info "Initializing PostgreSQL extensions..."
-    docker exec $DOCKER_EXEC_FLAGS MikroWizard-postgre psql -U "$username" -d "$dbname" -c 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp";' >/dev/null
+    docker exec -i MikroWizard-postgre psql -U "$username" -d "$dbname" -c 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp";' >/dev/null
 
     # 4. Database Migrations Execution
     run_with_spinner "Running MikroWizard schema migrations (this may take a minute)..." \
@@ -836,7 +848,7 @@ with open("./init.sql.rendered", "w") as f:
 
     docker cp ./init.sql.rendered MikroWizard-postgre:/init.sql
     _log_raw "[CMD]  psql -U $username -d $dbname -f /init.sql"
-    docker exec $DOCKER_EXEC_FLAGS MikroWizard-postgre psql -U "$username" -d "$dbname" -f /init.sql >/dev/null
+    docker exec -i MikroWizard-postgre psql -U "$username" -d "$dbname" -f /init.sql >/dev/null
     rm -f ./init.sql ./init.sql.rendered
     log_success "Initial database seed records applied cleanly."
 
