@@ -764,24 +764,34 @@ deploy_containers_and_initialize() {
         mikrowizard/mikrofront:latest >/dev/null
     log_success "MikroFront Web UI container running (Ports: 80, 443)."
 
-    # Wait for PostgreSQL Database Readiness
+    # Wait for PostgreSQL Database Readiness (poll actual database connection, not just socket)
     log_info "Waiting for PostgreSQL database service readiness..."
     local attempts=0
-    until docker exec MikroWizard-postgre pg_isready -U "$username" -d "$dbname" >/dev/null 2>&1; do
+    until docker exec -e PGPASSWORD="$password" -i MikroWizard-postgre psql -U "$username" -d "$dbname" -c "SELECT 1;" >/dev/null 2>&1; do
         attempts=$((attempts + 1))
         if [ $attempts -ge 30 ]; then
-            log_error "PostgreSQL database failed to respond within 60 seconds."
+            # If server is accepting connections but $dbname does not exist yet, create it explicitly
+            if docker exec -e PGPASSWORD="$password" -i MikroWizard-postgre psql -U postgres -c "CREATE DATABASE \"$dbname\" OWNER \"$username\";" >/dev/null 2>&1 || \
+               docker exec -e PGPASSWORD="$password" -i MikroWizard-postgre psql -U "$username" -c "CREATE DATABASE \"$dbname\";" >/dev/null 2>&1; then
+                if docker exec -e PGPASSWORD="$password" -i MikroWizard-postgre psql -U "$username" -d "$dbname" -c "SELECT 1;" >/dev/null 2>&1; then
+                    break
+                fi
+            fi
+            log_error "PostgreSQL database (${dbname}) failed to initialize within 60 seconds."
             exit 1
         fi
-        printf "\r  ${CYAN}\u280b${RESET}  Waiting for PostgreSQL... (attempt %d/30)" "$attempts"
+        printf "\r  ${CYAN}\u280b${RESET}  Waiting for PostgreSQL database (${dbname})... (attempt %d/30)" "$attempts"
         sleep 2
     done
-    printf "\r  ${GREEN}\u2714${RESET}  PostgreSQL database is ready for connections.              \n"
-    _log_raw "[OK]   PostgreSQL is ready (after $attempts attempts)"
+    printf "\r  ${GREEN}\u2714${RESET}  PostgreSQL database (${dbname}) is ready for connections.              \n"
+    _log_raw "[OK]   PostgreSQL database ($dbname) is ready (after $attempts attempts)"
 
     # Enable Postgres Extensions
     log_info "Initializing PostgreSQL extensions..."
-    docker exec -i MikroWizard-postgre psql -U "$username" -d "$dbname" -c 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp";' >/dev/null
+    docker exec -e PGPASSWORD="$password" -i MikroWizard-postgre psql -U "$username" -d "$dbname" \
+        -c 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp";' >/dev/null 2>&1 || \
+    docker exec -e PGPASSWORD="$password" -i MikroWizard-postgre psql -U postgres -d "$dbname" \
+        -c 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp";' >/dev/null 2>&1 || true
 
     # 4. Database Migrations Execution
     run_with_spinner "Running MikroWizard schema migrations (this may take a minute)..." \
@@ -848,7 +858,7 @@ with open("./init.sql.rendered", "w") as f:
 
     docker cp ./init.sql.rendered MikroWizard-postgre:/init.sql
     _log_raw "[CMD]  psql -U $username -d $dbname -f /init.sql"
-    docker exec -i MikroWizard-postgre psql -U "$username" -d "$dbname" -f /init.sql >/dev/null
+    docker exec -e PGPASSWORD="$password" -i MikroWizard-postgre psql -U "$username" -d "$dbname" -f /init.sql >/dev/null
     rm -f ./init.sql ./init.sql.rendered
     log_success "Initial database seed records applied cleanly."
 
