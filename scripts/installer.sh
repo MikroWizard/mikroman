@@ -10,6 +10,31 @@
 set -eo pipefail
 
 # -----------------------------------------------------------------------------
+# Log File Setup
+# -----------------------------------------------------------------------------
+# Log file is created in the directory where the installer is executed.
+INSTALL_LOG_DIR="$(pwd)"
+INSTALL_LOG="${INSTALL_LOG_DIR}/mikrowizard-install-$(date +%Y%m%d_%H%M%S).log"
+
+# Write a timestamped raw (no color) line to the log file
+_log_raw() {
+    printf "[%s] %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "${INSTALL_LOG}" 2>/dev/null || true
+}
+
+# Append arbitrary text block to the log file (used to save command output)
+_log_append_file() {
+    local label="$1"
+    local file="$2"
+    if [ -f "$file" ] && [ -s "$file" ]; then
+        {
+            echo "--- ${label} ---"
+            cat "$file"
+            echo "--- end ---"
+        } >> "${INSTALL_LOG}" 2>/dev/null || true
+    fi
+}
+
+# -----------------------------------------------------------------------------
 # Color & UI Formatting Utilities
 # -----------------------------------------------------------------------------
 BOLD='\033[1m'
@@ -29,6 +54,15 @@ log_banner() {
     echo "           MikroWizard Management Platform Installer                 "
     echo "======================================================================"
     echo -e "${RESET}"
+    _log_raw "======================================================================"
+    _log_raw "  MikroWizard Management Platform Installer"
+    _log_raw "  Log file: ${INSTALL_LOG}"
+    _log_raw "  Executed by: $(id) from $(pwd)"
+    _log_raw "  Host: $(hostname -f 2>/dev/null || hostname)"
+    _log_raw "  OS: $(uname -a)"
+    _log_raw "======================================================================"
+    echo -e "  ${DIM}Installation log: ${INSTALL_LOG}${RESET}"
+    echo ""
 }
 
 log_step() {
@@ -38,22 +72,112 @@ log_step() {
     echo ""
     echo -e "${BLUE}${BOLD}[$step/$total] $title${RESET}"
     echo -e "${DIM}----------------------------------------------------------------------${RESET}"
+    _log_raw ""
+    _log_raw "[$step/$total] $title"
+    _log_raw "----------------------------------------------------------------------"
 }
 
 log_info() {
     echo -e "${CYAN}[INFO]${RESET} $1"
+    _log_raw "[INFO] $1"
 }
 
 log_success() {
     echo -e "${GREEN}[OK]${RESET} $1"
+    _log_raw "[OK]   $1"
 }
 
 log_warn() {
     echo -e "${YELLOW}[WARN]${RESET} $1"
+    _log_raw "[WARN] $1"
 }
 
 log_error() {
     echo -e "${RED}[FAIL]${RESET} $1" >&2
+    _log_raw "[FAIL] $1"
+}
+
+
+# -----------------------------------------------------------------------------
+# Spinner / Progress Animation
+# -----------------------------------------------------------------------------
+# Usage: run_with_spinner "Message" command [args...]
+# Runs command in background while animating a spinner.
+# On failure, dumps last 20 lines of captured output for diagnostics.
+_SPINNER_PID=""
+_SPINNER_LOG=""
+
+_start_spinner() {
+    local msg="$1"
+    local frames=('\u280b' '\u2819' '\u2839' '\u2838' '\u283c' '\u2834' '\u2826' '\u2827' '\u2807' '\u280f')
+    local i=0
+    tput civis 2>/dev/null || true
+    (
+        while true; do
+            printf "\r  ${CYAN}${frames[$i]}${RESET}  %s" "$msg"
+            i=$(( (i + 1) % ${#frames[@]} ))
+            sleep 0.1
+        done
+    ) &
+    _SPINNER_PID=$!
+}
+
+_stop_spinner() {
+    local success="$1"
+    local msg="$2"
+    if [ -n "$_SPINNER_PID" ] && kill -0 "$_SPINNER_PID" 2>/dev/null; then
+        kill "$_SPINNER_PID" 2>/dev/null
+        wait "$_SPINNER_PID" 2>/dev/null || true
+        _SPINNER_PID=""
+    fi
+    tput cnorm 2>/dev/null || true
+    if [ "$success" = "ok" ]; then
+        printf "\r  ${GREEN}\u2714${RESET}  %-70s\n" "$msg"
+    else
+        printf "\r  ${RED}\u2718${RESET}  %-70s\n" "$msg"
+    fi
+}
+
+run_with_spinner() {
+    local msg="$1"
+    shift
+    _SPINNER_LOG=$(mktemp /tmp/mw_install_XXXXXX.log)
+
+    _log_raw "[RUN]  $msg"
+    _log_raw "[CMD]  $*"
+
+    _start_spinner "$msg"
+    local exit_code=0
+    "$@" >"$_SPINNER_LOG" 2>&1 || exit_code=$?
+
+    if [ $exit_code -eq 0 ]; then
+        _stop_spinner "ok" "$msg"
+        _log_raw "[OK]   $msg (exit 0)"
+        _log_append_file "output: $*" "$_SPINNER_LOG"
+    else
+        _stop_spinner "fail" "$msg"
+        _log_raw "[FAIL] $msg (exit $exit_code)"
+        _log_append_file "output: $*" "$_SPINNER_LOG"
+        echo ""
+        echo -e "${DIM}--- Last output (diagnostics) ---${RESET}"
+        tail -n 20 "$_SPINNER_LOG" 2>/dev/null | sed 's/^/  /'
+        echo -e "${DIM}---------------------------------${RESET}"
+        echo -e "${DIM}Full output saved to: ${INSTALL_LOG}${RESET}"
+        rm -f "$_SPINNER_LOG"
+        return $exit_code
+    fi
+    rm -f "$_SPINNER_LOG"
+    return 0
+}
+
+_cleanup_spinner() {
+    if [ -n "$_SPINNER_PID" ] && kill -0 "$_SPINNER_PID" 2>/dev/null; then
+        kill "$_SPINNER_PID" 2>/dev/null
+        wait "$_SPINNER_PID" 2>/dev/null || true
+        tput cnorm 2>/dev/null || true
+        echo ""
+    fi
+    rm -f "$_SPINNER_LOG" 2>/dev/null || true
 }
 
 # -----------------------------------------------------------------------------
@@ -72,11 +196,20 @@ fi
 # -----------------------------------------------------------------------------
 cleanup_on_exit() {
     local exit_code=$?
+    _cleanup_spinner
     rm -f ./init.sql ./init.sql.rendered 2>/dev/null || true
     if [ $exit_code -ne 0 ]; then
         echo ""
         log_error "Installation failed or was interrupted (Exit Code: $exit_code)."
         log_info "Check logs above for details. You can safely re-run this script after resolving the issue."
+        echo -e "${YELLOW}${BOLD}Full installation log saved at:${RESET} ${INSTALL_LOG}"
+        _log_raw "======================================================================"
+        _log_raw "INSTALLATION FAILED (Exit Code: $exit_code)"
+        _log_raw "======================================================================"
+    else
+        _log_raw "======================================================================"
+        _log_raw "INSTALLATION COMPLETED SUCCESSFULLY"
+        _log_raw "======================================================================"
     fi
 }
 trap cleanup_on_exit EXIT
@@ -214,10 +347,13 @@ check_prerequisites() {
     if [ ${#missing_tools[@]} -gt 0 ]; then
         log_info "Installing missing utility dependencies: ${missing_tools[*]}..."
         if command -v apt-get >/dev/null 2>&1; then
-            apt-get update -qq
-            apt-get install -y -qq curl python3 iproute2 ca-certificates >/dev/null 2>&1 || true
+            run_with_spinner "Updating package index..." \
+                apt-get update -qq
+            run_with_spinner "Installing prerequisite tools..." \
+                env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl python3 iproute2 ca-certificates
         elif command -v yum >/dev/null 2>&1; then
-            yum install -y curl python3 iproute >/dev/null 2>&1 || true
+            run_with_spinner "Installing prerequisite tools (yum)..." \
+                yum install -y curl python3 iproute
         fi
     fi
     log_success "All prerequisite CLI tools are available."
@@ -226,6 +362,45 @@ check_prerequisites() {
 # -----------------------------------------------------------------------------
 # STEP 2: Docker Engine Verification & Installation
 # -----------------------------------------------------------------------------
+
+# Internal: install Docker via apt on Debian/Ubuntu (non-interactive, with progress)
+_install_docker_apt() {
+    export DEBIAN_FRONTEND=noninteractive
+    run_with_spinner "Updating package index..." \
+        apt-get update -qq
+    run_with_spinner "Installing Docker prerequisites (ca-certificates, curl, gnupg)..." \
+        apt-get install -y -qq apt-transport-https ca-certificates curl software-properties-common gnupg
+    run_with_spinner "Adding Docker official GPG key..." \
+        bash -c '
+            mkdir -p /etc/apt/keyrings
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+                | gpg --dearmor -o /etc/apt/keyrings/docker.gpg --yes
+        '
+    local distro arch_dpkg
+    distro=$(lsb_release -cs 2>/dev/null || echo "focal")
+    arch_dpkg=$(dpkg --print-architecture 2>/dev/null || echo "amd64")
+    echo "deb [arch=${arch_dpkg} signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu ${distro} stable" \
+        > /etc/apt/sources.list.d/docker.list
+    run_with_spinner "Refreshing package index with Docker repository..." \
+        apt-get update -qq
+    run_with_spinner "Installing Docker Engine (docker-ce, docker-ce-cli, containerd.io)..." \
+        apt-get install -y -qq docker-ce docker-ce-cli containerd.io
+}
+
+# Internal: install Docker via official convenience script (non-interactive)
+# NOTE: We download the script first, then run with DEBIAN_FRONTEND=noninteractive.
+# Do NOT use "curl | sh" directly — that creates a pipeline that can hang SSH
+# if systemd post-install hooks request a TTY.
+_install_docker_script() {
+    local tmp_script
+    tmp_script=$(mktemp /tmp/get-docker-XXXXXX.sh)
+    run_with_spinner "Downloading Docker install script from get.docker.com..." \
+        curl -fsSL https://get.docker.com -o "$tmp_script"
+    run_with_spinner "Running Docker convenience installer (may take a few minutes)..." \
+        env DEBIAN_FRONTEND=noninteractive bash "$tmp_script"
+    rm -f "$tmp_script"
+}
+
 check_and_setup_docker() {
     log_step 2 6 "Docker Engine Verification & Setup"
 
@@ -249,37 +424,38 @@ check_and_setup_docker() {
         fi
     else
         log_info "Docker Engine not detected. Proceeding with Docker installation..."
+        echo ""
 
+        local install_ok=false
         if command -v apt-get >/dev/null 2>&1; then
-            apt-get update -qq
-            apt-get install -y -qq apt-transport-https ca-certificates curl software-properties-common gnupg >/dev/null 2>&1
-
-            mkdir -p /etc/apt/keyrings
-            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg --yes >/dev/null 2>&1 || true
-
-            local distro
-            distro=$(lsb_release -cs 2>/dev/null || echo "focal")
-            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu ${distro} stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-            apt-get update -qq
-            apt-get install -y -qq docker-ce docker-ce-cli containerd.io >/dev/null 2>&1 || {
-                log_info "Attempting fallback to Docker official install script..."
-                curl -fsSL https://get.docker.com | sh
-            }
+            if _install_docker_apt; then
+                install_ok=true
+            else
+                log_warn "Apt-based Docker install failed. Falling back to official install script..."
+                _install_docker_script && install_ok=true || true
+            fi
         else
-            curl -fsSL https://get.docker.com | sh
+            _install_docker_script && install_ok=true || true
         fi
 
-        systemctl start docker || true
-        systemctl enable docker || true
+        if [ "$install_ok" = false ]; then
+            log_error "Docker installation failed. Please install Docker manually and re-run this script."
+            exit 1
+        fi
+
+        run_with_spinner "Starting and enabling Docker daemon..." \
+            bash -c 'systemctl start docker && systemctl enable docker'
+
         log_success "Docker Engine installed and started successfully."
     fi
 
     # Verify Docker daemon responsiveness
     if ! docker info >/dev/null 2>&1; then
-        log_error "Docker daemon is not responding. Please check systemctl status docker."
+        log_error "Docker daemon is not responding. Please check: systemctl status docker"
         exit 1
     fi
+    log_success "Docker daemon is responsive."
+    docker version >> "${INSTALL_LOG}" 2>/dev/null || true
 }
 
 # -----------------------------------------------------------------------------
@@ -371,11 +547,13 @@ prompt_inputs() {
     if [ -n "$DB_USER" ]; then
         username="$DB_USER"
         log_info "Using PostgreSQL Username from environment: ${username}"
+        _log_raw "[INPUT] PostgreSQL username (from env): $username"
     else
         while true; do
             read -p "Enter PostgreSQL Database Username [default: postgres]: " input_user
             username="${input_user:-postgres}"
             if validate_username "$username"; then
+                _log_raw "[INPUT] PostgreSQL username set to: $username"
                 break
             else
                 log_warn "Invalid PostgreSQL username. Must be 1-63 alphanumeric/underscore characters."
@@ -393,6 +571,7 @@ prompt_inputs() {
             echo ""
             if validate_secret "$password"; then
                 log_success "PostgreSQL password validated."
+                _log_raw "[INPUT] PostgreSQL password: [REDACTED - validated OK]"
                 break
             else
                 log_warn "Insecure password. Criteria: 8+ characters, including [A-Z], [a-z], [0-9]."
@@ -407,11 +586,13 @@ prompt_inputs() {
     if [ -n "$SERVER_IP" ]; then
         serverip="$SERVER_IP"
         log_info "Using Server IP from environment: ${serverip}"
+        _log_raw "[INPUT] Server IP (from env): $serverip"
     else
         while true; do
             read -p "Enter Primary Server IP address [default: $default_detected_ip]: " input_ip
             serverip="${input_ip:-$default_detected_ip}"
             if validate_ip "$serverip"; then
+                _log_raw "[INPUT] Server IP set to: $serverip"
                 break
             else
                 log_warn "Invalid IPv4 address format. Please enter a valid IP (e.g. 192.168.1.100)."
@@ -429,6 +610,7 @@ prompt_inputs() {
             echo ""
             if validate_secret "$secret"; then
                 log_success "RADIUS secret validated."
+                _log_raw "[INPUT] RADIUS secret: [REDACTED - validated OK]"
                 break
             else
                 log_warn "Insecure RADIUS secret. Criteria: 8+ characters, including [A-Z], [a-z], [0-9]."
@@ -451,6 +633,7 @@ prompt_inputs() {
     done
     mkdir -p "$firmpath"
     log_success "Firmware directory configured: ${firmpath}"
+    _log_raw "[INPUT] Firmware path: $firmpath"
 
     # Backup Storage Path
     local default_backuppath="/opt/mikrowizard/backup"
@@ -467,6 +650,7 @@ prompt_inputs() {
     done
     mkdir -p "$backuppath"
     log_success "Backup directory configured: ${backuppath}"
+    _log_raw "[INPUT] Backup path: $backuppath"
 }
 
 # -----------------------------------------------------------------------------
@@ -524,21 +708,48 @@ deploy_containers_and_initialize() {
     docker rm -f redis-stack-server MikroWizard-postgre mikrofront mikroman mikroman-migrator 2>/dev/null || true
 
     # 1. Redis Stack Server Container
-    log_info "Pulling and launching Redis Stack Server..."
-    docker pull redis/redis-stack-server:latest >/dev/null 2>&1 || true
-    docker run -d --restart unless-stopped         --name redis-stack-server         -p 127.0.0.1:6379:6379         redis/redis-stack-server --requirepass "$redisPassword" >/dev/null
+    run_with_spinner "Pulling Redis Stack Server image..." \
+        docker pull redis/redis-stack-server:latest
+
+    log_info "Launching Redis Stack Server container..."
+    _log_raw "[CMD]  docker run redis-stack-server (port 127.0.0.1:6379)"
+    # redis/redis-stack-server uses REDIS_ARGS env var for flags like --requirepass.
+    # Passing --requirepass as a container command arg causes OCI runtime error.
+    docker run -d --restart unless-stopped \
+        --name redis-stack-server \
+        -p 127.0.0.1:6379:6379 \
+        -e REDIS_ARGS="--requirepass $redisPassword" \
+        redis/redis-stack-server >/dev/null
     log_success "Redis Stack Server container running (Bound: 127.0.0.1:6379)."
 
     # 2. PostgreSQL Container
-    log_info "Pulling and launching PostgreSQL Container..."
-    docker pull postgres:latest >/dev/null 2>&1 || true
-    docker run -d --restart unless-stopped         --name MikroWizard-postgre         -p 5432:5432         -e POSTGRES_DB="$dbname"         -e POSTGRES_USER="$username"         -e POSTGRES_PASSWORD="$password"         postgres >/dev/null
+    run_with_spinner "Pulling PostgreSQL image..." \
+        docker pull postgres:latest
+
+    log_info "Launching PostgreSQL container..."
+    _log_raw "[CMD]  docker run MikroWizard-postgre db=$dbname user=$username (port 5432)"
+    docker run -d --restart unless-stopped \
+        --name MikroWizard-postgre \
+        -p 5432:5432 \
+        -e POSTGRES_DB="$dbname" \
+        -e POSTGRES_USER="$username" \
+        -e POSTGRES_PASSWORD="$password" \
+        postgres >/dev/null
     log_success "PostgreSQL container running (Port: 5432)."
 
     # 3. MikroFront Frontend Container
-    log_info "Pulling and launching MikroFront Container..."
-    docker pull mikrowizard/mikrofront:latest >/dev/null 2>&1 || true
-    docker run -d --restart unless-stopped         --add-host=host.docker.internal:host-gateway         --name mikrofront         -p 80:80         -p 443:443         -v /opt/mikrowizard/:/conf/         mikrowizard/mikrofront:latest >/dev/null
+    run_with_spinner "Pulling MikroFront Web UI image..." \
+        docker pull mikrowizard/mikrofront:latest
+
+    log_info "Launching MikroFront Web UI container..."
+    _log_raw "[CMD]  docker run mikrofront (ports 80, 443)"
+    docker run -d --restart unless-stopped \
+        --add-host=host.docker.internal:host-gateway \
+        --name mikrofront \
+        -p 80:80 \
+        -p 443:443 \
+        -v /opt/mikrowizard/:/conf/ \
+        mikrowizard/mikrofront:latest >/dev/null
     log_success "MikroFront Web UI container running (Ports: 80, 443)."
 
     # Wait for PostgreSQL Database Readiness
@@ -550,17 +761,23 @@ deploy_containers_and_initialize() {
             log_error "PostgreSQL database failed to respond within 60 seconds."
             exit 1
         fi
+        printf "\r  ${CYAN}\u280b${RESET}  Waiting for PostgreSQL... (attempt %d/30)" "$attempts"
         sleep 2
     done
-    log_success "PostgreSQL database is ready for connections."
+    printf "\r  ${GREEN}\u2714${RESET}  PostgreSQL database is ready for connections.              \n"
+    _log_raw "[OK]   PostgreSQL is ready (after $attempts attempts)"
 
     # Enable Postgres Extensions
     log_info "Initializing PostgreSQL extensions..."
     docker exec $DOCKER_EXEC_FLAGS MikroWizard-postgre psql -U "$username" -d "$dbname" -c 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp";' >/dev/null
 
     # 4. Database Migrations Execution
-    log_info "Running MikroWizard schema migrations..."
-    docker run --rm --net host         --name mikroman-migrator         -v /opt/mikrowizard/:/conf/         mikrowizard/mikroman:latest         /bin/bash -c "cd /app/; export PYTHONPATH=/app/py; export PYSRV_CONFIG_PATH=/conf/server-conf.json; python3 scripts/dbmigrate.py;"
+    run_with_spinner "Running MikroWizard schema migrations (this may take a minute)..." \
+        docker run --rm --net host \
+            --name mikroman-migrator \
+            -v /opt/mikrowizard/:/conf/ \
+            mikrowizard/mikroman:latest \
+            /bin/bash -c "cd /app/; export PYTHONPATH=/app/py; export PYSRV_CONFIG_PATH=/conf/server-conf.json; python3 scripts/dbmigrate.py;"
     log_success "Database schema migrations applied successfully."
 
     # 5. Build and Apply init.sql Template Safely
@@ -618,14 +835,25 @@ with open("./init.sql.rendered", "w") as f:
 '
 
     docker cp ./init.sql.rendered MikroWizard-postgre:/init.sql
+    _log_raw "[CMD]  psql -U $username -d $dbname -f /init.sql"
     docker exec $DOCKER_EXEC_FLAGS MikroWizard-postgre psql -U "$username" -d "$dbname" -f /init.sql >/dev/null
     rm -f ./init.sql ./init.sql.rendered
     log_success "Initial database seed records applied cleanly."
 
     # 6. Main MikroMan Backend Container
-    log_info "Pulling and launching MikroMan Backend Container..."
-    docker pull mikrowizard/mikroman:latest >/dev/null 2>&1 || true
-    docker run -d --restart unless-stopped         -it --net host         --name mikroman         --add-host=host.docker.internal:host-gateway         -v /opt/mikrowizard/:/conf/         -v "$firmpath":/firms         -v "$backuppath":/backups         mikrowizard/mikroman:latest >/dev/null
+    run_with_spinner "Pulling MikroMan Backend image..." \
+        docker pull mikrowizard/mikroman:latest
+
+    log_info "Launching MikroMan Backend container..."
+    _log_raw "[CMD]  docker run mikroman --net host firms=$firmpath backups=$backuppath"
+    docker run -d --restart unless-stopped \
+        -it --net host \
+        --name mikroman \
+        --add-host=host.docker.internal:host-gateway \
+        -v /opt/mikrowizard/:/conf/ \
+        -v "$firmpath":/firms \
+        -v "$backuppath":/backups \
+        mikrowizard/mikroman:latest >/dev/null
     log_success "MikroMan Backend container running in host mode."
 }
 
@@ -664,6 +892,13 @@ print_summary_and_security_guide() {
     echo -e "    ${BLUE}sudo netfilter-persistent save${RESET}"
     echo ""
     echo -e "${DIM}======================================================================${RESET}"
+    echo ""
+    echo -e "  ${DIM}Full installation log: ${INSTALL_LOG}${RESET}"
+    _log_raw "Access URL: http://$serverip"
+    _log_raw "Admin user: mikrowizard"
+    _log_raw "DB name: $dbname"
+    _log_raw "Firmware dir: $firmpath"
+    _log_raw "Backup dir: $backuppath"
 }
 
 # -----------------------------------------------------------------------------
