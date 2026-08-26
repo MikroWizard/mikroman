@@ -153,16 +153,17 @@ def extract_zip_reload(filename,dst):
         if os.path.exists(f):
             os.remove(f)
     
-    # Kill the uWSGI master to force a clean, hard container restart.
+    # Kill the uWSGI master and exit immediately to force a clean, hard container restart.
     # PyArmor requires a clean Python interpreter for new files to prevent memory corruption. 
-    masterpid=uwsgi.masterpid()
-    log.info("Triggering hard server restart (sending SIGKILL to masterpid: {}).".format(masterpid))
-    os.kill(masterpid, signal.SIGKILL)
-    time.sleep(2)
     try:
-        os.kill(1, signal.SIGKILL)
-    except Exception:
-        pass
+        masterpid = uwsgi.masterpid()
+        log.info("Triggering hard server restart (sending SIGKILL to masterpid: {}).".format(masterpid))
+        os.kill(masterpid, signal.SIGKILL)
+    except Exception as e:
+        log.error("Error killing masterpid: {}".format(e))
+    time.sleep(1)
+    # Terminate this mule process immediately so it cannot continue looping in memory
+    os._exit(0)
 
 def main():
     while True:
@@ -203,11 +204,19 @@ def main():
         install_date = datetime.datetime.strptime(install_date, "%Y-%m-%d %H:%M:%S").strftime("%Y%m%d")
         # convert install_date from "%Y-%m-%d %H:%M:%S" to ""%Y%m%d"" and append to serial_number
         hwid += "-"+install_date
+        # Dynamically evaluate ISPRO in case new modules or dependencies were added
+        is_pro = False
+        try:
+            from libs import utilpro
+            is_pro = True
+        except ImportError:
+            is_pro = False
+
         params={
             "serial_number": hwid,
             "username": username.strip(),
             "version": __version__,
-            "ISPRO":ISPRO
+            "ISPRO": is_pro
         }
         url="https://mikrowizard.com/wp-json/mikrowizard/v1/get_update"
         log.info("Checking for updates at {} with params: {}".format(url, params))

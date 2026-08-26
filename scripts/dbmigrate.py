@@ -65,9 +65,38 @@ try:
                     os.remove(f)
             except:
                 pass
-        # Hard-kill uWSGI (SIGKILL is unblockable) to force Docker to restart the container cleanly.
-        # Fallback to killing PID 1 if killall is missing or matches nothing.
-        os.system("killall -9 uwsgi || kill -9 1")
-        time.sleep(10) # Block the old updater mule from continuing before the kill signal arrives
+        # Hard-kill uWSGI processes to force Docker to restart the container cleanly.
+        # Pure-Python implementation: does NOT depend on killall or pkill being installed!
+        import signal
+
+        # 1. Kill parent process (the updater mule)
+        try:
+            os.kill(os.getppid(), signal.SIGKILL)
+        except Exception:
+            pass
+
+        # 2. Pure Python /proc scan: kill all processes running uwsgi
+        try:
+            my_pid = os.getpid()
+            for pid_dir in os.listdir('/proc'):
+                if pid_dir.isdigit():
+                    pid = int(pid_dir)
+                    if pid not in (1, my_pid):
+                        try:
+                            with open(f'/proc/{pid}/cmdline', 'rb') as cf:
+                                if b'uwsgi' in cf.read():
+                                    os.kill(pid, signal.SIGKILL)
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+        # 3. Fallback to shell tools if present
+        try:
+            os.system("pkill -9 -f uwsgi 2>/dev/null || killall -9 uwsgi 2>/dev/null")
+        except:
+            pass
+
+        time.sleep(10)
 except Exception as e:
     print(f"Error in update restart patch: {e}")
