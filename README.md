@@ -414,7 +414,7 @@ MikroWizard is built upon and deeply indebted to the open-source community:
 Run the following command on a clean Ubuntu server (v20.04+) with root privileges:
 
 ```bash
-sudo su -c "bash <(wget -qO- https://gist.githubusercontent.com/s265925/84f8fdc90c8b330a1501626a50e983a1/raw/b1fc4e0f283fd48d78861fa1a665fd1cb19b734d/installer.sh)" root
+sudo bash -c "$(wget -qO- https://raw.githubusercontent.com/MikroWizard/mikroman/master/scripts/installer.sh)"
 ```
 
 ### Option 2: Docker Compose Deployment
