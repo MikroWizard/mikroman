@@ -88,89 +88,94 @@ def _execute_routeros_api_hook(hook, device, hook_type, context):
             log.warning("hook_runner: routeros_api hook missing context[api_options] - skipped")
         return out
 
+    resource = None
     try:
-        resource = RouterOSCheckResource(api_options)
-        api = resource.api
-    except Exception as e:
-        log.warning("hook_runner: routeros_api connection to %s failed: %s", getattr(device, "ip", "?"), e)
-        return out
+        try:
+            resource = RouterOSCheckResource(api_options)
+            api = resource.api
+        except Exception as e:
+            log.warning("hook_runner: routeros_api connection to %s failed: %s", getattr(device, "ip", "?"), e)
+            return out
 
-    path = hook.get("path", "/ip/service")
-    path_parts = path.strip("/").split("/")
-    call = api.path(*path_parts)
+        path = hook.get("path", "/ip/service")
+        path_parts = path.strip("/").split("/")
+        call = api.path(*path_parts)
 
-    filter_criteria = hook.get("filter", {})
-    results = tuple(call)
-    target = None
-    for row in results:
-        match = True
-        for key, val in filter_criteria.items():
-            if str(row.get(key, "")) != str(val):
-                match = False
+        filter_criteria = hook.get("filter", {})
+        results = tuple(call)
+        target = None
+        for row in results:
+            match = True
+            for key, val in filter_criteria.items():
+                if str(row.get(key, "")) != str(val):
+                    match = False
+                    break
+            if match:
+                target = dict(row)
                 break
-        if match:
-            target = dict(row)
-            break
 
-    if not target:
-        log.warning("hook_runner: routeros_api no match for filter %s at %s", filter_criteria, path)
-        return out
+        if not target:
+            log.warning("hook_runner: routeros_api no match for filter %s at %s", filter_criteria, path)
+            return out
 
-    if hook_type == "pre_connect":
-        action = hook.get("action", "enable")
-        capture_field = hook.get("capture_field")
-        save_key = hook.get("save_state_key")
+        if hook_type == "pre_connect":
+            action = hook.get("action", "enable")
+            capture_field = hook.get("capture_field")
+            save_key = hook.get("save_state_key")
 
-        if capture_field and capture_field in target:
-            try:
-                val = target[capture_field]
-                out["ssh_port"] = int(val) if str(val).isdigit() else val
-            except (ValueError, TypeError):
-                out["ssh_port"] = target[capture_field]
+            if capture_field and capture_field in target:
+                try:
+                    val = target[capture_field]
+                    out["ssh_port"] = int(val) if str(val).isdigit() else val
+                except (ValueError, TypeError):
+                    out["ssh_port"] = target[capture_field]
 
-        if action == "enable":
-            is_disabled = str(target.get("disabled", "")).lower() in ("true", "yes", "1")
-            if is_disabled:
+            if action == "enable":
+                is_disabled = str(target.get("disabled", "")).lower() in ("true", "yes", "1")
+                if is_disabled:
+                    api_id = target.get(".id")
+                    if api_id:
+                        call.update(**{".id": api_id, "disabled": False})
+                        log.info("hook_runner: enabled SSH on %s (was disabled)", device.ip)
+                if save_key:
+                    out[save_key] = is_disabled
+
+            if hook.get("capture_export_flags") and "export_flags" not in out:
+                version_str = None
+                if api:
+                    try:
+                        ver_call = api.path("/system", "resource")
+                        ver_results = tuple(ver_call)
+                        if ver_results:
+                            version_str = dict(ver_results[0]).get("version")
+                    except Exception as e:
+                        log.warning("hook_runner: version detection via API failed: %s", e)
+
+                if version_str:
+                    try:
+                        clean_ver = str(version_str).partition(" ")[0].strip()
+                        m = re.match(r"^(\d+)", clean_ver)
+                        if m:
+                            major = int(m.group(1))
+                            out["export_flags"] = " show-sensitive" if major >= 7 else ""
+                            log.info("hook_runner: RouterOS version via API %s (device %s) => export_flags='%s'",
+                                     version_str, getattr(device, "ip", "?"), out["export_flags"])
+                    except Exception as e:
+                        log.warning("hook_runner: version parsing failed for %s: %s", version_str, e)
+
+        elif hook_type == "post_disconnect":
+            action = hook.get("action", "restore")
+            state_key = hook.get("state_key")
+            if action == "restore" and state_key and context.get(state_key):
                 api_id = target.get(".id")
                 if api_id:
-                    call.update(**{".id": api_id, "disabled": False})
-                    log.info("hook_runner: enabled SSH on %s (was disabled)", device.ip)
-            if save_key:
-                out[save_key] = is_disabled
+                    call.update(**{".id": api_id, "disabled": True})
+                    log.info("hook_runner: disabled SSH on %s (restored original state)", device.ip)
 
-        if hook.get("capture_export_flags") and "export_flags" not in out:
-            version_str = None
-            if api:
-                try:
-                    ver_call = api.path("/system", "resource")
-                    ver_results = tuple(ver_call)
-                    if ver_results:
-                        version_str = dict(ver_results[0]).get("version")
-                except Exception as e:
-                    log.warning("hook_runner: version detection via API failed: %s", e)
-
-            if version_str:
-                try:
-                    clean_ver = str(version_str).partition(" ")[0].strip()
-                    m = re.match(r"^(\d+)", clean_ver)
-                    if m:
-                        major = int(m.group(1))
-                        out["export_flags"] = " show-sensitive" if major >= 7 else ""
-                        log.info("hook_runner: RouterOS version via API %s (device %s) => export_flags='%s'",
-                                 version_str, getattr(device, "ip", "?"), out["export_flags"])
-                except Exception as e:
-                    log.warning("hook_runner: version parsing failed for %s: %s", version_str, e)
-
-    elif hook_type == "post_disconnect":
-        action = hook.get("action", "restore")
-        state_key = hook.get("state_key")
-        if action == "restore" and state_key and context.get(state_key):
-            api_id = target.get(".id")
-            if api_id:
-                call.update(**{".id": api_id, "disabled": True})
-                log.info("hook_runner: disabled SSH on %s (restored original state)", device.ip)
-
-    return out
+        return out
+    finally:
+        if resource:
+            resource.close()
 
 
 # ---------------------------------------------------------------------------

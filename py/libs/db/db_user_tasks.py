@@ -101,29 +101,22 @@ class TaskDevRel(BaseModel):
     class Meta:
         db_table = 'task_group_dev_rel'
 
-def get_task_devices(task,return_devs=True):
-    members=[]
-    members=list(TaskDevRel.select().where(TaskDevRel.utask_id == task.id).execute())
-    devs=[]
-    if task.selection_type=='groups':
-        group_ids=[]
-        for mem in members:
-            try:
-                group_ids.append(mem.group_id)
-            except DoesNotExist as err:
-                log.error(err)
-                pass
+def get_task_devices(task, return_devs=True):
+    if not task:
+        return []
+    if task.selection_type == 'groups':
+        groups = list(DevGroups.select().join(TaskDevRel, on=(TaskDevRel.group_id == DevGroups.id)).where(TaskDevRel.utask_id == task.id))
         if return_devs:
-            devs=get_devs_of_groups(group_ids)
-        else:
-            devs=group_ids
+            group_ids = [g.id for g in groups]
+            return get_devs_of_groups(group_ids)
+        return groups
     else:
-        for mem in members:
-            try:
-                devs.append(mem.device_id)
-            except DoesNotExist as err:
-                pass
-    return devs
+        query = (Devices
+                 .select()
+                 .join(TaskDevRel, on=(TaskDevRel.device_id == Devices.id))
+                 .where(TaskDevRel.utask_id == task.id)
+                 .order_by(Devices.name))
+        return list(query)
 
 def add_member_to_task(task_id,members,type='devices'):
     data=[]

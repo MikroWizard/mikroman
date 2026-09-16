@@ -660,38 +660,43 @@ def update_device(dev,q):
     else:
         q.put({"id": dev.id})
     options=util.build_api_options(dev)
-    #get /system package print 
-    router=RouterOSCheckResource(options) 
+    router = None
     try:
-        call=router.api.path('/system/package')
-        results = tuple(call)
-    except:
-        q.put({"id": dev.id})
-        return False
-    packages=[]
-    if firm:
-        packages.append(firm)
-    else:
-        db_events.firmware_event(dev.id,"updater","Firmware repositpry","Error",0,"Firmware not found #2 :Please check firmware config in settings section")
-        log.error('No Firmware found for device {}({})'.format(dev.name,dev.ip))
-        q.put({"id": dev.id})
-        return False
-    
-    for res in results:
-        if res['name']!="routeros":
-            package=db_firmware.get_frim_by_version(ver_to_install, "{}-{}".format(arch,res['name']))
-            if package:
-                packages.append(package)
-
-    try:
-        #Try to take a backup from the router before update
+        #get /system package print 
+        router=RouterOSCheckResource(options) 
         try:
-            util.backup_router(dev)
+            call=router.api.path('/system/package')
+            results = tuple(call)
         except:
-            pass
-        apply_firmware(packages, firm2, arch, dev, router, events, q)
-    except:
-        q.put({"id": dev.id})
+            q.put({"id": dev.id})
+            return False
+        packages=[]
+        if firm:
+            packages.append(firm)
+        else:
+            db_events.firmware_event(dev.id,"updater","Firmware repositpry","Error",0,"Firmware not found #2 :Please check firmware config in settings section")
+            log.error('No Firmware found for device {}({})'.format(dev.name,dev.ip))
+            q.put({"id": dev.id})
+            return False
+        
+        for res in results:
+            if res['name']!="routeros":
+                package=db_firmware.get_frim_by_version(ver_to_install, "{}-{}".format(arch,res['name']))
+                if package:
+                    packages.append(package)
+
+        try:
+            #Try to take a backup from the router before update
+            try:
+                util.backup_router(dev)
+            except:
+                pass
+            apply_firmware(packages, firm2, arch, dev, router, events, q)
+        except:
+            q.put({"id": dev.id})
+    finally:
+        if router:
+            router.close()
 
 def apply_firmware(packages,firm2,arch,dev,router,events,q):
     dev.failed_attempt=dev.failed_attempt+1
@@ -756,10 +761,13 @@ def apply_firmware(packages,firm2,arch,dev,router,events,q):
     q.put({"id": dev.id})
 
 
-def upgrade_routerboot(dev, q=None):
+def upgrade_routerboot(dev, q=None, router=None):
     success = False
-    options = util.build_api_options(dev)
-    router = RouterOSCheckResource(options)
+    own_router = False
+    if router is None:
+        options = util.build_api_options(dev)
+        router = RouterOSCheckResource(options)
+        own_router = True
     api = None
     try:
         api = router._connect_api()
@@ -799,7 +807,9 @@ def upgrade_routerboot(dev, q=None):
         success = False
 
     finally:
-        if api:
+        if own_router and router:
+            router.close()
+        elif own_router and api:
             api.close()
 
     # Update status and queue

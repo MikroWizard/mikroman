@@ -91,6 +91,9 @@ class RouterOSCheckResource(nagiosplugin.Resource):
         return (cur_value - old_value) / elapsed_seconds * factor
 
     def _connect_api(self) -> librouteros.api.Api:
+        if self._api is not None:
+            return self._api
+
         def wrap_socket(socket):
             server_hostname: Optional[str] = self._cmd_options["hostname"]
             if server_hostname is None:
@@ -135,6 +138,7 @@ class RouterOSCheckResource(nagiosplugin.Resource):
             timeout=self._cmd_options.get("timeout",5) ,
             **extra_kwargs
         )
+        self._api = api
         return api
 
     @staticmethod
@@ -162,6 +166,27 @@ class RouterOSCheckResource(nagiosplugin.Resource):
             self._api = self._connect_api()
 
         return self._api
+
+    def close(self) -> None:
+        """Safely close the underlying RouterOS API connection and socket."""
+        if self._api is not None:
+            try:
+                self._api.close()
+            except Exception:
+                pass
+            self._api = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
 
     @classmethod
     def parse_routeros_date(cls, date_string: str) -> date:

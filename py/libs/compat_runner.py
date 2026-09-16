@@ -16,7 +16,14 @@ def backup_router(dev):
 
 def backup_routers(dev, q):
     status = backup_router(dev)
-    q.put({"id": dev.id, "devip": dev.ip, "state": status})
+    q.put({
+        "id": dev.id,
+        "devid": dev.id,
+        "devip": dev.ip,
+        "devname": getattr(dev, "name", ""),
+        "status": status,
+        "state": status,
+    })
 
 
 def run_snippet(dev, snippet, template_key=None, user_task_id=None, snippet_id=None, store_in_backup=False):
@@ -39,9 +46,14 @@ def run_snippet(dev, snippet, template_key=None, user_task_id=None, snippet_id=N
 
 def run_snippets(dev, snippet, q, template_key=None, user_task_id=None, snippet_id=None, store_in_backup=False):
     result = run_snippet(dev, snippet, template_key=template_key, user_task_id=user_task_id, snippet_id=snippet_id, store_in_backup=store_in_backup)
+    status = True if result else False
     q.put({
-        "devid": dev.id, "devip": dev.ip, "devname": dev.name,
-        "status": True if result else False,
+        "id": dev.id,
+        "devid": dev.id,
+        "devip": dev.ip,
+        "devname": getattr(dev, "name", ""),
+        "status": status,
+        "state": status,
         "result": result if result else "Exec Failed",
     })
     return result

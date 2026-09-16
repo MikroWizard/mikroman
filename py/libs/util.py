@@ -12,6 +12,7 @@ import uuid
 import socket
 import config
 from libs.db import db_sysconfig,db_backups,db_events
+from libs.db.db import database
 from cryptography.fernet import Fernet 
 from libs.check_routeros.routeros_check.resource import RouterOSCheckResource
 from libs.check_routeros.routeros_check.helper import  RouterOSVersion
@@ -42,6 +43,18 @@ except ImportError:
     pass
 
 import urllib.request, urllib.parse, urllib.error
+
+def close_router(router):
+    """Safely close a RouterOSCheckResource or librouteros Api instance."""
+    if not router:
+        return
+    try:
+        if hasattr(router, 'close'):
+            router.close()
+        elif hasattr(router, '_api') and router._api:
+            router._api.close()
+    except Exception:
+        pass
 
 # --------------------------------------------------------------------------
 # date related common methods
@@ -186,23 +199,26 @@ def build_api_options(dev):
 
     return options
 
-def check_device_firmware_update(dev,q):
-    port=get_device_port(dev)
-    if check_port(dev.ip,port):
-        options=build_api_options(dev)
-        try:
-            is_availbe , current , arch , upgrade_availble = check_update(options)
-        except Exception as e:
-            q.put({"id": dev.id,"update_availble":False,"reason":"Unknoown Reason"})
-        if is_availbe:
-                q.put({"id": dev.id,"update_availble":is_availbe,"current_firmware":current,"arch":arch,"upgrade_availble":upgrade_availble})
-        else:
-            if current:
-                q.put({"id": dev.id,"update_availble":is_availbe,"current_firmware":current,"arch":arch,"upgrade_availble":upgrade_availble})
-            else:
-                q.put({"id": dev.id,"reason":"Wrong user or password"})
+def check_device_firmware_update(dev, q):
+    port = get_device_port(dev)
+    if not check_port(dev.ip, port):
+        q.put({"id": dev.id, "update_availble": False, "reason": "Connection problem"})
+        return
+
+    options = build_api_options(dev)
+    try:
+        is_availbe, current, arch, upgrade_availble = check_update(options)
+    except Exception as e:
+        q.put({"id": dev.id, "update_availble": False, "reason": f"Unknown Reason: {e}"})
+        return
+
+    if is_availbe:
+        q.put({"id": dev.id, "update_availble": is_availbe, "current_firmware": current, "arch": arch, "upgrade_availble": upgrade_availble})
     else:
-         q.put({"id": dev.id,"update_availble":False,"reason":"Connection problem"})
+        if current:
+            q.put({"id": dev.id, "update_availble": is_availbe, "current_firmware": current, "arch": arch, "upgrade_availble": upgrade_availble})
+        else:
+            q.put({"id": dev.id, "reason": "Wrong user or password"})
 
 def get_interfaces_counters(router):
    result = {}
@@ -281,7 +297,7 @@ def check_or_fix_event(events,eventtype,detail,comment=False):
     else:
         return False
 
-def grab_device_data(dev, q):
+def grab_device_data(dev, q, sysconfig_flags=None):
     max_attempts = 3
     attempts = 0
     port=get_device_port(dev)
@@ -296,9 +312,11 @@ def grab_device_data(dev, q):
         time_to_wait += 0.1
     if success:
         # get all device events which src is "Data Puller" and status is 0
-        events=list(db_events.get_events_by_src_and_status("Data Puller", 0,dev.id).dicts())
-        check_or_fix_event(events,"connection","Unreachable")
+        with database.connection_context():
+            events = list(db_events.get_events_by_src_and_status("Data Puller", 0, dev.id).dicts())
+            check_or_fix_event(events, "connection", "Unreachable")
         options=build_api_options(dev)
+        router = None
         try:
             router=RouterOSCheckResource(options)
             _installed_version=router._get_routeros_version()
@@ -355,7 +373,8 @@ def grab_device_data(dev, q):
             log.warning(dev.ip)
             q.put({"id": dev.id,"detail":"API Connection","reason":e,"done":False})
             return True
-        check_or_fix_event(events,"connection","API Connection")
+        with database.connection_context():
+            check_or_fix_event(events, "connection", "API Connection")
         try:
             keys=["free-memory","cpu-load","free-hdd-space"]
             if len(health):
@@ -385,10 +404,11 @@ def grab_device_data(dev, q):
 
                 for name, value in items_to_process:
                     if 'state' in name:
-                        if value == 'fail':
-                             db_events.health_event(dev.id,'Data Puller',name,'Critical',0,"{} is Failed".format(name))
-                        else:
-                             check_or_fix_event(events,"health",name)
+                        with database.connection_context():
+                            if value == 'fail':
+                                 db_events.health_event(dev.id, 'Data Puller', name, 'Critical', 0, "{} is Failed".format(name))
+                            else:
+                                 check_or_fix_event(events, "health", name)
                         # Don't add state to health_vals (Redis)
                         continue
                     
@@ -420,34 +440,46 @@ def grab_device_data(dev, q):
             log.error(health)
             q.put({"id": dev.id,"reason":"Could not health data from device","detail":"Get Health","done":False})
             return True
-        check_or_fix_event(events,"connection","Get Health")
+        with database.connection_context():
+            check_or_fix_event(events, "connection", "Get Health")
         try:
             # arch=result['architecture-name']
             try:
-                is_availbe , current , arch , upgrade_availble = check_update(options)
+                is_availbe , current , arch , upgrade_availble = check_update(options, router=router)
                 dev.update_availble=is_availbe
                 dev.upgrade_availble=upgrade_availble
                 dev.current_firmware=current
             except:
                 pass
-            force_syslog=True if db_sysconfig.get_sysconfig('force_syslog')=="True" else False
-            force_radius=True if db_sysconfig.get_sysconfig('force_radius')=="True" else False
+            if sysconfig_flags:
+                force_syslog = sysconfig_flags.get('force_syslog', False)
+                force_radius = sysconfig_flags.get('force_radius', False)
+                rad_secret = sysconfig_flags.get('rad_secret', '')
+            else:
+                with database.connection_context():
+                    force_syslog = True if db_sysconfig.get_sysconfig('force_syslog') == "True" else False
+                    force_radius = True if db_sysconfig.get_sysconfig('force_radius') == "True" else False
+                    rad_secret = db_sysconfig.get_sysconfig('rad_secret') if force_radius else ""
             if force_radius:
                 try:
-                    peer_ip=resolve_peer_ip(dev)
-                    secret = db_sysconfig.get_sysconfig('rad_secret')
-                    res = configure_radius(router, peer_ip,secret)
-                    check_or_fix_event(events,"config","radius configuration")
+                    peer_ip = resolve_peer_ip(dev)
+                    secret = rad_secret
+                    res = configure_radius(router, peer_ip, secret)
+                    with database.connection_context():
+                        check_or_fix_event(events, "config", "radius configuration")
                 except:
-                    db_events.config_event(dev.id,'Data Puller','radius configuration','Error',0,"Force radius Failed")
+                    with database.connection_context():
+                        db_events.config_event(dev.id, 'Data Puller', 'radius configuration', 'Error', 0, "Force radius Failed")
                     pass
             try:
-                syslog_configured=check_syslog_config(dev,router,force_syslog)
-                if dev.syslog_configured!=syslog_configured:
-                    dev.syslog_configured=syslog_configured
-                check_or_fix_event(events,"config","syslog configuration")
+                syslog_configured = check_syslog_config(dev, router, force_syslog)
+                if dev.syslog_configured != syslog_configured:
+                    dev.syslog_configured = syslog_configured
+                with database.connection_context():
+                    check_or_fix_event(events, "config", "syslog configuration")
             except:
-                db_events.config_event(dev.id,'Data Puller','syslog configuration','Error',0,"Force SysLog Failed")
+                with database.connection_context():
+                    db_events.config_event(dev.id, 'Data Puller', 'syslog configuration', 'Error', 0, "Force SysLog Failed")
                 pass
             dev.current_firmware=_installed_version
             dev.uptime=result['uptime']
@@ -494,24 +526,27 @@ def grab_device_data(dev, q):
             }
             reddb=RedisDB(redopts)
             
-            current_sensors = set(json.loads(dev.sensors)) if dev.sensors else set()
-            new_sensors = set(keys)
-            
-            # Only trigger if we've found a brand new sensor we've never seen before
-            if new_sensors - current_sensors:
-                log.info("updating keys for device {}".format(dev.id))
-                # Accumulate sensors so we don't forget temporarily disconnected ones
-                updated_sensors = list(current_sensors.union(new_sensors))
-                dev.sensors = json.dumps(updated_sensors)
-                reddb.dev_create_keys()
-            dev.save()
+            with database.connection_context():
+                current_sensors = set(json.loads(dev.sensors)) if dev.sensors else set()
+                new_sensors = set(keys)
+                
+                # Only trigger if we've found a brand new sensor we've never seen before
+                if new_sensors - current_sensors:
+                    log.info("updating keys for device {}".format(dev.id))
+                    # Accumulate sensors so we don't forget temporarily disconnected ones
+                    updated_sensors = list(current_sensors.union(new_sensors))
+                    dev.sensors = json.dumps(updated_sensors)
+                    reddb.dev_create_keys()
+                dev.save()
+                check_or_fix_event(events, "connection", "DB Write")
             reddb.add_dev_data(data)
-            check_or_fix_event(events,"connection","DB Write")
         except Exception as e:
             log.error(e)
             log.warning(dev.ip)
             q.put({"id": dev.id,"reason":"Unable to store data in DB","detail":"DB Write","done":False})
             return True
+        finally:
+            close_router(router)
     else:
         q.put({"id": dev.id, "reason":"device not reachable with port {}".format(port),"detail":"Unreachable", "done":False})
         return True
@@ -520,10 +555,12 @@ def grab_device_data(dev, q):
 
 
 def check_syslog_config(dev,router,apply=False):
+    own_router = False
     try:
         if not router:
             options=build_api_options(dev)
             router=RouterOSCheckResource(options)
+            own_router = True
         peer_ip=resolve_peer_ip(dev)
         devid=dev.id
         call = router.api.path(
@@ -597,6 +634,9 @@ def check_syslog_config(dev,router,apply=False):
     except Exception as e:
         log.error(e)
         return False
+    finally:
+        if own_router and router:
+            close_router(router)
 
 def apply_perm(router,name,perms):
     try:
@@ -752,6 +792,7 @@ def configure_radius(router,ip,secret):
         return False
 
 def FourcePermToRouter(dev,perm):
+    router = None
     try:
         options=build_api_options(dev)
         router=RouterOSCheckResource(options)
@@ -787,13 +828,17 @@ def FourcePermToRouter(dev,perm):
     except Exception as e:
         log.error(e)
         return False
+    finally:
+        close_router(router)
 
 def check_update(options,router=False):
     ofa=db_sysconfig.get_firmware_action().value
     #is_availbe , current , arch , data
+    own_router = False
     try:
         if not router:
             router=RouterOSCheckResource(options)
+            own_router = True
         _installed_version=router._get_routeros_version()
         try:
             if ofa=="keep" and _installed_version < RouterOSVersion('6.99.99'):
@@ -831,6 +876,9 @@ def check_update(options,router=False):
         log.error("Error during firmware check for host : {}".format(options["host"]))
         log.error(e)
         return False,False,False,False
+    finally:
+        if own_router and router:
+            close_router(router)
 
 def log_alert(type, dev, massage):
     if isinstance(dev, int):
@@ -900,6 +948,7 @@ def run_snippet(dev, snippet, template_key=None):
 
     # --- LEGACY MIKROTIK ROUTEROS API PATH ---
     port=get_device_port(dev)
+    router = None
     try:
         if check_port(dev.ip,port):
             options=build_api_options(dev)
@@ -945,9 +994,12 @@ def run_snippet(dev, snippet, template_key=None):
         log.error(e)
         log_alert('backup',dev,'Problem During backup when connecting to ssh')
         return False
+    finally:
+        close_router(router)
 
 def backup_router(dev):
     port=get_device_port(dev)
+    router = None
     try:
         if check_port(dev.ip,port):
             options=build_api_options(dev)
@@ -991,6 +1043,8 @@ def backup_router(dev):
         log.error(e)
         log_alert('backup',dev,'Problem During backup when connecting to ssh')
         return False
+    finally:
+        close_router(router)
 
 def store_config(dev,configs):
     dir=config.BACKUP_DIR
@@ -1062,9 +1116,11 @@ def sizeof_fmt(num, suffix="B"):
     return f"{num:.1f}Yi{suffix}"
 
 def get_local_users(opts,router=False,full=False):
+    own_router = False
     try:
         if not router:
             router=RouterOSCheckResource(opts)
+            own_router = True
         call = router.api.path(
             "/user"
         )
@@ -1076,6 +1132,9 @@ def get_local_users(opts,router=False,full=False):
     except Exception as e:
         log.error(e)
         return False
+    finally:
+        if own_router and router:
+            close_router(router)
 
 def delete_file(file):
     try:

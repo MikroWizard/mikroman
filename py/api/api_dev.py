@@ -587,46 +587,51 @@ def dev_info():
     )
     network_info = []
     res["online"] = True
+    router = None
     try:
-        if util.check_port(options["host"], options["port"]):
-            router = util.RouterOSCheckResource(options)
-            network_info = util.get_network_data(router)
-            del network_info["total"]
-        else:
+        try:
+            if util.check_port(options["host"], options["port"]):
+                router = util.RouterOSCheckResource(options)
+                network_info = util.get_network_data(router)
+                del network_info["total"]
+            else:
+                res["online"] = False
+        except:
             res["online"] = False
-    except:
-        res["online"] = False
-        pass
-    interfaces = []
-    for iface in network_info:
-        interfaces.append(network_info[iface])
-    # fix and change some data
-    res["interfaces"] = interfaces
-    res.pop("user_name")
-    res.pop("password")
-    res.pop("wifi_config")
-    res["created"] = res["created"].strftime("%Y-%m-%d %H:%M:%S")
-    res["modified"] = res["modified"].strftime("%Y-%m-%d %H:%M:%S")
-    # get data from redis
-    if ISPRO:
-        res["is_radio"] = utilpro.check_is_radio(res["id"])
-    try:
-        del res["sensors"]
-    except Exception as e:
-        log.error(e)
-        return buildResponse({"status": "failed"}, 200, error="Wrong Data")
-        pass
-    try:
-        res["active_users"] = []
-        if res["online"]:
-            res["active_users"] = tuple(router.api("/user/active/print"))
-    except:
-        res["active_users"] = []
-    try:
-        res["ping"] = ping.get_ping_results(res["ip"], 5, 1)
-    except Exception as e:
-        res["ping"] = []
-    return buildResponse(res, 200)
+            pass
+        interfaces = []
+        for iface in network_info:
+            interfaces.append(network_info[iface])
+        # fix and change some data
+        res["interfaces"] = interfaces
+        res.pop("user_name")
+        res.pop("password")
+        res.pop("wifi_config")
+        res["created"] = res["created"].strftime("%Y-%m-%d %H:%M:%S")
+        res["modified"] = res["modified"].strftime("%Y-%m-%d %H:%M:%S")
+        # get data from redis
+        if ISPRO:
+            res["is_radio"] = utilpro.check_is_radio(res["id"])
+        try:
+            del res["sensors"]
+        except Exception as e:
+            log.error(e)
+            return buildResponse({"status": "failed"}, 200, error="Wrong Data")
+            pass
+        try:
+            res["active_users"] = []
+            if res["online"] and router:
+                res["active_users"] = tuple(router.api("/user/active/print"))
+        except:
+            res["active_users"] = []
+        try:
+            res["ping"] = ping.get_ping_results(res["ip"], 5, 1)
+        except Exception as e:
+            res["ping"] = []
+        return buildResponse(res, 200)
+    finally:
+        if router:
+            router.close()
 
 
 @app.route("/api/dev/kill_session", methods=["POST"])
@@ -649,18 +654,21 @@ def dev_kill_session():
     if not dev:
         return buildResponse({"status": "failed"}, 200, error="Wrong Data")
     options = util.build_api_options(dev)
-    router = util.RouterOSCheckResource(options)
-    # active_users=tuple(router.api("/user/active/print"))
-    # if item in active_users:
+    router = None
     try:
-        acturl = router.api.path("user", "active")
-        res = tuple(acturl("request-logout", **{".id": item[".id"]}))
-        log.error(res)
-    except Exception as e:
-        log.error(e)
-        pass
-    res = tuple(router.api("/user/active/print"))
-    return buildResponse(res, 200)
+        router = util.RouterOSCheckResource(options)
+        try:
+            acturl = router.api.path("user", "active")
+            res = tuple(acturl("request-logout", **{".id": item[".id"]}))
+            log.error(res)
+        except Exception as e:
+            log.error(e)
+            pass
+        res = tuple(router.api("/user/active/print"))
+        return buildResponse(res, 200)
+    finally:
+        if router:
+            router.close()
 
 
 @app.route("/api/dev/sensors", methods=["POST"])

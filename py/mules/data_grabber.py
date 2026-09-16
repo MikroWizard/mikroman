@@ -49,10 +49,19 @@ def grab_device_data(timer=2):
         if os.getenv("DEV_MODE") == "true":
             log.info(f"Data grabber started for {num_devices} devices")
 
+        # Pre-fetch static sysconfig flags once per cycle to prevent N-query amplification
+        try:
+            sysconfig_flags = {
+                'force_syslog': db_sysconfig.get_sysconfig('force_syslog') == "True",
+                'force_radius': db_sysconfig.get_sysconfig('force_radius') == "True",
+                'rad_secret': db_sysconfig.get_sysconfig('rad_secret') or "",
+            }
+        except Exception as e:
+            log.warning("Could not pre-fetch sysconfig flags: %s", e)
+            sysconfig_flags = None
+
         def thread_worker(dev, q_obj):
-            """Each worker opens and closes its own DB connection cleanly."""
-            with database.connection_context():
-                util.grab_device_data(dev, q_obj)
+            util.grab_device_data(dev, q_obj, sysconfig_flags=sysconfig_flags)
 
         # Process in batches to control memory pressure at scale
         for batch_start in range(0, num_devices, BATCH_SIZE):

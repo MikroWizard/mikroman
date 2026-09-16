@@ -14,7 +14,7 @@ import config
 import time
 from libs.db import db_tasks,db_device,db_events,db_user_group_perm
 from threading import Thread
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import queue
 import pexpect
 import re
@@ -93,16 +93,26 @@ def check_devices_for_update(*args, **kwargs):
             q = queue.Queue()
             if devs:
                 with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_THREADS, len(devs))) as executor:
-                    futures = [executor.submit(util.check_device_firmware_update, dev, q) for dev in devs]
-                    for future in futures:
-                        future.result()
-            res=[]
-            for _ in range(num_threads):
-                qres=q.get()
-                if not qres.get("reason",False):
-                    res.append(qres)
-                else:
-                    db_events.connection_event(qres['id'],'Firmware updater',qres.get("detail","connection"),"Critical",0,qres.get("reason","problem in Firmware updater"))
+                    futures = {executor.submit(util.check_device_firmware_update, dev, q): dev for dev in devs}
+                    for future in as_completed(futures):
+                        dev = futures[future]
+                        try:
+                            future.result(timeout=600)
+                        except Exception as e:
+                            log.error(f"Firmware check worker failure for dev {getattr(dev, 'id', '?')}: {e}")
+                            q.put({"id": getattr(dev, "id", None), "update_availble": False, "reason": f"Worker failure: {e}"})
+            res = []
+            while not q.empty():
+                try:
+                    qres = q.get_nowait()
+                    if not qres.get("reason", False):
+                        res.append(qres)
+                    else:
+                        dev_id = qres.get('id', qres.get('devid'))
+                        if dev_id:
+                            db_events.connection_event(dev_id, 'Firmware updater', qres.get("detail", "connection"), "Critical", 0, qres.get("reason", "problem in Firmware updater"))
+                except queue.Empty:
+                    break
             db_device.update_devices_firmware_status(res)
     except Exception as e:
         log.error(e)
@@ -150,12 +160,20 @@ def update_device(*args, **kwargs):
                 eligible_devs.append(dev)
             if eligible_devs:
                 with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_THREADS, len(eligible_devs))) as executor:
-                    futures = [executor.submit(firm_lib.update_device, dev, q) for dev in eligible_devs]
-                    for future in futures:
-                        future.result()
-            res=[]
-            for _ in range(len(eligible_devs)):
-                qres=q.get()
+                    futures = {executor.submit(firm_lib.update_device, dev, q): dev for dev in eligible_devs}
+                    for future in as_completed(futures):
+                        dev = futures[future]
+                        try:
+                            future.result(timeout=600)
+                        except Exception as e:
+                            log.error(f"Device update worker failure for dev {getattr(dev, 'id', '?')}: {e}")
+                            q.put({"id": getattr(dev, "id", None), "status": False, "reason": f"Worker failure: {e}"})
+            res = []
+            while not q.empty():
+                try:
+                    res.append(q.get_nowait())
+                except queue.Empty:
+                    break
     except Exception as e:
         log.error(e)
         return False
@@ -220,20 +238,38 @@ def backup_devices(*args, **kwargs):
         if kwargs.get('devices',False):
             devices=kwargs.get('devices',False)
             if len(devices):
-                num_threads = len(devices)
                 q = queue.Queue()
                 if devices:
                     with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_THREADS, len(devices))) as executor:
-                        futures = [executor.submit(compat_runner.backup_routers, dev, q) for dev in devices]
-                        for future in futures:
-                            future.result()
-                res=[]
-                for _ in range(num_threads):
-                    qres=q.get()
-                    if not qres['status']:
-                        if 'id' in qres:
-                            db_events.connection_event(qres['id'], 'Backup', qres.get("detail", "connection"), "Critical", 0, qres.get("reason", "problem in getting backup for device"))
-                    res.append(qres)
+                        futures = {executor.submit(compat_runner.backup_routers, dev, q): dev for dev in devices}
+                        for future in as_completed(futures):
+                            dev = futures[future]
+                            try:
+                                future.result(timeout=600)
+                            except Exception as e:
+                                log.error(f"Backup worker failure for dev {getattr(dev, 'id', '?')}: {e}")
+                                q.put({
+                                    "id": getattr(dev, "id", None),
+                                    "devid": getattr(dev, "id", None),
+                                    "devip": getattr(dev, "ip", ""),
+                                    "devname": getattr(dev, "name", ""),
+                                    "status": False,
+                                    "state": False,
+                                    "reason": f"Worker failure: {e}",
+                                    "detail": "Worker error",
+                                })
+                res = []
+                while not q.empty():
+                    try:
+                        qres = q.get_nowait()
+                        status = qres.get('status', qres.get('state', False))
+                        if not status:
+                            dev_id = qres.get('id', qres.get('devid'))
+                            if dev_id:
+                                db_events.connection_event(dev_id, 'Backup', qres.get("detail", "connection"), "Critical", 0, qres.get("reason", "problem in getting backup for device"))
+                        res.append(qres)
+                    except queue.Empty:
+                        break
             else:
                 return False
     except Exception as e:
@@ -384,8 +420,9 @@ def scan_with_ip(*args, **kwargs):
                         'ssl_verify':False,
                         'ssl_verify_hostname':False
                     }
-                    router=RouterOSCheckResource(options)
+                    router = None
                     try:
+                        router=RouterOSCheckResource(options)
                         call = router.api.path(
                         "/system/resource"
                         )
@@ -515,6 +552,9 @@ def scan_with_ip(*args, **kwargs):
                         dev_number+=1
                         log.error(f"Error scanning {ip}: {e}")
                         continue
+                    finally:
+                        if router:
+                            router.close()
                 else:
                     scan_results.append({})
                     scan_results[dev_number]['ip']=ip
@@ -614,15 +654,24 @@ def exec_snipet(*args, **kwargs):
                 store_in_backup = bool(taskdata.get('store_in_backup', False))
                 snippet_id = taskdata.get('snippet', {}).get('id')
                 def _snipet_worker(dev, code, q):
-                    with database.connection_context():
-                        compat_runner.run_snippets(dev, code, q, user_task_id=utask.id, snippet_id=snippet_id, store_in_backup=store_in_backup)
+                    compat_runner.run_snippets(dev, code, q, user_task_id=utask.id, snippet_id=snippet_id, store_in_backup=store_in_backup)
                 with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_THREADS, len(eligible_devs))) as executor:
-                    futures = [executor.submit(_snipet_worker, dev, code, q) for dev, code in eligible_devs]
-                    for future in futures:
+                    futures = {executor.submit(_snipet_worker, dev, code, q): dev for dev, code in eligible_devs}
+                    for future in as_completed(futures):
+                        dev = futures[future]
                         try:
                             future.result(timeout=600)
                         except Exception as e:
-                            log.error("Snippet worker failure: %s", e)
+                            log.error("Snippet worker failure for dev %s: %s", getattr(dev, "id", "?"), e)
+                            q.put({
+                                "id": getattr(dev, "id", None),
+                                "devid": getattr(dev, "id", None),
+                                "devip": getattr(dev, "ip", ""),
+                                "devname": getattr(dev, "name", ""),
+                                "status": False,
+                                "state": False,
+                                "result": f"Execution error: {e}",
+                            })
             res=[]
             while not q.empty():
                 try:
@@ -845,6 +894,7 @@ def bulk_add_devices(*args, **kwargs):
                 'ssl_verify_hostname':False
             }
             
+            router = None
             try:
                 router=RouterOSCheckResource(options)
                 call = router.api.path("/system/resource")
@@ -959,6 +1009,9 @@ def bulk_add_devices(*args, **kwargs):
                 scan_results[idx]['added']=False
                 scan_results[idx]['failures']="Connection or authentication failed"
                 log.error(f"Error adding device {ip}: {e}")
+            finally:
+                if router:
+                    router.close()
                 
         try:
             db_tasks.add_task_result('bulk-add', json.dumps(scan_results), json.dumps(info,default=serialize_datetime))

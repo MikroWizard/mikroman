@@ -98,16 +98,25 @@ def backup_devs(devices):
     q = queue.Queue()
 
     def thread_worker(dev, q_obj):
-        with database.connection_context():
-            compat_runner.backup_routers(dev, q_obj)
+        compat_runner.backup_routers(dev, q_obj)
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {executor.submit(thread_worker, dev, q): dev for dev in devices}
         for future in as_completed(futures):
+            dev = futures[future]
             try:
                 future.result(timeout=600)
             except Exception as e:
-                log.error(f"Backup thread failure: {e}")
+                log.error(f"Backup thread failure for dev {getattr(dev, 'id', '?')}: {e}")
+                q.put({
+                    "id": getattr(dev, "id", None),
+                    "devid": getattr(dev, "id", None),
+                    "devip": getattr(dev, "ip", ""),
+                    "devname": getattr(dev, "name", ""),
+                    "status": False,
+                    "state": False,
+                    "reason": f"Thread failure: {e}",
+                })
 
     res = []
     while not q.empty():
@@ -124,16 +133,25 @@ def run_snippets(devices, snippet, template_key=None, user_task_id=None, snippet
     q = queue.Queue()
 
     def thread_worker(dev, snippet_content, q_obj, tmpl_key):
-        with database.connection_context():
-            compat_runner.run_snippets(dev, snippet_content, q_obj, tmpl_key, user_task_id=user_task_id, snippet_id=snippet_id, store_in_backup=store_in_backup)
+        compat_runner.run_snippets(dev, snippet_content, q_obj, tmpl_key, user_task_id=user_task_id, snippet_id=snippet_id, store_in_backup=store_in_backup)
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {executor.submit(thread_worker, dev, snippet, q, template_key): dev for dev in devices}
         for future in as_completed(futures):
+            dev = futures[future]
             try:
                 future.result(timeout=600)
             except Exception as e:
-                log.error(f"Snippet thread failure: {e}")
+                log.error(f"Snippet thread failure for dev {getattr(dev, 'id', '?')}: {e}")
+                q.put({
+                    "id": getattr(dev, "id", None),
+                    "devid": getattr(dev, "id", None),
+                    "devip": getattr(dev, "ip", ""),
+                    "devname": getattr(dev, "name", ""),
+                    "status": False,
+                    "state": False,
+                    "result": False,
+                })
 
     res = []
     while not q.empty():

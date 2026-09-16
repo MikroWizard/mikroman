@@ -240,72 +240,73 @@ def run_device_job(config):
         result["output_normalized"] = None
 
     try:
-        # --- 1. LOAD ---
-        device = Devices.get_by_id(device_id)
-        result["device_name"] = device.name
-        result["device_ip"] = device.ip
-        if _DEVMODE:
-            log.info("[DEV] device=%s id=%s type=%s template_id=%s",
-                     device.name, device_id, getattr(device, "device_type", "?"),
-                     getattr(device, "template_id", None))
+        # --- 1. LOAD (scoped DB checkout) ---
+        with database.connection_context():
+            device = Devices.get_by_id(device_id)
+            result["device_name"] = device.name
+            result["device_ip"] = device.ip
+            if _DEVMODE:
+                log.info("[DEV] device=%s id=%s type=%s template_id=%s",
+                         device.name, device_id, getattr(device, "device_type", "?"),
+                         getattr(device, "template_id", None))
 
-        template_id = config.get("template_id") or getattr(device, "template_id", None)
-        template = DeviceTemplates.get_or_none(DeviceTemplates.id == template_id) if template_id else None
-        if not template:
-            brand = getattr(device, "device_type", None) or "mikrotik"
-            template = get_template_for_brand(brand)
-            if template:
-                template_id = template.id
-        t_dict = _template_to_dict(template)
+            template_id = config.get("template_id") or getattr(device, "template_id", None)
+            template = DeviceTemplates.get_or_none(DeviceTemplates.id == template_id) if template_id else None
+            if not template:
+                brand = getattr(device, "device_type", None) or "mikrotik"
+                template = get_template_for_brand(brand)
+                if template:
+                    template_id = template.id
+            t_dict = _template_to_dict(template)
 
-        # Fail loudly on missing template when template-driven
-        if not template and (config.get("command_key") or
-                             (config.get("snippet_id") and not config.get("custom_command"))):
-            msg = "Device {} has no template assigned; cannot resolve command".format(device_id)
-            result["error"] = msg
-            result["execution_log_id"] = _log_execution(
-                None, execution_run_id, device_id, None, config.get("command_key"),
-                "", 0, None, None, 0, "error", msg, 0, False, None
+            # Fail loudly on missing template when template-driven
+            if not template and (config.get("command_key") or
+                                 (config.get("snippet_id") and not config.get("custom_command"))):
+                msg = "Device {} has no template assigned; cannot resolve command".format(device_id)
+                result["error"] = msg
+                result["execution_log_id"] = _log_execution(
+                    None, execution_run_id, device_id, None, config.get("command_key"),
+                    "", 0, None, None, 0, "error", msg, 0, False, None
+                )
+                return result
+
+            # --- 2. RESOLVE command ---
+            snippet = None
+            if config.get("snippet_id"):
+                snippet = Snippets.get_or_none(Snippets.id == config["snippet_id"])
+
+            command_string, is_config_mode = resolve_command_string(
+                t_dict, config.get("command_key"), config.get("custom_command"),
+                config.get("snippet_content"), snippet, device, None
             )
-            return result
+            if not command_string:
+                raise ValueError("No command resolved")
 
-        # --- 2. RESOLVE command ---
-        snippet = None
-        if config.get("snippet_id"):
-            snippet = Snippets.get_or_none(Snippets.id == config["snippet_id"])
+            result["command_key"] = config.get("command_key")
+            if _DEVMODE:
+                log.info("[DEV] command=%s key=%s cm=%-5s tpl_id=%s",
+                         command_string[:200], result["command_key"], is_config_mode, template_id)
 
-        command_string, is_config_mode = resolve_command_string(
-            t_dict, config.get("command_key"), config.get("custom_command"),
-            config.get("snippet_content"), snippet, device, None
-        )
-        if not command_string:
-            raise ValueError("No command resolved")
+            # --- 3. BUILD API OPTIONS (for hooks) ---
+            api_options = None
+            has_routeros_hooks = any(
+                (t_dict.get("pre_connect") or []) + (t_dict.get("post_disconnect") or [])
+            )
+            # simpler: check if template has routeros_api hooks
+            pre_hooks = t_dict.get("pre_connect") or []
+            post_hooks = t_dict.get("post_disconnect") or []
+            if any(h.get("type") == "routeros_api" for h in pre_hooks + post_hooks):
+                api_options = util.build_api_options(device)
 
-        result["command_key"] = config.get("command_key")
-        if _DEVMODE:
-            log.info("[DEV] command=%s key=%s cm=%-5s tpl_id=%s",
-                     command_string[:200], result["command_key"], is_config_mode, template_id)
-
-        # --- 3. BUILD API OPTIONS (for hooks) ---
-        api_options = None
-        has_routeros_hooks = any(
-            (t_dict.get("pre_connect") or []) + (t_dict.get("post_disconnect") or [])
-        )
-        # simpler: check if template has routeros_api hooks
-        pre_hooks = t_dict.get("pre_connect") or []
-        post_hooks = t_dict.get("post_disconnect") or []
-        if any(h.get("type") == "routeros_api" for h in pre_hooks + post_hooks):
-            api_options = util.build_api_options(device)
-
-        # --- 4. LEGACY CREDS (for devices without DeviceConnections) ---
-        connection = None
-        try:
-            from libs.db.db_pam import get_device_connection as get_dc
-            connection = get_dc(device_id, "ssh") or get_dc(device_id, "telnet")
-        except Exception:
-            pass
-        legacy_creds = (util.decrypt_data(device.user_name) if device.user_name else "",
-                        util.decrypt_data(device.password) if device.password else "")
+            # --- 4. LEGACY CREDS (for devices without DeviceConnections) ---
+            connection = None
+            try:
+                from libs.db.db_pam import get_device_connection as get_dc
+                connection = get_dc(device_id, "ssh") or get_dc(device_id, "telnet")
+            except Exception:
+                pass
+            legacy_creds = (util.decrypt_data(device.user_name) if device.user_name else "",
+                            util.decrypt_data(device.password) if device.password else "")
 
         # --- 5. PRE-HOOKS ---
         hook_context = run_hooks(pre_hooks, "pre_connect", device, t_dict, {
@@ -355,9 +356,10 @@ def run_device_job(config):
             status = {"auth": "auth_error", "timeout": "timeout"}.get(err_type, "error")
             result["error"] = err
             result["status"] = status
-            _log_execution(config.get("user_task_id"), execution_run_id, device_id,
-                           template_id, config.get("command_key"), command_string,
-                           0, None, None, 0, status, err, duration_ms, False, None)
+            with database.connection_context():
+                _log_execution(config.get("user_task_id"), execution_run_id, device_id,
+                               template_id, config.get("command_key"), command_string,
+                               0, None, None, 0, status, err, duration_ms, False, None)
             run_hooks(post_hooks, "post_disconnect", device, t_dict, hook_context)
             return result
 
@@ -383,12 +385,13 @@ def run_device_job(config):
         # --- 11. STORE NORMALIZED BLOB ---
         norm_path = store_blob(normalized, "norm")
 
-        # --- 12. VERSION CHECK (atomic block) ---
-        is_versioned, version_id, version_num, exec_log_id = run_versioning(
-            config, execution_run_id, device_id, template_id, device,
-            command_string, raw_size, normalized, content_hash,
-            raw_path, raw_hash, norm_path, duration_ms, skip_versioning,
-        )
+        # --- 12. VERSION CHECK (atomic block with scoped DB context) ---
+        with database.connection_context():
+            is_versioned, version_id, version_num, exec_log_id = run_versioning(
+                config, execution_run_id, device_id, template_id, device,
+                command_string, raw_size, normalized, content_hash,
+                raw_path, raw_hash, norm_path, duration_ms, skip_versioning,
+            )
 
         # --- 13. POST-HOOKS ---
         if not session_conn:
@@ -407,12 +410,13 @@ def run_device_job(config):
         result["error"] = str(e)
         if result["execution_log_id"] is None:
             try:
-                result["execution_log_id"] = _log_execution(
-                    config.get("user_task_id"), execution_run_id, device_id,
-                    config.get("template_id") or (device.template_id if "device" in dir() else None),
-                    config.get("command_key"), command_string if "command_string" in dir() else "",
-                    0, None, None, 0, "error", str(e), result["duration_ms"], False, None
-                )
+                with database.connection_context():
+                    result["execution_log_id"] = _log_execution(
+                        config.get("user_task_id"), execution_run_id, device_id,
+                        config.get("template_id") or (device.template_id if "device" in dir() else None),
+                        config.get("command_key"), command_string if "command_string" in dir() else "",
+                        0, None, None, 0, "error", str(e), result["duration_ms"], False, None
+                    )
             except Exception:
                 pass
         try:
@@ -428,18 +432,19 @@ def _log_execution(user_task_id, execution_run_id, device_id, template_id,
                    command_key, command_string, raw_size, normalized_hash,
                    storage_path, raw_hash, status, error_message,
                    duration_ms, is_versioned, version_id, raw_storage_path=None):
-    return CommandExecutionLog.create(
-        user_task_id=user_task_id, execution_run_id=execution_run_id,
-        device_id=device_id, template_id=template_id,
-        command_key=command_key, command_string=command_string,
-        raw_size_bytes=raw_size, normalized_hash=normalized_hash,
-        storage_path=storage_path, raw_hash=raw_hash,
-        raw_storage_path=raw_storage_path,
-        status=status, error_message=error_message,
-        duration_ms=duration_ms, is_versioned=is_versioned,
-        version_id=version_id,
-        executed_at=datetime.now(timezone.utc),
-    ).id
+    with database.connection_context():
+        return CommandExecutionLog.create(
+            user_task_id=user_task_id, execution_run_id=execution_run_id,
+            device_id=device_id, template_id=template_id,
+            command_key=command_key, command_string=command_string,
+            raw_size_bytes=raw_size, normalized_hash=normalized_hash,
+            storage_path=storage_path, raw_hash=raw_hash,
+            raw_storage_path=raw_storage_path,
+            status=status, error_message=error_message,
+            duration_ms=duration_ms, is_versioned=is_versioned,
+            version_id=version_id,
+            executed_at=datetime.now(timezone.utc),
+        ).id
 
 
 # ---------------------------------------------------------------------------
@@ -463,8 +468,7 @@ def run_bulk_job(job_config):
     results = []
 
     def _worker(cfg):
-        with database.connection_context():
-            return run_device_job(cfg)
+        return run_device_job(cfg)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {}
