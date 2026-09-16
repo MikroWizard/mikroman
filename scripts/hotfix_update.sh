@@ -101,7 +101,7 @@ if [ "$ACTION" = "rollback" ]; then
 
     info "Reloading application..."
     $DOCKER exec "$CONTAINER" touch /app/reload 2>/dev/null || true
-    $DOCKER restart "$CONTAINER"
+    # $DOCKER restart "$CONTAINER"
 
     echo ""
     echo -e "${GREEN}${BOLD}======================================================${NC}"
@@ -187,7 +187,7 @@ info "Triggering application reload (/app/reload)..."
 $DOCKER exec "$CONTAINER" touch /app/reload 2>/dev/null || true
 
 info "Restarting container '${CONTAINER}' to ensure all worker mules and spoolers restart cleanly..."
-$DOCKER restart "$CONTAINER"
+# $DOCKER restart "$CONTAINER"
 
 sleep 3
 
