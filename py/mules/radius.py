@@ -269,9 +269,12 @@ class RadServer(ServerAsync):
                                     proxy_sid = raw_sid.decode('utf-8') if isinstance(raw_sid, bytes) else raw_sid
                         except Exception as e:
                             log.error("Failed to resolve proxy session id: %s", str(e))
-                        db_AA.Auth.add_log(dev.id, 'proxy', u.username, userip,
-                                           by="proxy", sessionid=proxy_sid, timestamp=tz,
-                                           message="proxy login")
+                        try:
+                            db_AA.Auth.add_log(dev.id, 'proxy', u.username, userip,
+                                               by="proxy", sessionid=proxy_sid, timestamp=tz,
+                                               message="proxy login")
+                        except Exception as log_err:
+                            log.error("Failed to add proxy auth log: %s", str(log_err))
                         self._proxy_users[(u.username, devip)] = tz
 
                 # send_response is thread-safe (UDP sendto)

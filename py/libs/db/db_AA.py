@@ -56,8 +56,7 @@ class Auth(BaseModel):
             # 1) Exact match on the session id (accurate link to the proxy_init row).
             if sid:
                 existing = Auth.select().where(
-                    (Auth.sessionid == sid) &
-                    (Auth.by == 'Web-Proxy')
+                    Auth.sessionid == sid
                 ).order_by(Auth.id.desc()).first()
             # 2) Fallback: most recent Web-Proxy row for this user/device within 30s
             #    (legacy callers that don't supply a session id).
