@@ -61,9 +61,28 @@ def list_non_mikrotik():
         devs = list(allowed.where(db_device.Devices.device_type != 'mikrotik').dicts())
     else:
         devs = list(db_device.Devices.select().where(db_device.Devices.device_type != 'mikrotik').dicts())
+    # Build mapping for effective_ip and child counts
+    id_to_ip = {d['id']: d.get('ip') for d in devs if d.get('ip')}
+    child_counts = {}
+    for d in devs:
+        pid = d.get('parent_id')
+        if pid:
+            child_counts[pid] = child_counts.get(pid, 0) + 1
+
     for d in devs:
         d.pop('user_name', None)
         d.pop('password', None)
+        pid = d.get('parent_id')
+        if pid:
+            d['effective_ip'] = id_to_ip.get(pid) or d.get('ip') or ''
+            d['is_child'] = True
+        else:
+            d['effective_ip'] = d.get('ip') or ''
+            d['is_child'] = False
+        d['child_count'] = child_counts.get(d['id'], 0)
+        if not d.get('protocol_config'):
+            d['protocol_config'] = {}
+
     return buildResponse({"status": "success", "data": devs})
 
 
@@ -109,6 +128,8 @@ def get_non_mikrotik():
     ).first()
     dev["has_enable"] = bool(enable_cred)
     
+    dev['parent_id'] = dev.get('parent_id')
+    dev['protocol_config'] = dev.get('protocol_config') or {}
     dev.pop('user_name', None)
     dev.pop('password', None)
         
@@ -133,32 +154,51 @@ def add_non_mikrotik():
     protocol = data.get('protocol', 'ssh')
     port = data.get('port', None)
     group_ids = data.get('group_ids', [])
-    if not ip:
-        return buildResponse({"status": "failed", "error": "IP required"}, 400)
-    if db_device.query_device_by_ip(ip):
-        return buildResponse({"status": "failed", "error": "IP already exists"}, 200)
-    if ISPRO:
-        try:
-            allowed, err = utilpro.can_add_device('other')
-            if not allowed:
-                return buildResponse({"status": "failed", "error": err}, 200)
-        except Exception as e:
-            log.error(e)
+    parent_id = data.get('parent_id')
+    protocol_config = data.get('protocol_config') or {}
+    
+    parent_dev = None
+    if parent_id:
+        if not ISPRO:
+            return buildResponse({"status": "failed", "error": "Child applications are only available in Pro"}, 403)
+        parent_dev = db_device.Devices.get_or_none(db_device.Devices.id == parent_id)
+        if not parent_dev:
+            return buildResponse({"status": "failed", "error": "Parent device not found"}, 400)
+        device_type = device_type or parent_dev.device_type or 'windows'
+        device_model = device_model or parent_dev.device_model or ''
+        template_id = template_id or parent_dev.template_id
+        # Child published apps do not require dedicated IP, and bypass quota
+        if not ip:
+            ip = None
+    else:
+        if not ip:
+            return buildResponse({"status": "failed", "error": "IP required"}, 400)
+        if db_device.query_device_by_ip(ip):
+            return buildResponse({"status": "failed", "error": "IP already exists"}, 200)
+        if ISPRO:
+            try:
+                allowed, err = utilpro.can_add_device('other')
+                if not allowed:
+                    return buildResponse({"status": "failed", "error": err}, 200)
+            except Exception as e:
+                log.error(e)
+
     now = datetime.datetime.now(datetime.timezone.utc)
     try:
         enc_user = util.crypt_data(username) if username else ''
         enc_pass = util.crypt_data(password) if password else ''
+        peer_ip_val = util.resolve_peer_ip({"ip": ip}) if ip else ''
         new_dev = db_device.Devices.create(
             name=name, ip=ip, mac=mac, details="{}", uptime="", license="", interface="",
             user_name=enc_user, password=enc_pass, port="",
             update_availble=False, current_firmware="", arch="", sensors="",
             router_type="", wifi_config="", upgrade_avail=False,
-            owner=user, created=now, modified=now, peer_ip=util.resolve_peer_ip({"ip": ip}), failed_attempt=0,
+            owner=user, created=now, modified=now, peer_ip=peer_ip_val, failed_attempt=0,
             status="active", firmware_to_install="", syslog_configured=False, upgrade_device=False,
-            device_type=device_type, device_model=device_model, template_id=template_id
+            device_type=device_type, device_model=device_model, template_id=template_id,
+            parent_id=parent_id, protocol_config=protocol_config
         )
-        from libs.db.db_pam import DeviceConnections, Credentials
-        port_map = {'ssh': 22, 'telnet': 23, 'web': 80, 'api': 8728}
+        port_map = {'ssh': 22, 'telnet': 23, 'web': 80, 'api': 8728, 'rdp': 3389, 'vnc': 5900}
         resolved_port = int(port) if port else port_map.get(protocol, 22)
         agent_modes = data.get('agent_modes') if protocol == 'ssh' else None
         if isinstance(agent_modes, dict):
@@ -232,7 +272,7 @@ def edit_non_mikrotik():
         return buildResponse({"status": "failed", "error": "id required"}, 400)
     try:
         update_fields = {}
-        for field in ('name', 'ip', 'mac', 'device_type', 'device_model', 'template_id', 'port'):
+        for field in ('name', 'ip', 'mac', 'device_type', 'device_model', 'template_id', 'port', 'parent_id', 'protocol_config'):
             if field in data and data[field] is not None:
                 update_fields[field] = data[field]
         if 'username' in data:
@@ -367,7 +407,7 @@ def edit_non_mikrotik():
 
         if 'protocol' in data or 'port' in data:
             now = datetime.datetime.now(datetime.timezone.utc)
-            port_map = {'ssh': 22, 'telnet': 23, 'web': 80, 'api': 8728}
+            port_map = {'ssh': 22, 'telnet': 23, 'web': 80, 'api': 8728, 'rdp': 3389, 'vnc': 5900}
             
             proto = data.get('protocol') or 'ssh'
             resolved_port = int(data.get('port')) if data.get('port') else port_map.get(proto, 22)

@@ -47,6 +47,7 @@ try:
     from libs.db.db_pam import Credentials, DeviceConnections, get_template_for_brand
     from libs import kek_provider, envelope_crypto
 except ImportError:
+    DeviceConnections = None
     pass
 
 
@@ -56,6 +57,48 @@ def index():
     if config.IS_PRODUCTION:
         return "not available", 400
     return redirect("/api/list")
+
+
+def _attach_device_connections(dev_list):
+    """Attach connection_types and default protocol to a list of device dicts."""
+    if not dev_list:
+        return dev_list
+    try:
+        if not DeviceConnections:
+            return dev_list
+        dev_ids = [d["id"] for d in dev_list if isinstance(d, dict) and "id" in d]
+        if not dev_ids:
+            return dev_list
+        conns = list(DeviceConnections.select().where(DeviceConnections.device_id.in_(dev_ids)))
+        conn_map = {}
+        for conn in conns:
+            d_id = getattr(conn, 'device_id_id', None) or getattr(conn, 'device_id', None)
+            if hasattr(d_id, 'id'):
+                d_id = d_id.id
+            conn_map.setdefault(d_id, []).append(conn)
+
+        for d in dev_list:
+            if not isinstance(d, dict):
+                continue
+            c_list = conn_map.get(d["id"], [])
+            raw_types = [conn.protocol for conn in c_list]
+            if not ISPRO:
+                raw_types = [p for p in raw_types if p not in ('rdp', 'vnc')]
+            d["connection_types"] = raw_types
+
+            def_c = next((conn for conn in c_list if conn.is_default and conn.protocol != 'api' and (ISPRO or conn.protocol not in ('rdp', 'vnc'))), None)
+            if not def_c and c_list:
+                def_c = next((conn for conn in c_list if conn.protocol != 'api' and (ISPRO or conn.protocol not in ('rdp', 'vnc'))), None)
+            if def_c:
+                d["protocol"] = def_c.protocol
+            else:
+                d["protocol"] = 'rdp' if (ISPRO and d.get('device_type') == 'windows') else 'ssh'
+    except Exception as e:
+        log.error('Failed to attach device connections: %s', e)
+        for d in dev_list:
+            if isinstance(d, dict) and 'protocol' not in d:
+                d["protocol"] = 'rdp' if (ISPRO and d.get('device_type') == 'windows') else 'ssh'
+    return dev_list
 
 
 @app.route("/api/dev/list", methods=["POST"])
@@ -97,6 +140,7 @@ def list_devs():
             res.append(temp)
     except Exception as e:
         return buildResponse({"result": "failed", "err": str(e)}, 200)
+    res = _attach_device_connections(res)
     return buildResponse(res, 200)
 
 
@@ -284,6 +328,10 @@ def add_device():
             DeviceConnections.create(device_id=new_dev.id, protocol='api', port=8728, auth_mode='credential', is_default=True, created=now, modified=now)
             DeviceConnections.create(device_id=new_dev.id, protocol='ssh', port=22, auth_mode='credential', is_default=False, created=now, modified=now)
             DeviceConnections.create(device_id=new_dev.id, protocol='webfig', port=80, auth_mode='credential', is_default=False, created=now, modified=now)
+        elif ISPRO and device_type == 'windows':
+            DeviceConnections.create(device_id=new_dev.id, protocol='rdp', port=3389, auth_mode='credential', is_default=True, created=now, modified=now)
+        elif ISPRO and device_type == 'vnc':
+            DeviceConnections.create(device_id=new_dev.id, protocol='vnc', port=5900, auth_mode='credential', is_default=True, created=now, modified=now)
         else:
             DeviceConnections.create(device_id=new_dev.id, protocol='ssh', port=22, auth_mode='credential', is_default=True, created=now, modified=now)
             DeviceConnections.create(device_id=new_dev.id, protocol='telnet', port=23, auth_mode='credential', is_default=False, created=now, modified=now)
@@ -486,10 +534,11 @@ def search_devices():
     try:
         if searchstr and searchstr != "":
             # find devices that contains searchstr in the name
-            devs = q.where(device.name.contains(searchstr)).dicts()
+            devs = list(q.where(device.name.contains(searchstr)).dicts())
         else:
-            # return first 10 ordered alphabeticaly
-            devs = q.order_by(device.name).limit(10).dicts()
+            # return first 1000 ordered alphabetically
+            devs = list(q.order_by(device.name).limit(1000).dicts())
+        devs = _attach_device_connections(devs)
     except Exception as e:
         return buildResponse({"result": "failed", "err": str(e)}, 200)
     return buildResponse(devs, 200)

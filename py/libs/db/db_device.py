@@ -9,7 +9,7 @@ import logging
 
 from libs.db.db import BaseModel, User, database
 from peewee import *
-from playhouse.postgres_ext import BooleanField
+from playhouse.postgres_ext import BinaryJSONField, BooleanField
 
 log = logging.getLogger("db")
 
@@ -51,6 +51,8 @@ class Devices(BaseModel):
     credential_migrated = BooleanField(
         default=False
     )  # set True by migrate_credentials.py
+    parent_id = IntegerField(null=True)  # FK -> devices.id (for child published applications)
+    protocol_config = BinaryJSONField(default={})  # Tier 2/3 GUI protocol config (overrides or published app defs)
 
     class Meta:
         db_table = "devices"

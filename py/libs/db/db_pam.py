@@ -73,6 +73,7 @@ class DeviceTemplates(BaseModel):
     brand = TextField()  # FK → device_brands.brand
     os_type = TextField()  # e.g. 'routeros', 'ios'
     display_name = TextField()
+    protocol = CharField(max_length=20, default="ssh")
     connection = BinaryJSONField(null=True)  # default port, timeout, protocols
     prompt = BinaryJSONField(null=True)  # prompt detection patterns
     privilege_escalation = BinaryJSONField(null=True)  # enable/sudo escalation

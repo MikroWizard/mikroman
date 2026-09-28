@@ -124,7 +124,8 @@ def list_templates():
         return blocked
     data = request.json or {}
     brand_id = data.get('brand_id')
-    return buildResponse(TemplateService.list_templates(brand=brand_id), 200)
+    protocol = data.get('protocol')
+    return buildResponse(TemplateService.list_templates(brand=brand_id, protocol=protocol, is_pro=ISPRO), 200)
 
 @app.route("/api/pam/templates/get", methods=["POST"])
 @login_required(role="admin", perm={"pam_config": "read"})
@@ -147,6 +148,7 @@ def create_template():
             'display_name': data.get('display_name', data.get('name', 'Custom Template')),
             'brand': data.get('brand', data.get('brand_id', 'generic')),
             'os_type': data.get('os_type', 'generic'),
+            'protocol': data.get('protocol') or (data.get('connection') or {}).get('protocol') or 'ssh',
             'connection': data.get('connection'),
             'prompt': data.get('prompt', data.get('prompt_pattern')),
             'privilege_escalation': data.get('privilege_escalation', data.get('privilege_escalation_cmd')),

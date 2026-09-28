@@ -3,6 +3,7 @@
 
 import datetime
 import logging
+from peewee import fn
 from libs.db.db_pam import DeviceTemplates
 from libs.db.db_device import Devices
 from playhouse.shortcuts import model_to_dict
@@ -77,15 +78,29 @@ class TemplateService:
         return commands.get(command_key, "")
 
     @staticmethod
-    def list_templates(include_inactive=False, brand=None) -> list:
-        """List templates, optionally filtered by brand"""
+    def list_templates(include_inactive=False, brand=None, protocol=None, is_pro=True) -> list:
+        """List templates, optionally filtered by brand and/or protocol"""
         q = DeviceTemplates.select()
+        if not is_pro:
+            q = q.where(fn.LOWER(DeviceTemplates.protocol).not_in(['rdp', 'vnc']))
         if brand:
             q = q.where(DeviceTemplates.brand == brand)
+        if protocol:
+            p_lower = protocol.lower()
+            q = q.where(fn.LOWER(DeviceTemplates.protocol) == p_lower)
         if not include_inactive:
             q = q.where(DeviceTemplates.is_active == True)
         
-        return [TemplateService._model_to_dict(t) for t in q]
+        results = [TemplateService._model_to_dict(t) for t in q]
+        if not results and brand and protocol:
+            # Fallback if specific brand has no templates for this protocol
+            fb_q = DeviceTemplates.select().where(fn.LOWER(DeviceTemplates.protocol) == protocol.lower())
+            if not is_pro:
+                fb_q = fb_q.where(fn.LOWER(DeviceTemplates.protocol).not_in(['rdp', 'vnc']))
+            if not include_inactive:
+                fb_q = fb_q.where(DeviceTemplates.is_active == True)
+            results = [TemplateService._model_to_dict(t) for t in fb_q]
+        return results
 
     @staticmethod
     def create_template(data: dict) -> int:
@@ -95,6 +110,7 @@ class TemplateService:
             brand=data.get('brand', 'generic'),
             os_type=data.get('os_type', 'generic'),
             display_name=data.get('display_name', 'Custom Template'),
+            protocol=data.get('protocol') or (data.get('connection') or {}).get('protocol') or 'ssh',
             connection=data.get('connection'),
             prompt=data.get('prompt'),
             privilege_escalation=data.get('privilege_escalation'),
@@ -129,6 +145,9 @@ class TemplateService:
             if 'display_name' in data: template.display_name = data['display_name']
 
         # Commands, connection, prompt, etc. can be updated for both system and custom templates
+        if 'protocol' in data: template.protocol = data['protocol']
+        elif 'connection' in data and data['connection'] and 'protocol' in data['connection']:
+            template.protocol = data['connection']['protocol']
         if 'connection' in data: template.connection = data['connection']
         if 'prompt' in data: template.prompt = data['prompt']
         if 'privilege_escalation' in data: template.privilege_escalation = data['privilege_escalation']
