@@ -8,7 +8,8 @@
 from flask import request, jsonify,session,send_file
 from playhouse.shortcuts import model_to_dict
 import datetime
-from libs.db import db_tasks,db_sysconfig,db_firmware,db_syslog,db_groups,db_user_group_perm
+from libs.db import db_tasks,db_sysconfig,db_firmware,db_syslog,db_groups,db_user_group_perm,db_device
+from libs.check_routeros.routeros_check.resource import RouterOSCheckResource
 from libs import util,firm_lib
 from libs.webutil import app, login_required, get_myself,buildResponse,get_myself,get_ip,get_agent
 import bgtasks
@@ -48,16 +49,30 @@ def check_task_status():
 @app.route('/api/firmware/update_firmware', methods = ['POST'])
 @login_required(role='admin',perm={'device':'full'})
 def update_device():
-    """Update devices"""
+    """Update devices with optional version, package list, mode, and auto-upgrade RouterBOOT"""
     status=db_tasks.update_job_status().status
-    input=request.json
+    input=request.json or {}
     devids=input.get('devids',"0")
+    version=input.get('version')
+    mode=input.get('mode', 'full')
+    packages=input.get('packages')
+    auto_upgrade_rb=input.get('auto_upgrade_rb', True)
+    delivery_method=input.get('delivery_method', 'local_repo')
     uid = session.get("userid") or False
     if not uid:
         return buildResponse({'result':'failed','err':"No User"}, 200)
     if not status:
         db_syslog.add_syslog_event(get_myself(), "Firmware","update", get_ip(),get_agent(),json.dumps(input))
-        bgtasks.update_device(devices=devids,uid=uid,task="update")
+        bgtasks.update_device(
+            devices=devids,
+            uid=uid,
+            task="update",
+            version=version,
+            mode=mode,
+            packages=packages,
+            auto_upgrade_rb=auto_upgrade_rb,
+            delivery_method=delivery_method
+        )
         res={'status': True}
     else:
         res={'status': status}
@@ -102,12 +117,14 @@ def get_firms():
 @app.route('/api/firmware/get_downloadable_firms', methods = ['POST'])
 @login_required(role='admin',perm={'settings':'full'})
 def get_downloadable_firms():
-    """get list of availble Firmwares from Mikrotik Official webstire"""
+    """get list of available Firmwares from Mikrotik Official website"""
     input = request.json or {}
-    versions=firm_lib.get_mikrotik_versions()
-    versions = sorted(versions, key=lambda x: [int(y) if y.isdigit() else int(re.sub(r'\D', '', y)) for y in x.split('.')])
+    channel = input.get('channel', 'all')
+    versions = firm_lib.get_mikrotik_versions(channel=channel)
+    if not versions:
+        versions = []
 
-    return buildResponse({"versions":versions}, 200)
+    return buildResponse({"versions": versions}, 200)
 
 @app.route('/api/firmware/download_firmware_to_repository', methods = ['POST'])
 @login_required(role='admin',perm={'settings':'full'})
@@ -115,11 +132,12 @@ def download_firmware_to_repository():
     """Download Firmware from Mikrotik Official website"""
     input = request.json or {}
     version=input.get('version')
+    arch=input.get('arch', 'all')
     status=db_tasks.downloader_job_status().status
     
     if not status:
         db_syslog.add_syslog_event(get_myself(), "Firmware","Download", get_ip(),get_agent(),json.dumps(input))
-        bgtasks.download_firmware(version=version)
+        bgtasks.download_firmware(version=version, arch=arch)
         return buildResponse({'status': True}, 200)
     else:
         return buildResponse({'status': status}, 200)
@@ -153,6 +171,10 @@ def update_firmware_settings():
     db_sysconfig.update_sysconfig("old_firmware_action", updateBehavior)
     db_sysconfig.update_sysconfig("latest_version", firmwaretoinstall)
     db_sysconfig.update_sysconfig("old_version", firmwaretoinstallv6)
+    try:
+        firm_lib.recalculate_fleet_update_status(firmwaretoinstall, firmwaretoinstallv6, updateBehavior)
+    except Exception as e:
+        log.error(f"Error recalculating fleet update status: {e}")
     db_syslog.add_syslog_event(get_myself(), "Firmware","settings", get_ip(),get_agent(),json.dumps(input))
     return buildResponse({'status': True}, 200)
 
@@ -230,3 +252,56 @@ def devgroup_firmware_action():
     
     return buildResponse({'status': True}, 200)
 
+
+@app.route('/api/firmware/reset_device_update_status', methods = ['POST'])
+@login_required(role='admin',perm={'device':'write'})
+def reset_device_update_status():
+    """Reset failed update status and attempt counter for given devices"""
+    input = request.json or {}
+    devids = input.get('devids')
+    if not devids:
+        return buildResponse({'result':'failed','err':"Missing devids"}, 200)
+    
+    count = firm_lib.reset_device_update_status(devids)
+    db_syslog.add_syslog_event(get_myself(), "Firmware", "ResetStatus", get_ip(), get_agent(), json.dumps(input))
+    return buildResponse({'status': True, 'updated': count}, 200)
+
+
+@app.route('/api/firmware/get_device_packages', methods = ['POST'])
+@login_required(role='admin',perm={'device':'read'})
+def get_device_packages():
+    """Get installed packages from target device"""
+    input = request.json or {}
+    devid = input.get('devid')
+    if not devid:
+        return buildResponse({'result':'failed','err':"Missing devid"}, 200)
+    
+    dev = db_device.get_device(devid)
+    if not dev:
+        return buildResponse({'result':'failed','err':"Device not found"}, 200)
+    
+    options = util.build_api_options(dev)
+    router = None
+    try:
+        router = RouterOSCheckResource(options)
+        call = router.api.path('/system/package')
+        results = tuple(call)
+        packages = [
+            {
+                'name': r.get('name'),
+                'version': r.get('version'),
+                'disabled': r.get('disabled', False),
+                'scheduled': r.get('scheduled', '')
+            }
+            for r in results if 'name' in r
+        ]
+        return buildResponse({'packages': packages, 'arch': dev.arch, 'current_version': dev.current_firmware}, 200)
+    except Exception as e:
+        log.error(f"Error querying packages for device {devid}: {e}")
+        return buildResponse({'result':'failed','err':str(e)}, 200)
+    finally:
+        if router:
+            try:
+                router.close()
+            except Exception:
+                pass

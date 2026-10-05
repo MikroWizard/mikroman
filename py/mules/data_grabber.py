@@ -94,11 +94,16 @@ def grab_device_data(timer=2):
                         has_data = True
                 res.append(qres)
             else:
-                db_events.connection_event(
-                    qres['id'], 'Data Puller',
-                    qres.get("detail", "connection"), "Critical", 0,
-                    qres.get("reason", "problem in data puller")
-                )
+                dev_obj = db_device.get_device(qres['id'])
+                dev_status = dev_obj.get('status') if dev_obj else ''
+                if dev_status in ['updating', 'rebooting']:
+                    log.info(f"Device {qres['id']} is currently {dev_status} (rebooting to apply update). Skipping unreachable alert.")
+                else:
+                    db_events.connection_event(
+                        qres['id'], 'Data Puller',
+                        qres.get("detail", "connection"), "Critical", 0,
+                        qres.get("reason", "problem in data puller")
+                    )
 
         keys = ["rx-total", "tx-total"]
         redopts = {"dev_id": 'all', "keys": keys}

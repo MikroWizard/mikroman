@@ -10,7 +10,7 @@ from playhouse.shortcuts import dict_to_model, update_model_from_dict
 os.environ["PYSRV_CONFIG_PATH"] = "/conf/server-conf.json"
 
 import config
-from libs import util
+from libs import util, firm_lib
 from libs import compat_runner
 from libs.db import db_user_tasks
 from libs.db.db import database
@@ -240,10 +240,11 @@ if __name__ == "__main__":
             })
 
         elif utask.task_type == "firmware":
-            log.error("firmware update")
-            if not ISPRO:
-                exit()
-            res = utilpro.run_firmware_task(utask)
+            log.info("firmware update task")
+            if ISPRO:
+                res = utilpro.run_firmware_task(utask)
+            else:
+                res = firm_lib.run_firmware_task(utask)
 
         elif utask.task_type == "vault":
             log.error("vault")

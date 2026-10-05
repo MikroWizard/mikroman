@@ -482,6 +482,20 @@ def grab_device_data(dev, q, sysconfig_flags=None):
                     db_events.config_event(dev.id, 'Data Puller', 'syslog configuration', 'Error', 0, "Force SysLog Failed")
                 pass
             dev.current_firmware=_installed_version
+            try:
+                if dev.firmware_to_install and _installed_version:
+                    if RouterOSVersion(_installed_version) >= RouterOSVersion(dev.firmware_to_install):
+                        dev.firmware_to_install = None
+                        if dev.status in ['updating', 'rebooting']:
+                            dev.status = 'updated'
+                        dev.failed_attempt = 0
+                        with database.connection_context():
+                            check_or_fix_event(events, "firmware", "Update Failed")
+                            check_or_fix_event(events, "firmware", "Download Failed")
+                            check_or_fix_event(events, "firmware", "Device storage")
+                            check_or_fix_event(events, "firmware", "Firmware repositpry")
+            except Exception as e:
+                log.warning(f"Error checking firmware completion in grab_device_data: {e}")
             dev.uptime=result['uptime']
             dev.router_type=device_type
             if dev.name!=result['name']:
@@ -831,51 +845,60 @@ def FourcePermToRouter(dev,perm):
     finally:
         close_router(router)
 
-def check_update(options,router=False):
-    ofa=db_sysconfig.get_firmware_action().value
-    #is_availbe , current , arch , data
+def check_update(options, router=False):
+    # Safe lookup of sysconfig with graceful fallbacks
+    try:
+        ofa_cfg = db_sysconfig.get_sysconfig('old_firmware_action')
+        ofa = ofa_cfg if ofa_cfg else "keep"
+    except Exception:
+        ofa = "keep"
+
     own_router = False
     try:
         if not router:
-            router=RouterOSCheckResource(options)
+            router = RouterOSCheckResource(options)
             own_router = True
-        _installed_version=router._get_routeros_version()
+        _installed_version = router._get_routeros_version()
         try:
-            if ofa=="keep" and _installed_version < RouterOSVersion('6.99.99'):
-                _latest_version=RouterOSVersion(db_sysconfig.get_firmware_old().value)
+            if ofa == "keep" and _installed_version < RouterOSVersion('6.99.99'):
+                old_ver = db_sysconfig.get_sysconfig('old_version')
+                _latest_version = RouterOSVersion(str(old_ver)) if old_ver else False
             else:
-                _latest_version=RouterOSVersion(db_sysconfig.get_firmware_latest().value)
-        except:
-            _latest_version=False
-        call = router.api.path(
-            "/system/resource"
-        )
+                latest_ver = db_sysconfig.get_sysconfig('latest_version')
+                _latest_version = RouterOSVersion(str(latest_ver)) if latest_ver else False
+        except Exception:
+            _latest_version = False
+
+        call = router.api.path("/system/resource")
         results = tuple(call)
-        result: Dict[str, str] = results[0]
-        arch=result['architecture-name']
+        result: Dict[str, str] = results[0] if results else {}
+        arch = result.get('architecture-name', '')
+
+        # RouterBOARD inspection (safe against virtual, CHR, and empty responses)
+        upgrade = False
         try:
-            call = router.api.path(
-                "/system/routerboard"
-            )
-            
-            routerboard = tuple(call)
-            routerboard: Dict[str, str] = routerboard[0]
-            result.update(routerboard)
+            call_rb = router.api.path("/system/routerboard")
+            rb_results = tuple(call_rb)
+            if rb_results:
+                result.update(rb_results[0])
+                current_rb = result.get('current-firmware')
+                upgrade_rb = result.get('upgrade-firmware')
+                board_name = result.get('board-name', '')
+                if current_rb and upgrade_rb and 'x86' not in arch and 'x86' not in board_name:
+                    if current_rb != upgrade_rb:
+                        upgrade = True
         except Exception as e:
             if 'no such command' not in str(e):
-                log.error(e)
-            pass
-        upgrade=False
-        if 'x86' not in arch and result['current-firmware']!= result['upgrade-firmware'] and result['board-name']!='x86':
-            upgrade=True
+                log.warning(f"Could not check routerboard for {options.get('host')}: {e}")
+
         if _latest_version and _installed_version < _latest_version:
-            return True, _installed_version,arch,upgrade
+            return True, _installed_version, arch, upgrade
         else:
-            return False, _installed_version,arch,upgrade
+            return False, _installed_version, arch, upgrade
     except Exception as e:
-        log.error("Error during firmware check for host : {}".format(options["host"]))
+        log.error("Error during firmware check for host : {}".format(options.get("host", "?")))
         log.error(e)
-        return False,False,False,False
+        return False, False, False, False
     finally:
         if own_router and router:
             close_router(router)

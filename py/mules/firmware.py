@@ -8,7 +8,7 @@
 import time
 import concurrent.futures
 from libs import util, firm_lib
-from libs.db import db_tasks, db_device
+from libs.db import db_tasks, db_device, db_sysconfig
 import config
 import logging
 import queue
@@ -62,31 +62,73 @@ def updater():
     task = db_tasks.firmware_service_status()
     if task.status:
         return False
+
+    # Prevent collision with active background update jobs initiated via bgtasks
+    try:
+        update_job = db_tasks.update_job_status()
+        if update_job and update_job.status:
+            return False
+    except Exception:
+        pass
+
     if os.getenv("DEV_MODE") == "true":
         log.info("Firmware updater started")
     task.status = 1
     task.save()
     try:
-        # Process firmware updates
-        devs = list(db_device.Devices.select().where(
-            db_device.Devices.firmware_to_install.is_null(False) & 
-            (db_device.Devices.failed_attempt < 4) &
-            ((db_device.Devices.status == 'updated') | (db_device.Devices.status == 'failed'))
+        # Read configurable retry policy
+        max_retries = 2
+        try:
+            ret_cfg = db_sysconfig.get_sysconfig('firmware_max_retries')
+            if ret_cfg:
+                max_retries = int(ret_cfg)
+        except Exception:
+            pass
+
+        auto_retry = True
+        try:
+            auto_retry = (db_sysconfig.get_sysconfig('firmware_auto_retry') != 'False')
+        except Exception:
+            pass
+
+        # Phase 1: Verify devices pending post-reboot verification
+        # Devices that have received packages and rebooted, but need live version confirmation
+        pending_verif = list(db_device.Devices.select().where(
+            db_device.Devices.firmware_to_install.is_null(False) &
+            ((db_device.Devices.status == 'updated') | (db_device.Devices.status == 'rebooting'))
         ))
+        for pdev in pending_verif:
+            try:
+                firm_lib.verify_device_firmware(pdev)
+            except Exception as pe:
+                log.warning(f"Verification error on {pdev.name}: {pe}")
+
+        # Phase 2: Process firmware update retries for genuinely failed devices (never updating/rebooting)
+        if auto_retry:
+            devs_retry = list(db_device.Devices.select().where(
+                db_device.Devices.firmware_to_install.is_null(False) & 
+                (db_device.Devices.failed_attempt < max_retries) &
+                (db_device.Devices.status == 'failed')
+            ))
+            if devs_retry:
+                devs_retry = [d for d in devs_retry if util.check_port(d.ip, util.get_device_port(d))]
+                if devs_retry:
+                    log.info(f"Processing firmware updates for {len(devs_retry)} devices (max retries: {max_retries})")
+                    process_firmware_updates(devs_retry)
         
-        if devs:
-            log.info(f"Processing firmware updates for {len(devs)} devices")
-            process_firmware_updates(devs)
-        
-        # Process RouterBOOT upgrades
+        # Phase 3: Process RouterBOOT upgrades (exclude devices actively updating or rebooting)
         devs_upgrade = list(db_device.Devices.select().where(
-            (db_device.Devices.failed_attempt < 4) & 
-            (db_device.Devices.upgrade_device == True)
+            (db_device.Devices.failed_attempt < max_retries) & 
+            (db_device.Devices.upgrade_device == True) &
+            (db_device.Devices.status != 'updating') &
+            (db_device.Devices.status != 'rebooting')
         ))
         
         if devs_upgrade:
-            log.info(f"Processing RouterBOOT upgrades for {len(devs_upgrade)} devices")
-            process_routerboot_upgrades(devs_upgrade)
+            devs_upgrade = [d for d in devs_upgrade if util.check_port(d.ip, util.get_device_port(d))]
+            if devs_upgrade:
+                log.info(f"Processing RouterBOOT upgrades for {len(devs_upgrade)} devices")
+                process_routerboot_upgrades(devs_upgrade)
             
     except Exception as e:
         log.error(f"Firmware updater error: {e}")

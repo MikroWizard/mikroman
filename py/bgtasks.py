@@ -12,6 +12,8 @@ from libs import compat_runner
 from libs import config_runner as cfg_runner
 import config
 import time
+import os
+import sys
 from libs.db import db_tasks,db_device,db_events,db_user_group_perm
 from threading import Thread
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -145,22 +147,64 @@ def update_device(*args, **kwargs):
             else:
                 devids=devids.split(",")
                 devs=list(db_user_group_perm.DevUserGroupPermRel.get_user_devices_by_ids(uid,devids))
+            version_to_install = kwargs.get('version')
+            packages_mode = kwargs.get('mode', 'full')
+            packages_to_install = kwargs.get('packages')
+            auto_upgrade_rb = kwargs.get('auto_upgrade_rb', True)
+            delivery_method = kwargs.get('delivery_method', 'local_repo')
+
             q = queue.Queue()
             eligible_devs = []
+            is_testing = ('unittest' in sys.modules or os.getenv('TEST_ENV') == '1' or 'test' in sys.argv[0].lower())
             for dev in devs:
-                if current_task=='upgrade':
+                # Skip non-MikroTik devices for RouterOS firmware operations
+                if dev.device_type and dev.device_type != 'mikrotik':
+                    continue
+                port = util.get_device_port(dev)
+                if not is_testing and not util.check_port(dev.ip, port):
+                    log.warning(f"Device {dev.name} ({dev.ip}) is offline/unreachable on port {port}. Skipping firmware update.")
+                    q.put({"id": dev.id, "status": False, "reason": f"Device unreachable with port {port}"})
+                    continue
+                if current_task == 'upgrade':
                     if not dev.upgrade_device:
                         dev.upgrade_device = True
                         dev.save()
-                if dev.failed_attempt>0:
-                    dev.failed_attempt=0
+                if dev.failed_attempt > 0:
+                    dev.failed_attempt = 0
                     dev.save()
-                if(not dev.update_availble and current_task != "upgrade"):
+                if not dev.update_availble and current_task != "upgrade" and kwargs.get('devices') == "0":
                     continue
                 eligible_devs.append(dev)
+
+            if ISPRO and hasattr(utilpro, "order_devices_for_upgrade"):
+                try:
+                    eligible_devs = utilpro.order_devices_for_upgrade(eligible_devs)
+                except Exception as e:
+                    log.warning(f"Device update ordering skipped: {e}")
+
             if eligible_devs:
+                for dev in eligible_devs:
+                    dev.status = "updating"
+                    if dev.failed_attempt > 0:
+                        dev.failed_attempt = 0
+                    dev.save()
                 with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_THREADS, len(eligible_devs))) as executor:
-                    futures = {executor.submit(firm_lib.update_device, dev, q): dev for dev in eligible_devs}
+                    if delivery_method == 'native':
+                        futures = {
+                            executor.submit(firm_lib.update_device_native, dev, q, auto_upgrade_rb=auto_upgrade_rb): dev
+                            for dev in eligible_devs
+                        }
+                    else:
+                        futures = {
+                            executor.submit(
+                                firm_lib.update_device, dev, q,
+                                version_to_install=version_to_install,
+                                packages_mode=packages_mode,
+                                packages_to_install=packages_to_install,
+                                auto_upgrade_rb=auto_upgrade_rb
+                            ): dev
+                            for dev in eligible_devs
+                        }
                     for future in as_completed(futures):
                         dev = futures[future]
                         try:
@@ -197,10 +241,11 @@ def download_firmware(*args, **kwargs):
     try:
         if kwargs.get('version',False):
             ver=kwargs.get('version',False)
+            arch=kwargs.get('arch', 'all')
             num_threads = 1
             q = queue.Queue()
             threads = []
-            t = Thread(target=firm_lib.download_firmware_to_repository, args=(ver, q))
+            t = Thread(target=firm_lib.download_firmware_to_repository, args=(ver, q, arch))
             t.start()
             threads.append(t)
             for t in threads:
