@@ -112,7 +112,7 @@ def get_template_for_brand(brand, os_type=None):
         )
         if os_type:
             q = q.where(DeviceTemplates.os_type == os_type)
-        return q.get()
+        return q.order_by(DeviceTemplates.id.asc()).first()
     except DeviceTemplates.DoesNotExist:
         return None
 

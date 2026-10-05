@@ -45,7 +45,6 @@ except ImportError:
 try:
     from libs.config_runner_pro import normalize_output, run_versioning
 except ImportError:
-
     def normalize_output(raw_output, t_dict, command_key):
         return raw_output or ""
 
@@ -70,6 +69,8 @@ except ImportError:
         )
         return False, None, 0, exec_log_id
 
+log = logging.getLogger("config_runner")
+
 from libs.device_connector import (
     connect_and_execute,
     build_prompt_re,
@@ -79,8 +80,6 @@ from libs.device_connector import (
     DeviceCommandError,
 )
 from libs.hook_runner import run_hooks
-
-log = logging.getLogger("config_runner")
 
 VERSIONS_DIR = os.path.join(getattr(config, "BACKUP_DIR", "/opt/mikrowizard/backups"), "versions")
 _DEVMODE = os.environ.get("DEV_MODE") == "true"
@@ -100,7 +99,7 @@ def store_blob(content, kind):
     kind ∈ {'raw','norm'}.  Atomic: writes to .tmp file then os.replace().
     """
     content_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
-    rel_path = "{}/{}/{}.txt".format(kind, content_hash[:2], content_hash[2:4], content_hash)
+    rel_path = "{}/{}/{}/{}.txt".format(kind, content_hash[:2], content_hash[2:4], content_hash)
     abs_path = os.path.join(VERSIONS_DIR, rel_path)
 
     if os.path.exists(abs_path):

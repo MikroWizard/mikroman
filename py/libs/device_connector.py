@@ -369,6 +369,10 @@ def _template_driven_login(conn, template, username, password, timeout=30):
             if re.search(prompt_re, output):
                 if _DEVMODE:
                     log.info("[DEV] login OK: prompt matched on attempt %d", attempt + 1)
+                try:
+                    conn.set_base_prompt()
+                except Exception:
+                    pass
                 return
 
         raise DeviceAuthError(
@@ -569,6 +573,28 @@ def _strip_pagination(output, pattern):
     return "".join(kept)
 
 
+def _strip_trailing_prompt(output, prompt_re=None):
+    """Strip trailing device CLI prompt and trailing blank lines from command output."""
+    if not output:
+        return ""
+    lines = output.rstrip().splitlines()
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if lines:
+        last = lines[-1].strip()
+        matched = False
+        if prompt_re and re.search(prompt_re, last):
+            matched = True
+        elif re.search(r"^(?:\[[^\]\r\n]+@[^\]\r\n]+\][^\r\n]*?[>#]|\S+[@#>$]|\<[\w\-]+\>|\[[\w\-]+\])\s*$", last):
+            matched = True
+        if matched:
+            lines.pop()
+            while lines and not lines[-1].strip():
+                lines.pop()
+            return "\n".join(lines)
+    return output
+
+
 def _scan_errors(output, template):
     if not output or not template:
         return
@@ -629,6 +655,7 @@ def execute_command(conn, command, template, prompt_re, is_config_mode, enable_p
         raise DeviceAuthError("Login failed: {}".format(output.strip()[:200]))
 
     _scan_errors(output, template)
+    output = _strip_trailing_prompt(output, prompt_re)
     duration_ms = int((time.time() - start) * 1000)
     return output, duration_ms
 
