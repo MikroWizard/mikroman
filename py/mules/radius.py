@@ -234,17 +234,6 @@ class RadServer(ServerAsync):
                     if reply and reply.code == AccessAccept:
                         matched_hash_type = 'normal'
 
-            # The temp hash is a one-time login credential for webfig proxy /
-            # user-based logins. Clear it once this authentication attempt has
-            # completed (success or failure) so it cannot be reused.
-            if tnthash:
-                try:
-                    from libs.db import db_pro
-                    UserpPro = db_pro.UserPoro
-                    UserpPro.update(temp_hash=None).where(UserpPro.id == u.id).execute()
-                except Exception as e:
-                    log.error("Failed to clear webfig proxy hash: %s", str(e))
-
             if reply and reply.code == AccessAccept:
                 if ISPRO:
                     is_proxy = (matched_hash_type == 'pth')
@@ -258,17 +247,7 @@ class RadServer(ServerAsync):
 
                     if is_proxy:
                         log.info("web-proxy User %s logged in from %s" % (u.username, userip))
-                        # Resolve the proxy session's MikroWizard UUID via the temp hash
-                        # so this login links to the correct recording/session row.
-                        proxy_sid = None
-                        try:
-                            _r = config.flask_config.get("SESSION_REDIS") if hasattr(config, 'flask_config') else None
-                            if _r:
-                                raw_sid = _r.get(f"proxy_temp_hash:{tnthash}")
-                                if raw_sid:
-                                    proxy_sid = raw_sid.decode('utf-8') if isinstance(raw_sid, bytes) else raw_sid
-                        except Exception as e:
-                            log.error("Failed to resolve proxy session id: %s", str(e))
+                        proxy_sid = utilpro.resolve_proxy_session(tnthash) if (ISPRO and hasattr(utilpro, 'resolve_proxy_session')) else None
                         try:
                             db_AA.Auth.add_log(dev.id, 'proxy', u.username, userip,
                                                by="proxy", sessionid=proxy_sid, timestamp=tz,

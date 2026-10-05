@@ -6,8 +6,11 @@ import logging
 from libs.db.db_pam import Credentials
 try:
     from libs.db.db_pam_pro import CredentialRotationHistory
+    from libs import utilpro
     ISPRO = True
 except ImportError:
+    CredentialRotationHistory = None
+    utilpro = None
     ISPRO = False
 from libs.db.db_groups import DevGroupRel
 from libs import kek_provider
@@ -31,29 +34,9 @@ class CredentialService:
 
     @staticmethod
     def _resolve_user_credential(device_id, protocol, user_id):
-        from libs.db.db_device import Devices
-        dev = Devices.get_or_none(Devices.id == device_id)
-        if not dev or not user_id or getattr(dev, 'device_type', 'mikrotik') != 'mikrotik':
+        if not ISPRO or not utilpro or not hasattr(utilpro, 'resolve_user_credential'):
             return None
-        try:
-            from libs.db.db_pro import UserPoro
-            from libs import utilpro
-            up = UserPoro.get_or_none(UserPoro.id == user_id)
-            if up:
-                # Generate temp password + store temp_hash
-                password = utilpro.generate_password(12)
-                nthash = utilpro.nt_password_hash(password)
-                up.temp_hash = nthash
-                up.save()
-                return {
-                    'method': 'credential',
-                    'username': up.username,
-                    'password': password,
-                    'auth_method': 'password'
-                }
-        except ImportError:
-            pass
-        return None
+        return utilpro.resolve_user_credential(device_id, protocol, user_id)
 
     @staticmethod
     def get_credential_for_connection(device_id, protocol, user_id=None) -> dict:

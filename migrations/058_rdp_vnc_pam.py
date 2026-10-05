@@ -1,4 +1,4 @@
-# 058_rdp_vnc_pam_pro.py
+# 058_rdp_vnc_pam.py
 # Adds 4-tier cascading hierarchy and Web-centric PAM Session DLP for RDP/VNC sessions.
 # 1. Adds parent_id (self-referential FK) and protocol_config (JSONB) to devices.
 # 2. Adds session_dlp (JSONB) to terminal_policies_pro.
