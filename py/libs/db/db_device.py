@@ -79,12 +79,21 @@ def query_device_by_mac(mac):
 
 
 def query_device_by_ip(ip):
-    q = Devices.select()
     try:
-        q = q.where(Devices.ip == ip).get()
+        return Devices.select().where(Devices.ip == ip).first() or False
     except:
-        q = False
-    return q
+        return False
+
+
+def query_device_by_ip_and_port(ip, port):
+    try:
+        if port is not None and str(port).strip() != '':
+            return Devices.select().where(
+                (Devices.ip == ip) & (Devices.port == str(port).strip())
+            ).first() or False
+        return Devices.select().where(Devices.ip == ip).first() or False
+    except:
+        return False
 
 
 def get_all_device():

@@ -91,8 +91,11 @@ def _attach_device_connections(dev_list):
                 def_c = next((conn for conn in c_list if conn.protocol != 'api' and (ISPRO or conn.protocol not in ('rdp', 'vnc'))), None)
             if def_c:
                 d["protocol"] = def_c.protocol
+                if not d.get("port") or str(d.get("port")).strip() == '':
+                    d["port"] = def_c.port
             else:
                 d["protocol"] = 'rdp' if (ISPRO and d.get('device_type') == 'windows') else 'ssh'
+            d["connection_ports"] = {conn.protocol: conn.port for conn in c_list if conn.port}
     except Exception as e:
         log.error('Failed to attach device connections: %s', e)
         for d in dev_list:
@@ -301,8 +304,9 @@ def add_device():
         except Exception:
             pass
     
-    if db_device.query_device_by_ip(ip):
-        return buildResponse({"result": "failed", "err": "IP already exists"}, 200)
+    port_val = input.get("port") or (8729 if input.get("ssl") else 8728)
+    if db_device.query_device_by_ip_and_port(ip, port_val):
+        return buildResponse({"result": "failed", "err": f"Endpoint already exists with IP {ip} and Port {port_val}"}, 200)
 
     if ISPRO and device_type == 'mikrotik':
         try:
@@ -316,7 +320,7 @@ def add_device():
         now = datetime.datetime.now(datetime.timezone.utc)
         new_dev = db_device.Devices.create(
             name=name, ip=ip, mac=mac, details="{}", uptime="", license="", interface="",
-            user_name="", password="", port="", update_availble=False, current_firmware="",
+            user_name="", password="", port=str(port_val), update_availble=False, current_firmware="",
             arch="", sensors="", router_type="", wifi_config="", upgrade_availble=False,
             owner=get_myself(), created=now, modified=now, peer_ip=util.resolve_peer_ip({"ip": ip}), failed_attempt=0,
             status="active", firmware_to_install="", syslog_configured=False, upgrade_device=False,
@@ -325,7 +329,7 @@ def add_device():
         
         # Create default DeviceConnections based on brand_id (device_type) — pro-only, skip silently on free
         if device_type == 'mikrotik':
-            DeviceConnections.create(device_id=new_dev.id, protocol='api', port=8728, auth_mode='credential', is_default=True, created=now, modified=now)
+            DeviceConnections.create(device_id=new_dev.id, protocol='api', port=int(port_val), auth_mode='credential', is_default=True, created=now, modified=now)
             DeviceConnections.create(device_id=new_dev.id, protocol='ssh', port=22, auth_mode='credential', is_default=False, created=now, modified=now)
             DeviceConnections.create(device_id=new_dev.id, protocol='webfig', port=80, auth_mode='credential', is_default=False, created=now, modified=now)
         elif ISPRO and device_type == 'windows':

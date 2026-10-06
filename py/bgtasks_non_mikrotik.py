@@ -66,9 +66,12 @@ def bulk_add_non_mikrotik_devices(*args, **kwargs):
                 results.append(result)
                 continue
 
-            if db_device.query_device_by_ip(ip):
+            protocol = device_info.get('protocol', 'ssh')
+            resolved_port = int(device_info.get('port')) if device_info.get('port') else PORT_MAP.get(protocol, 22)
+
+            if db_device.query_device_by_ip_and_port(ip, resolved_port):
                 result['added'] = False
-                result['failures'] = "IP already exists"
+                result['failures'] = f"Endpoint already exists with IP {ip} and Port {resolved_port}"
                 results.append(result)
                 continue
 
@@ -79,7 +82,6 @@ def bulk_add_non_mikrotik_devices(*args, **kwargs):
             username = device_info.get('username', '')
             password = device_info.get('password', '')
             enable_password = device_info.get('enable_password', '')
-            protocol = device_info.get('protocol', 'ssh')
             group_ids = device_info.get('group_ids', [])
             mac = device_info.get('mac', '')
             ssh_auth_mode = device_info.get('ssh_auth_mode', 'credential')
@@ -91,7 +93,7 @@ def bulk_add_non_mikrotik_devices(*args, **kwargs):
 
                 new_dev = Devices.create(
                     name=name, ip=ip, mac=mac, details="{}", uptime="", license="", interface="",
-                    user_name=enc_user, password=enc_pass, port="",
+                    user_name=enc_user, password=enc_pass, port=str(resolved_port),
                     update_availble=False, current_firmware="", arch="", sensors="",
                     router_type="", wifi_config="", upgrade_avail=False,
                     owner=user_id, created=now, modified=now, peer_ip=util.resolve_peer_ip({"ip": ip}), failed_attempt=0,
@@ -99,8 +101,6 @@ def bulk_add_non_mikrotik_devices(*args, **kwargs):
                     device_type=device_type, device_model=device_model, template_id=template_id
                 )
                 inserted_ids.append(new_dev.id)
-
-                resolved_port = int(device_info.get('port')) if device_info.get('port') else PORT_MAP.get(protocol, 22)
                 am = agent_modes if protocol == 'ssh' else None
                 if isinstance(am, dict):
                     valid, err = validate_agent_modes(am)

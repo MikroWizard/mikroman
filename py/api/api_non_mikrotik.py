@@ -12,6 +12,7 @@ from flask import Blueprint, request
 from libs.webutil import app, buildResponse, login_required, get_myself, get_ip, get_agent
 from libs.db import db_device, db_syslog, db_tasks
 from libs.db.db_groups import DevGroupRel
+from libs.db.db_user_group_perm import DevUserGroupPermRel
 from libs.db.db_pam import DeviceBrands, DeviceTemplates, DeviceConnections, Credentials
 try:
     from libs.agent_validation import validate_agent_modes
@@ -56,7 +57,6 @@ def _template_supports_escalation(template_id):
 def list_non_mikrotik():
     user = get_myself()
     if user.role not in ('admin', 'superuser'):
-        from libs.db.db_user_group_perm import DevUserGroupPermRel
         allowed = DevUserGroupPermRel.get_user_devices(user.id)
         devs = list(allowed.where(db_device.Devices.device_type != 'mikrotik').dicts())
     else:
@@ -68,6 +68,14 @@ def list_non_mikrotik():
         pid = d.get('parent_id')
         if pid:
             child_counts[pid] = child_counts.get(pid, 0) + 1
+
+    conns = list(DeviceConnections.select())
+    conn_map = {}
+    for c in conns:
+        dev_id_val = getattr(c, 'device_id_id', None) or getattr(c, 'device_id', None)
+        if hasattr(dev_id_val, 'id'):
+            dev_id_val = dev_id_val.id
+        conn_map.setdefault(dev_id_val, []).append(c)
 
     for d in devs:
         d.pop('user_name', None)
@@ -83,6 +91,16 @@ def list_non_mikrotik():
         if not d.get('protocol_config'):
             d['protocol_config'] = {}
 
+        c_list = conn_map.get(d['id'], [])
+        if c_list:
+            d['connection_types'] = [c.protocol for c in c_list]
+            def_c = next((c for c in c_list if c.is_default), c_list[0])
+            d['protocol'] = def_c.protocol
+            if not d.get('port') or str(d.get('port')).strip() == '':
+                d['port'] = def_c.port
+        else:
+            d['connection_types'] = [d.get('protocol')] if d.get('protocol') else []
+
     return buildResponse({"status": "success", "data": devs})
 
 
@@ -97,7 +115,6 @@ def get_non_mikrotik():
         return buildResponse({"status": "failed", "error": "Device not found"}, 404)
     
     # Fetch connection types
-    from libs.db.db_pam import DeviceConnections, Credentials
     conns = list(DeviceConnections.select().where(DeviceConnections.device_id == devid))
     dev["connection_types"] = [c.protocol for c in conns]
     
@@ -157,24 +174,23 @@ def add_non_mikrotik():
     parent_id = data.get('parent_id')
     protocol_config = data.get('protocol_config') or {}
     
+    port_map = {'ssh': 22, 'telnet': 23, 'web': 80, 'api': 8728, 'rdp': 3389, 'vnc': 5900}
+    resolved_port = int(port) if port else port_map.get(protocol, 22)
+
     parent_dev = None
     if parent_id:
-        if not ISPRO:
-            return buildResponse({"status": "failed", "error": "Child applications are only available in Pro"}, 403)
         parent_dev = db_device.Devices.get_or_none(db_device.Devices.id == parent_id)
         if not parent_dev:
             return buildResponse({"status": "failed", "error": "Parent device not found"}, 400)
         device_type = device_type or parent_dev.device_type or 'windows'
         device_model = device_model or parent_dev.device_model or ''
         template_id = template_id or parent_dev.template_id
-        # Child published apps do not require dedicated IP, and bypass quota
+        # Inherit IP from parent if not explicitly set
         if not ip:
-            ip = None
+            ip = parent_dev.ip
     else:
         if not ip:
             return buildResponse({"status": "failed", "error": "IP required"}, 400)
-        if db_device.query_device_by_ip(ip):
-            return buildResponse({"status": "failed", "error": "IP already exists"}, 200)
         if ISPRO:
             try:
                 allowed, err = utilpro.can_add_device('other')
@@ -183,6 +199,9 @@ def add_non_mikrotik():
             except Exception as e:
                 log.error(e)
 
+    if ip and db_device.query_device_by_ip_and_port(ip, resolved_port):
+        return buildResponse({"status": "failed", "error": f"Endpoint already exists with IP {ip} and Port {resolved_port}"}, 200)
+
     now = datetime.datetime.now(datetime.timezone.utc)
     try:
         enc_user = util.crypt_data(username) if username else ''
@@ -190,7 +209,7 @@ def add_non_mikrotik():
         peer_ip_val = util.resolve_peer_ip({"ip": ip}) if ip else ''
         new_dev = db_device.Devices.create(
             name=name, ip=ip, mac=mac, details="{}", uptime="", license="", interface="",
-            user_name=enc_user, password=enc_pass, port="",
+            user_name=enc_user, password=enc_pass, port=str(resolved_port),
             update_availble=False, current_firmware="", arch="", sensors="",
             router_type="", wifi_config="", upgrade_avail=False,
             owner=user, created=now, modified=now, peer_ip=peer_ip_val, failed_attempt=0,
@@ -198,8 +217,6 @@ def add_non_mikrotik():
             device_type=device_type, device_model=device_model, template_id=template_id,
             parent_id=parent_id, protocol_config=protocol_config
         )
-        port_map = {'ssh': 22, 'telnet': 23, 'web': 80, 'api': 8728, 'rdp': 3389, 'vnc': 5900}
-        resolved_port = int(port) if port else port_map.get(protocol, 22)
         agent_modes = data.get('agent_modes') if protocol == 'ssh' else None
         if isinstance(agent_modes, dict):
             valid, err = validate_agent_modes(agent_modes)
@@ -418,6 +435,7 @@ def edit_non_mikrotik():
                 DeviceConnections.device_id == devid,
                 DeviceConnections.is_default == True
             )
+            db_device.Devices.update(port=str(resolved_port)).where(db_device.Devices.id == devid).execute()
             if existing:
                 log.info(f"edit_non_mikrotik: updating existing connection id={existing.id} from {existing.protocol}:{existing.port} to {proto}:{resolved_port}")
                 existing.protocol = proto
@@ -560,12 +578,16 @@ def _validate_device_row(device_info, index, brands_set, templates_map):
             elif enable_provided and not has_privilege_escalation:
                 warnings.append(f"enable_password provided but template '{template.get('display_name')}' does not use it")
 
-    # Check duplicate IP only if IP is valid
+    # Check duplicate endpoint only if IP is valid
     if ip:
         try:
             ipaddress.IPv4Address(ip)
-            if db_device.query_device_by_ip(ip):
-                warnings.append(f"IP {ip} already exists in database — will be skipped")
+            row_port = device_info.get('port')
+            row_proto = device_info.get('protocol', 'ssh')
+            port_map = {'ssh': 22, 'telnet': 23, 'web': 80, 'api': 8728, 'rdp': 3389, 'vnc': 5900}
+            res_port = int(row_port) if row_port else port_map.get(row_proto, 22)
+            if db_device.query_device_by_ip_and_port(ip, res_port):
+                warnings.append(f"Endpoint {ip}:{res_port} already exists in database — will be skipped")
         except:
             pass
 
