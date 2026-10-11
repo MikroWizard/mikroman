@@ -16,15 +16,58 @@
 import redis
 import datetime
 import time
+import json
 from collections import defaultdict
 import config as app_config
+import threading
+from libs import traffic_math
 
 import logging
 log = logging.getLogger("RedisDB")
 
 
 # --------------------------------------------------------------------------
-# key values
+# Shared connection pool: one pool per process instead of one per RedisDB() instance
+# (the poller creates several RedisDB objects per device per cycle).
+_POOLS = {}
+_POOLS_LOCK = threading.Lock()
+
+
+def _get_pool(host, port, password):
+    key = (host, port, password)
+    pool = _POOLS.get(key)
+    if pool is None:
+        with _POOLS_LOCK:
+            pool = _POOLS.get(key)
+            if pool is None:
+                pool = redis.ConnectionPool(host=host, port=port, password=password, db=0)
+                _POOLS[key] = pool
+    return pool
+
+
+def align_timeseries_grid(raw_points, start_ms, end_ms, step_ms, fill_value=0.0, open_bucket=True):
+    """Regular time grid for chart series (see libs.traffic_math.align_timeseries_grid)."""
+    return traffic_math.align_timeseries_grid(raw_points, start_ms, end_ms, step_ms,
+                                              fill_value=fill_value, open_bucket=open_bucket)
+
+
+def chart_series(raw_points, sensor, delta, start_ms, end_ms):
+    """Shape raw TimeSeries points for charts.
+
+    Traffic rate sensors (rx-/tx-/rxp-/txp-*) are placed on a regular grid so downtime shows
+    as 0 instead of a jump. Other sensors (cpu, memory, health, radio signal...) are returned
+    unchanged - a 0 there would be a false reading.
+    """
+    step = traffic_math.DELTA_STEP_MS.get(delta, 60000)
+    if not traffic_math.is_rate_sensor(sensor):
+        points = [(p[0], p[1]) for p in raw_points if p and len(p) >= 2]
+        return points[-30:] if delta == 'live' else points
+    if delta == 'live':
+        live_start = max(int(start_ms), (int(end_ms) // step - 30) * step)
+        return align_timeseries_grid(raw_points, live_start, end_ms, step)[-30:]
+    return align_timeseries_grid(raw_points, start_ms, end_ms, step)
+
+
 class RedisDB(object):
     def __init__(self, options):
         self.dev_id = options.get('dev_id',False)
@@ -36,18 +79,17 @@ class RedisDB(object):
         _redis_host = getattr(app_config, 'redishost', '127.0.0.1:6379')
         _redis_pass = app_config.srvconf.get('PYSRV_REDIS_PASSWORD', None) or None
         _redis_parts = _redis_host.split(':')
-        self.r = redis.Redis(
-            host=_redis_parts[0],
-            port=int(_redis_parts[1]) if len(_redis_parts) > 1 else 6379,
-            password=_redis_pass,
-            db=0
-        )
+        self.r = redis.Redis(connection_pool=_get_pool(
+            _redis_parts[0],
+            int(_redis_parts[1]) if len(_redis_parts) > 1 else 6379,
+            _redis_pass,
+        ))
         self.delta = options.get('delta','')
 
     def create_sensor_rts(self,sensor):
         retention=self.retention
         if "rx" in sensor or "tx" in sensor:
-            retention=3600000
+            retention=21600000
         if self.dev_id==False:
             return
         master_key="sensor::{}::{}".format(self.dev_id,sensor)
@@ -67,7 +109,7 @@ class RedisDB(object):
             #daily avg store for 3month
             self.r.ts().create(rule5m_key,retention_msecs=3600000*24,duplicate_policy="last")
             self.r.ts().create(rule1h_key,retention_msecs=3600000*336,duplicate_policy="last")
-            self.r.ts().create(ruledaily_key,retention_msecs=retention*2160,duplicate_policy="last")
+            self.r.ts().create(ruledaily_key,retention_msecs=3600000*2160,duplicate_policy="last")
         except Exception as e:
             self.r.ts().alter(rule5m_key,retention_msecs=3600000*24)
             self.r.ts().alter(rule1h_key,retention_msecs=3600000*336)
@@ -102,27 +144,66 @@ class RedisDB(object):
         return True
 
 
+
+    def get_cached_counters(self, dev_id):
+        try:
+            val = self.r.get(f"iface_counters::{dev_id}")
+            if val:
+                return json.loads(val.decode('utf-8') if isinstance(val, bytes) else val)
+        except Exception as e:
+            log.warning(f"Failed to get cached counters for dev {dev_id}: {e}")
+        return {}
+
+    def set_cached_counters(self, dev_id, counters, ttl=1800):
+        try:
+            self.r.setex(f"iface_counters::{dev_id}", ttl, json.dumps(counters))
+        except Exception as e:
+            log.warning(f"Failed to set cached counters for dev {dev_id}: {e}")
+
     def add_dev_data(self,info=[]):
-        if self.dev_id==False:
+        if self.dev_id==False or not info:
             return
         datalist=[]
         for key, val in info.items():
+            try:
+                numeric_val = float(val) if val is not None else 0.0
+            except (ValueError, TypeError):
+                numeric_val = 0.0
             master_key="sensor::{}::{}".format(self.dev_id,key)
-            datalist.append((master_key , '*' , val))
+            datalist.append((master_key , '*' , numeric_val))
             
         try:
-            self.r.ts().madd(datalist)
+            results = self.r.ts().madd(datalist)
+            if any(isinstance(x, Exception) for x in results):
+                for k in info.keys():
+                    try:
+                        self.create_sensor_rts(k)
+                    except Exception:
+                        pass
+                try:
+                    self.r.ts().madd(datalist)
+                except Exception as e2:
+                    log.error(f"Error executing madd retry for dev {self.dev_id}: {e2}")
         except redis.exceptions.ResponseError as e:
-            if "TSDB: the key does not exist" in str(e):
-                self.dev_create_keys()
-                self.r.ts().madd(datalist)
+            if "TSDB: the key does not exist" in str(e) or "not a TSDB key" in str(e):
+                for k in info.keys():
+                    try:
+                        self.create_sensor_rts(k)
+                    except Exception:
+                        pass
+                try:
+                    self.r.ts().madd(datalist)
+                except Exception as e2:
+                    log.error(f"Error executing madd retry for dev {self.dev_id}: {e2}")
             else:
-                raise e
+                log.error(f"Redis ResponseError adding dev data for dev {self.dev_id}: {e}")
+        except Exception as e:
+            log.error(f"Redis error adding dev data for dev {self.dev_id}: {e}")
         return True
 
     def get_dev_data(self,sensor):
         if self.dev_id==False:
-            return
+            return []
         start=int(time.mktime(self.start_time.timetuple())* 1000)
         end=int(time.mktime(self.end_time.timetuple())* 1000)
         if self.delta=='live':
@@ -130,15 +211,23 @@ class RedisDB(object):
         else:
             master_key="sensor{}::{}::{}".format(self.delta,self.dev_id,sensor)
 
-        if self.delta=='live':
-            return list(reversed(self.r.ts().revrange(master_key,start,end,count=30)))
-        return self.r.ts().range(master_key,start,end)
+        try:
+            if self.delta=='live':
+                raw = list(reversed(self.r.ts().revrange(master_key,start,end,count=30)))
+            else:
+                raw = self.r.ts().range(master_key,start,end)
+        except Exception:
+            return []
+        return chart_series(raw, sensor, self.delta, start, end)
     
     def get_dev_last_data(self,sensor):
         if self.dev_id==False:
-            return
+            return None
         master_key="sensor::{}::{}".format(self.dev_id,sensor)
-        return self.r.ts().get(master_key)
+        try:
+            return self.r.ts().get(master_key)
+        except Exception:
+            return None
 
     def get_dev_data_keys(self):
         if self.dev_id==False:
@@ -182,22 +271,19 @@ class RedisDB(object):
 
         for idx, (dev_id, key) in enumerate(commands):
             res_list = results[idx]
-            if isinstance(res_list, Exception):
+            if isinstance(res_list, Exception) or not res_list:
                 continue
-            for item in res_list:
-                ts = item[0]
-                val = item[1]
-                if delta == 'live':
-                    ts = (ts // 10000) * 10000
+            if delta == 'live':
+                res_list = list(reversed(res_list))
+            # Align every device on the same grid BEFORE summing, so one device's poll
+            # jitter does not show up as a dip in the group total.
+            for ts, val in chart_series(res_list, key, delta, start_ms, end_ms):
                 summed_data[key][ts] += val
 
         out = {}
         for key in keys:
-            sorted_ts = sorted(summed_data[key].keys())
-            if delta == 'live':
-                out[key] = [(ts, summed_data[key][ts]) for ts in sorted_ts[-30:]]
-            else:
-                out[key] = [(ts, summed_data[key][ts]) for ts in sorted_ts]
+            raw_pairs = [(ts, summed_data[key][ts]) for ts in sorted(summed_data[key].keys())]
+            out[key] = chart_series(raw_pairs, key, delta, start_ms, end_ms)
         return out
 
 

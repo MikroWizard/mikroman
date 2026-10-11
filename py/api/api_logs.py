@@ -783,8 +783,8 @@ def dashboard_traffic():
         datasets=[]
         lables=[]
         for idx, val in enumerate(data_keys):
-            for d in data[val]:
-                if len(lables) <= len(data[val]):
+            for d in data.get(val, []):
+                if idx == 0:
                     lables.append(datetime.datetime.fromtimestamp(d[0]/1000))
                 temp.append(round(d[1],1))
             datasets.append({'label':val,'borderColor': colors[idx],'type': 'line','yAxisID': ids[idx],'data':temp,'unit':val.split("-")[0],'backgroundColor': bgcolor[idx],'pointHoverBackgroundColor': '#fff','fill': True})

@@ -645,8 +645,8 @@ def dev_info():
         try:
             if util.check_port(options["host"], options["port"]):
                 router = util.RouterOSCheckResource(options)
-                network_info = util.get_network_data(router)
-                del network_info["total"]
+                network_info = util.get_network_data(router, dev_id=res["id"])
+                network_info.pop("total", None)
             else:
                 res["online"] = False
         except:
@@ -804,12 +804,10 @@ def dev_sensors():
                 if (
                     total == "bps"
                     and "rx/tx-total" in res["sensors"]
-                    and "rx/tx-total" in res["sensors"]
                 ):
                     continue
                 if (
                     total != "bps"
-                    and "rxp/txp-total" in res["sensors"]
                     and "rxp/txp-total" in res["sensors"]
                 ):
                     continue
@@ -822,16 +820,22 @@ def dev_sensors():
                 data_keys = ["tx-total", "rx-total"]
                 if total != "bps":
                     data_keys = ["txp-total", "rxp-total"]
+
+                best_series = max((data.get(val, []) for val in data_keys), key=len, default=[])
+                for d in best_series:
+                    edatetime = datetime.datetime.fromtimestamp(d[0] / 1000)
+                    lables.append(
+                        util.utc2local(edatetime, tz=tz).strftime(
+                            "%m/%d/%Y, %H:%M:%S %Z"
+                        )
+                    )
+
                 for idx, val in enumerate(data_keys):
-                    for d in data[val]:
-                        if len(lables) <= len(data[val]):
-                            edatetime = datetime.datetime.fromtimestamp(d[0] / 1000)
-                            lables.append(
-                                util.utc2local(edatetime, tz=tz).strftime(
-                                    "%m/%d/%Y, %H:%M:%S %Z"
-                                )
-                            )
-                        temp.append(round(d[1], 1))
+                    series_points = data.get(val, [])
+                    if len(series_points) < len(lables):
+                        temp = [round(d[1], 1) for d in series_points] + [0.0] * (len(lables) - len(series_points))
+                    else:
+                        temp = [round(d[1], 1) for d in series_points[:len(lables)]]
                     datasets.append(
                         {
                             "borderColor": colors[idx],
@@ -854,7 +858,7 @@ def dev_sensors():
 
             else:
                 temp = {"labels": [], "data": []}
-                for d in data[key]:
+                for d in data.get(key, []):
                     edatetime = datetime.datetime.fromtimestamp(d[0] / 1000)
                     temp["labels"].append(
                         util.utc2local(edatetime, tz=tz).strftime(
@@ -873,12 +877,9 @@ def dev_sensors():
                         }
                     ],
                 }
-            if "rxp-total" in res["sensors"]:
-                res["sensors"].remove("txp-total")
-                res["sensors"].remove("rxp-total")
-            elif "rx-total" in res["sensors"]:
-                res["sensors"].remove("tx-total")
-                res["sensors"].remove("rx-total")
+
+        total_strip = {"txp-total", "rxp-total", "tx-total", "rx-total"}
+        res["sensors"] = [s for s in res["sensors"] if s not in total_strip]
     except Exception as e:
         log.error(e)
         return buildResponse(
@@ -943,14 +944,12 @@ def dev_ifstat():
         + interface
     )
     try:
-        res["sensors"] = json.loads(res["sensors"])
-        for sensor in res["sensors"][:]:
-            regex = r".*{}$".format(interface)
-            if not bool(re.match(regex, sensor)):
-                res["sensors"].remove(sensor)
+        data_keys = ["tx-{}".format(interface), "rx-{}".format(interface)]
+        if chart_type == "pps":
+            data_keys = ["txp-{}".format(interface), "rxp-{}".format(interface)]
         redopts = {
             "dev_id": res["id"],
-            "keys": res["sensors"],
+            "keys": data_keys,
             "start_time": start_time,
             "end_time": end_time,
             "delta": delta,
@@ -970,19 +969,19 @@ def dev_ifstat():
         datasets = []
         lables = []
         tz = db_sysconfig.get_sysconfig("timezone")
-        data_keys = ["tx-{}".format(interface), "rx-{}".format(interface)]
-        if chart_type == "bps":
-            data_keys = ["tx-{}".format(interface), "rx-{}".format(interface)]
-        elif chart_type == "pps":
-            data_keys = ["txp-{}".format(interface), "rxp-{}".format(interface)]
+        best_series = max((data.get(val, []) for val in data_keys), key=len, default=[])
+        for d in best_series:
+            edatetime = datetime.datetime.fromtimestamp(d[0] / 1000)
+            lables.append(
+                util.utc2local(edatetime, tz=tz).strftime("%Y-%m-%d %H:%M:%S")
+            )
+
         for idx, val in enumerate(data_keys):
-            for d in data[val]:
-                if len(lables) <= len(data[val]):
-                    edatetime = datetime.datetime.fromtimestamp(d[0] / 1000)
-                    lables.append(
-                        util.utc2local(edatetime, tz=tz).strftime("%Y-%m-%d %H:%M:%S")
-                    )
-                temp.append(round(d[1], 1))
+            series_points = data.get(val, [])
+            if len(series_points) < len(lables):
+                temp = [round(d[1], 1) for d in series_points] + [0.0] * (len(lables) - len(series_points))
+            else:
+                temp = [round(d[1], 1) for d in series_points[:len(lables)]]
             datasets.append(
                 {
                     "label": val,
