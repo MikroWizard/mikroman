@@ -9,6 +9,7 @@ from uwsgidecorators import spool
 from playhouse.shortcuts import model_to_dict
 from libs import util,firm_lib
 from libs import compat_runner
+from libs import task_tracker
 from libs import config_runner as cfg_runner
 import config
 import time
@@ -70,6 +71,7 @@ def cancel_task(task_name='',task=0):
     return True
 
 @spool(pass_arguments=True)
+@task_tracker.track_task(100)
 def check_devices_for_update(*args, **kwargs):
     reset_db()
     task=db_tasks.update_check_status()
@@ -94,8 +96,16 @@ def check_devices_for_update(*args, **kwargs):
             num_threads = len(devs)
             q = queue.Queue()
             if devs:
+                def _check_worker(dev, q):
+                    try:
+                        if task_tracker.cancel_requested(100):
+                            return  # stopped by user: skip devices not started yet
+                        util.check_device_firmware_update(dev, q)
+                    finally:
+                        database.close()
+
                 with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_THREADS, len(devs))) as executor:
-                    futures = {executor.submit(util.check_device_firmware_update, dev, q): dev for dev in devs}
+                    futures = {executor.submit(_check_worker, dev, q): dev for dev in devs}
                     for future in as_completed(futures):
                         dev = futures[future]
                         try:
@@ -104,28 +114,31 @@ def check_devices_for_update(*args, **kwargs):
                             log.error(f"Firmware check worker failure for dev {getattr(dev, 'id', '?')}: {e}")
                             q.put({"id": getattr(dev, "id", None), "update_availble": False, "reason": f"Worker failure: {e}"})
             res = []
-            while not q.empty():
-                try:
-                    qres = q.get_nowait()
-                    if not qres.get("reason", False):
-                        res.append(qres)
-                    else:
-                        dev_id = qres.get('id', qres.get('devid'))
-                        if dev_id:
-                            db_events.connection_event(dev_id, 'Firmware updater', qres.get("detail", "connection"), "Critical", 0, qres.get("reason", "problem in Firmware updater"))
-                except queue.Empty:
-                    break
-            db_device.update_devices_firmware_status(res)
+            with database.connection_context():
+                while not q.empty():
+                    try:
+                        qres = q.get_nowait()
+                        if not qres.get("reason", False):
+                            res.append(qres)
+                        else:
+                            dev_id = qres.get('id', qres.get('devid'))
+                            if dev_id:
+                                db_events.connection_event(dev_id, 'Firmware updater', qres.get("detail", "connection"), "Critical", 0, qres.get("reason", "problem in Firmware updater"))
+                    except queue.Empty:
+                        break
+                db_device.update_devices_firmware_status(res)
     except Exception as e:
         log.error(e)
         return False
     finally:
         task.status=0
         task.save()
+        database.close()
     return False
 
 
 @spool(pass_arguments=True)
+@task_tracker.track_task(110)
 def update_device(*args, **kwargs):
     reset_db()
     task=db_tasks.update_job_status()
@@ -183,25 +196,64 @@ def update_device(*args, **kwargs):
                     log.warning(f"Device update ordering skipped: {e}")
 
             if eligible_devs:
-                for dev in eligible_devs:
-                    dev.status = "updating"
-                    if dev.failed_attempt > 0:
-                        dev.failed_attempt = 0
-                    dev.save()
+                previous_status = {dev.id: dev.status for dev in eligible_devs}
+                with database.atomic():
+                    for dev in eligible_devs:
+                        dev.status = "updating"
+                        if dev.failed_attempt > 0:
+                            dev.failed_attempt = 0
+                        dev.save()
+
+                def _skip_if_cancelled(dev, q):
+                    """Stop requested: never start a new device; revert its 'updating' mark.
+                    Devices already uploading/rebooting are left to finish."""
+                    if not task_tracker.cancel_requested(110):
+                        return False
+                    try:
+                        with database.connection_context():
+                            Devices.update(status=previous_status.get(dev.id) or "active").where(
+                                (Devices.id == dev.id) & (Devices.status == "updating")).execute()
+                    except Exception as e:
+                        log.warning(f"Could not revert status of dev {dev.id} after cancel: {e}")
+                    q.put({"id": dev.id, "status": False, "reason": "Cancelled by user before start"})
+                    return True
+
+                def _update_native_worker(dev, q, auto_upgrade_rb):
+                    try:
+                        if _skip_if_cancelled(dev, q):
+                            return
+                        firm_lib.update_device_native(dev, q, auto_upgrade_rb=auto_upgrade_rb)
+                    finally:
+                        database.close()
+
+                def _update_worker(dev, q, version_to_install, packages_mode, packages_to_install, auto_upgrade_rb):
+                    try:
+                        if _skip_if_cancelled(dev, q):
+                            return
+                        firm_lib.update_device(
+                            dev, q,
+                            version_to_install=version_to_install,
+                            packages_mode=packages_mode,
+                            packages_to_install=packages_to_install,
+                            auto_upgrade_rb=auto_upgrade_rb
+                        )
+                    finally:
+                        database.close()
+
                 with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_THREADS, len(eligible_devs))) as executor:
                     if delivery_method == 'native':
                         futures = {
-                            executor.submit(firm_lib.update_device_native, dev, q, auto_upgrade_rb=auto_upgrade_rb): dev
+                            executor.submit(_update_native_worker, dev, q, auto_upgrade_rb): dev
                             for dev in eligible_devs
                         }
                     else:
                         futures = {
                             executor.submit(
-                                firm_lib.update_device, dev, q,
-                                version_to_install=version_to_install,
-                                packages_mode=packages_mode,
-                                packages_to_install=packages_to_install,
-                                auto_upgrade_rb=auto_upgrade_rb
+                                _update_worker, dev, q,
+                                version_to_install,
+                                packages_mode,
+                                packages_to_install,
+                                auto_upgrade_rb
                             ): dev
                             for dev in eligible_devs
                         }
@@ -227,6 +279,7 @@ def update_device(*args, **kwargs):
     return False
 
 @spool(pass_arguments=True)
+@task_tracker.track_task(140)
 def download_firmware(*args, **kwargs):
     reset_db()
     task=db_tasks.downloader_job_status()
@@ -268,6 +321,7 @@ def download_firmware(*args, **kwargs):
     return False
 
 @spool(pass_arguments=True)
+@task_tracker.track_task(120)
 def backup_devices(*args, **kwargs):
     reset_db()
     task=db_tasks.backup_job_status()
@@ -284,9 +338,20 @@ def backup_devices(*args, **kwargs):
             devices=kwargs.get('devices',False)
             if len(devices):
                 q = queue.Queue()
+                def _backup_worker(dev, q):
+                    try:
+                        if task_tracker.cancel_requested(120):
+                            q.put({"id": dev.id, "devid": dev.id, "devip": getattr(dev, "ip", ""),
+                                   "status": True, "state": True, "cancelled": True,
+                                   "reason": "Cancelled by user before start"})
+                            return
+                        compat_runner.backup_routers(dev, q)
+                    finally:
+                        database.close()
+
                 if devices:
                     with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_THREADS, len(devices))) as executor:
-                        futures = {executor.submit(compat_runner.backup_routers, dev, q): dev for dev in devices}
+                        futures = {executor.submit(_backup_worker, dev, q): dev for dev in devices}
                         for future in as_completed(futures):
                             dev = futures[future]
                             try:
@@ -304,17 +369,18 @@ def backup_devices(*args, **kwargs):
                                     "detail": "Worker error",
                                 })
                 res = []
-                while not q.empty():
-                    try:
-                        qres = q.get_nowait()
-                        status = qres.get('status', qres.get('state', False))
-                        if not status:
-                            dev_id = qres.get('id', qres.get('devid'))
-                            if dev_id:
-                                db_events.connection_event(dev_id, 'Backup', qres.get("detail", "connection"), "Critical", 0, qres.get("reason", "problem in getting backup for device"))
-                        res.append(qres)
-                    except queue.Empty:
-                        break
+                with database.connection_context():
+                    while not q.empty():
+                        try:
+                            qres = q.get_nowait()
+                            status = qres.get('status', qres.get('state', False))
+                            if not status:
+                                dev_id = qres.get('id', qres.get('devid'))
+                                if dev_id:
+                                    db_events.connection_event(dev_id, 'Backup', qres.get("detail", "connection"), "Critical", 0, qres.get("reason", "problem in getting backup for device"))
+                            res.append(qres)
+                        except queue.Empty:
+                            break
             else:
                 return False
     except Exception as e:
@@ -337,6 +403,7 @@ def extract_device_from_macdiscovery(line):
     return sgroups
 
 @spool(pass_arguments=True)
+@task_tracker.track_task(130)
 def scan_with_mac(timer=2):
     reset_db()
     task=db_tasks.scanner_job_status()
@@ -396,6 +463,7 @@ def scan_with_mac(timer=2):
 
 
 @spool(pass_arguments=True)
+@task_tracker.track_task(130)
 def scan_with_ip(*args, **kwargs):
     reset_db()
     task=None
@@ -659,6 +727,7 @@ def scan_with_ip(*args, **kwargs):
             task.save()
 
 @spool(pass_arguments=True)
+@task_tracker.track_task(160)
 def exec_snipet(*args, **kwargs):
     reset_db()
     task=db_tasks.exec_snipet_status()
@@ -699,7 +768,15 @@ def exec_snipet(*args, **kwargs):
                 store_in_backup = bool(taskdata.get('store_in_backup', False))
                 snippet_id = taskdata.get('snippet', {}).get('id')
                 def _snipet_worker(dev, code, q):
-                    compat_runner.run_snippets(dev, code, q, user_task_id=utask.id, snippet_id=snippet_id, store_in_backup=store_in_backup)
+                    try:
+                        if task_tracker.cancel_requested(160):
+                            q.put({"id": dev.id, "devid": dev.id, "devip": getattr(dev, "ip", ""),
+                                   "devname": getattr(dev, "name", ""), "status": False,
+                                   "result": "Cancelled by user before start"})
+                            return
+                        compat_runner.run_snippets(dev, code, q, user_task_id=utask.id, snippet_id=snippet_id, store_in_backup=store_in_backup)
+                    finally:
+                        database.close()
                 with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_THREADS, len(eligible_devs))) as executor:
                     futures = {executor.submit(_snipet_worker, dev, code, q): dev for dev, code in eligible_devs}
                     for future in as_completed(futures):
@@ -738,6 +815,7 @@ def exec_snipet(*args, **kwargs):
     return False
 
 @spool(pass_arguments=True)
+@task_tracker.track_task(185)
 def exec_multi_brand(*args, **kwargs):
     reset_db()
     task = db_tasks.exec_multi_brand_status()
@@ -766,6 +844,7 @@ def exec_multi_brand(*args, **kwargs):
             "is_config_mode": kwargs.get("is_config_mode", False),
             "user_task_id": user_task_id,
             "max_workers": MAX_CONCURRENT_THREADS,
+            "should_cancel": lambda: task_tracker.cancel_requested(185),
         }
         results = cfg_runner.run_bulk_job(job_config)
         try:
@@ -786,6 +865,7 @@ def exec_multi_brand(*args, **kwargs):
     return False
 
 @spool(pass_arguments=True)
+@task_tracker.track_task(175)
 def exec_sequence(*args, **kwargs):
     reset_db()
     try:
@@ -828,6 +908,7 @@ def exec_sequence(*args, **kwargs):
     return False
 
 @spool(pass_arguments=True)
+@task_tracker.track_task(170)
 def exec_vault(*args, **kwargs):
     reset_db()
     Tasks=db_tasks.Tasks
@@ -856,6 +937,7 @@ def exec_vault(*args, **kwargs):
     return False
 
 @spool(pass_arguments=True)
+@task_tracker.track_task(180)
 def bulk_add_devices(*args, **kwargs):
     reset_db()
     task=None
@@ -906,24 +988,47 @@ def bulk_add_devices(*args, **kwargs):
             password = device_info['password']
             ssl = device_info.get('ssl', False)
             port = device_info.get('port') or (8729 if ssl else 8728)
+            if int(port) == 8729 and 'ssl' not in device_info:
+                ssl = True
             
             scan_results.append({'ip': ip})
-            ip=str(ipaddress.IPv4Address(ip))
+            ip = str(ipaddress.IPv4Address(ip))
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            src_ip = None
             try:
                 sock.settimeout(SOCKET_TIMEOUT)
-                result = sock.connect_ex((ip,int(port)))
+                result = sock.connect_ex((ip, int(port)))
                 if result != 0:
-                    scan_results[idx]['added']=False
-                    scan_results[idx]['failures']="Connection or authentication failed"
-                    log.error(f"Error adding device {ip}")
-                else:
-                    src_ip=sock.getsockname()[0]
+                    # Auto-probe 8729 (SSL) if default 8728 was unreachable
+                    if int(port) == 8728 and 'port' not in device_info:
+                        try:
+                            sock.close()
+                            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                            sock.settimeout(SOCKET_TIMEOUT)
+                            if sock.connect_ex((ip, 8729)) == 0:
+                                port = 8729
+                                ssl = True
+                                result = 0
+                                src_ip = sock.getsockname()[0]
+                        except Exception:
+                            pass
+                    if result != 0:
+                        scan_results[idx]['added'] = False
+                        scan_results[idx]['failures'] = "Connection or authentication failed"
+                        log.error(f"Error adding device {ip}: port {port} unreachable")
+                        continue
+                if not src_ip:
+                    src_ip = sock.getsockname()[0]
             except Exception as e:
-                scan_results[idx]['added']=False
-                scan_results[idx]['failures']="Connection or authentication failed"
+                scan_results[idx]['added'] = False
+                scan_results[idx]['failures'] = "Connection or authentication failed"
                 log.error(f"Error adding device {ip}: {e}")
                 continue
+            finally:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
             options={
                 'host':ip,
                 'username':username,

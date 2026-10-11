@@ -6,10 +6,14 @@
 # Author: sepehr.ha@gmail.com
 
 from flask import request
-import uwsgi
+try:
+    import uwsgi
+except ImportError:
+    uwsgi = None
 import signal
 import os
 from libs.db import db_sysconfig,db_syslog, db_tasks
+from libs import task_tracker
 from libs import util
 from libs.webutil import app, login_required,buildResponse,get_myself,get_ip,get_agent
 import time
@@ -87,48 +91,30 @@ def tasks_list():
 @app.route('/api/tasks/stop', methods = ['POST'])
 @login_required(role='admin',perm={'settings':'write'})
 def stop_task():
-    """get all tasks"""
-    input = request.json
-    task_signal = int(input['signal'])
-    task=db_tasks.get_task_by_signal(task_signal)
-    res=[]
-    #remove spooler file to stop task
-    #list files under directory
-    if not task:
-        return buildResponse({'result':'failed','err':"No task"}, 200)
-    spooldir=uwsgi.opt['spooler'].decode()+'/'+str(task_signal)
-    #list all files and remove them in spooldir
-    files = []
+    """Stop/cancel a background task.
+
+    Removes its queued spool files and asks the running instance to stop gracefully
+    (devices in progress finish, remaining devices are skipped). Pressing Stop again after
+    2 minutes, or sending force=true, kills the exact spooler PID running it - except for
+    firmware update, firmware download, scan and vault, which are never killed.
+    """
+    input = request.json or {}
     try:
-        if os.path.exists(spooldir):
-            for file in os.listdir(spooldir):
-                file_path = os.path.join(spooldir, file)
-                if os.path.isfile(file_path):
-                    os.remove(file_path)
-                    files.append(file)
+        task_signal = int(input['signal'])
+    except (KeyError, TypeError, ValueError):
+        return buildResponse({'result': 'failed', 'err': 'Invalid signal'}, 200)
+    task_id = input.get('task_id') or None
+    force = str(input.get('force', '')).lower() in ('1', 'true', 'yes')
+    try:
+        res = task_tracker.stop_task(task_signal, task_id=task_id, force=force)
     except Exception as e:
-        log.error(f"Error removing spool files: {str(e)}")
-        return buildResponse({'result':'failed','err':str(e)}, 200)
-    pid=uwsgi.spooler_pid()
-    #kill pid to stop task
-    if task_signal not in [130,140]:
-        try:
-            os.kill(pid, signal.SIGTERM)  # Attempt graceful shutdown
-        except ProcessLookupError:
-            return buildResponse({'result':'failed','err':'Spooler not running'}, 200)
-        except PermissionError:
-            return buildResponse({'result':'failed','err':'Permission denied to reload spooler process'}, 200)
-        except Exception as e:
-            return buildResponse({'result':'failed','err':str(e)}, 200)
-    else:
-        task.action="cancel"
-        task.status=False
-        task.save()
-        return buildResponse({"status":"success"})
-    task.status=False
-    task.action="None"
-    task.save()
-    return buildResponse({"status":"success"})
+        log.error(f"Error stopping task {task_signal}: {e}")
+        return buildResponse({'result': 'failed', 'err': str(e)}, 200)
+    log.info(f"Stop task {task_signal}: mode={res['mode']} removed={len(res['removed_files'])} killed={res['killed_pids']} cancelled_rows={res['cancelled_rows']}")
+    if res['result'] != 'success':
+        return buildResponse({'result': 'failed', 'err': 'No running or queued task'}, 200)
+    return buildResponse({"status": "success", "mode": res['mode'], "killed": len(res['killed_pids']),
+                          "removed": len(res['removed_files']), "cancelled": res['cancelled_rows']})
 
 @app.route('/api/sysconfig/apply_update', methods = ['POST'])
 @login_required(role='admin',perm={'settings':'write'})

@@ -13,7 +13,7 @@ import config
 from libs import util, firm_lib
 from libs import compat_runner
 from libs.db import db_user_tasks
-from libs.db.db import database
+from libs.db.db import database, tune_process_db_pool
 from libs.webutil import app, login_required, get_myself, buildResponse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import reduce
@@ -94,11 +94,15 @@ def _heartbeat(task_id, hostname, stop_event):
 
 
 def backup_devs(devices):
+    tune_process_db_pool(role="bgtasks", num_devices=len(devices))
     num_threads = len(devices)
     q = queue.Queue()
 
     def thread_worker(dev, q_obj):
-        compat_runner.backup_routers(dev, q_obj)
+        try:
+            compat_runner.backup_routers(dev, q_obj)
+        finally:
+            database.close()
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {executor.submit(thread_worker, dev, q): dev for dev in devices}
@@ -119,21 +123,28 @@ def backup_devs(devices):
                 })
 
     res = []
-    while not q.empty():
-        qres = q.get_nowait()
-        if not qres.get("state", True):
-            with database.connection_context():
-                util.log_alert("backup", qres.get("id", 0), "Backup failed")
-        res.append(qres)
+    with database.connection_context():
+        while not q.empty():
+            try:
+                qres = q.get_nowait()
+                if not qres.get("state", True):
+                    util.log_alert("backup", qres.get("id", 0), "Backup failed")
+                res.append(qres)
+            except queue.Empty:
+                break
     return res
 
 
 def run_snippets(devices, snippet, template_key=None, user_task_id=None, snippet_id=None, store_in_backup=False):
+    tune_process_db_pool(role="bgtasks", num_devices=len(devices))
     num_threads = len(devices)
     q = queue.Queue()
 
     def thread_worker(dev, snippet_content, q_obj, tmpl_key):
-        compat_runner.run_snippets(dev, snippet_content, q_obj, tmpl_key, user_task_id=user_task_id, snippet_id=snippet_id, store_in_backup=store_in_backup)
+        try:
+            compat_runner.run_snippets(dev, snippet_content, q_obj, tmpl_key, user_task_id=user_task_id, snippet_id=snippet_id, store_in_backup=store_in_backup)
+        finally:
+            database.close()
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {executor.submit(thread_worker, dev, snippet, q, template_key): dev for dev in devices}
@@ -154,12 +165,15 @@ def run_snippets(devices, snippet, template_key=None, user_task_id=None, snippet
                 })
 
     res = []
-    while not q.empty():
-        qres = q.get_nowait()
-        if "result" in qres and not qres["result"]:
-            with database.connection_context():
-                util.log_alert("run_snippet", qres.get("id", 0), "Run Snippet failed")
-        res.append(qres)
+    with database.connection_context():
+        while not q.empty():
+            try:
+                qres = q.get_nowait()
+                if "result" in qres and not qres["result"]:
+                    util.log_alert("run_snippet", qres.get("id", 0), "Run Snippet failed")
+                res.append(qres)
+            except queue.Empty:
+                break
     return res
 
 

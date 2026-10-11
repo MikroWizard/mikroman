@@ -456,6 +456,7 @@ def run_bulk_job(job_config):
     job_config keys:
         device_ids: list[int]
         max_workers: int (default 25)
+        should_cancel: optional callable -> bool; checked before each device starts
         ... (passed through to run_device_job for each device)
     """
     device_ids = job_config.get("device_ids", [])
@@ -466,13 +467,26 @@ def run_bulk_job(job_config):
     max_workers = min(job_config.get("max_workers", getattr(config, "MAX_CONCURRENT_THREADS", 10)), 50)
     results = []
 
+    should_cancel = job_config.get("should_cancel")
+
     def _worker(cfg):
+        # Stop requested by the operator: never start a new device (in-flight ones finish).
+        if callable(should_cancel):
+            try:
+                if should_cancel():
+                    return {
+                        "device_id": cfg.get("device_id"), "status": "cancelled",
+                        "error": "Cancelled by user before start",
+                        "is_changed": False, "version_num": None, "duration_ms": 0,
+                    }
+            except Exception:
+                pass
         return run_device_job(cfg)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {}
         for did in device_ids:
-            device_config = dict(job_config)
+            device_config = {k: v for k, v in job_config.items() if k != "should_cancel"}
             device_config["device_id"] = did
             device_config["execution_run_id"] = execution_run_id
             futures[executor.submit(_worker, device_config)] = did
