@@ -19,6 +19,7 @@ from pyrad.packet import AccessAccept,AccessReject
 from pyrad.server import RemoteHost
 from libs.mschap3 import mschap,mppe
 from libs.db import db,db_user_group_perm,db_device,db_groups,db_device,db_AA,db_sysconfig
+from libs.db.db import release_db_connection
 from libs.util import FourcePermToRouter
 import config
 
@@ -164,6 +165,7 @@ class RadServer(ServerAsync):
             log.error("Auth dispatch error: %s", str(e))
             self.send_auth_reject(protocol, pkt, addr)
 
+    @release_db_connection   # pool thread: give the DB connection back after every request
     def _handle_auth_blocking(self, protocol, pkt, addr, username, userip, devip, tz):
         """Runs in thread pool. Performs all DB lookups and RouterOS API calls."""
         try:
@@ -277,6 +279,7 @@ class RadServer(ServerAsync):
             protocol, pkt, addr
         )
 
+    @release_db_connection
     def _handle_acct_blocking(self, protocol, pkt, addr):
         """Original accounting logic, runs in thread pool."""
         try:

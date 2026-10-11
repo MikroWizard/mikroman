@@ -40,8 +40,11 @@ DATABASE_PORT = srvconf["PYSRV_DATABASE_PORT"]
 DATABASE_NAME = srvconf["PYSRV_DATABASE_NAME"]
 DATABASE_USER = srvconf["PYSRV_DATABASE_USER"]
 DATABASE_PASSWORD = srvconf["PYSRV_DATABASE_PASSWORD"]
-# Database pool size (per process). Increase for high-concurrency deployments.
-DATABASE_POOL_SIZE = int(srvconf.get("PYSRV_DATABASE_POOL_SIZE", 10))
+# Database pool size per process. Leave UNSET: each process then sizes its pool from the
+# server's real max_connections (libs/db/db_budget.py). Setting it forces that size everywhere.
+DATABASE_POOL_SIZE = int(srvconf.get("PYSRV_DATABASE_POOL_SIZE", 20))
+# Database pool wait timeout in seconds when all connections are checked out.
+DATABASE_POOL_TIMEOUT = int(srvconf.get("PYSRV_DATABASE_POOL_TIMEOUT", 30))
 # Max concurrent threads for background task executors.
 MAX_CONCURRENT_THREADS = int(srvconf.get("PYSRV_MAX_CONCURRENT_THREADS", 10))
 # Seconds before an idle DB connection is closed. Min 60, recommend 180-600.
@@ -50,6 +53,15 @@ DB_STALE_TIMEOUT = int(srvconf.get("PYSRV_DB_STALE_TIMEOUT", 300))
 SOCKET_SCAN_TIMEOUT = float(srvconf.get("PYSRV_SOCKET_SCAN_TIMEOUT", 0.2))
 # Max concurrent RouterOS API connections for data grabber mule.
 DATAGRABBER_CONCURRENCY = int(srvconf.get("PYSRV_DATAGRABBER_CONCURRENCY", 25))
+# Sharding configuration for multiple data grabber mules (e.g. "2,6" or "[2,6]")
+DATAGRABBER_MULES = srvconf.get("PYSRV_DATAGRABBER_MULES", "")
+# Hard ceiling (seconds) for one poll cycle; hung device threads are abandoned after this.
+DATAGRABBER_CYCLE_DEADLINE = int(srvconf.get("PYSRV_DATAGRABBER_CYCLE_DEADLINE", 240))
+# Seconds the poller reuses a device's resolved API credentials (0 = resolve every poll).
+CREDENTIAL_CACHE_SECONDS = int(srvconf.get("PYSRV_CREDENTIAL_CACHE_SECONDS", 300))
+# Seconds between re-reads of rarely-changing device info (routerboard, identity, wireless
+# mode, syslog/RADIUS enforcement). Uptime/resources/traffic are read every poll. 0 = every poll.
+STATIC_POLL_SECONDS = int(srvconf.get("PYSRV_STATIC_POLL_SECONDS", 300))
 # Max concurrent firmware update threads. Firmware uploads are heavy per device.
 FIRMWARE_CONCURRENCY = int(srvconf.get("PYSRV_FIRMWARE_CONCURRENCY", 40))
 CRYPT_KEY = srvconf["PYSRV_CRYPT_KEY"]
