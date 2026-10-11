@@ -14,16 +14,24 @@ import config
 from libs.db import db_sysconfig,db_backups,db_events
 from libs.db.db import database
 from cryptography.fernet import Fernet 
-from libs.check_routeros.routeros_check.resource import RouterOSCheckResource
+from libs.check_routeros.routeros_check.resource import RouterOSCheckResource, _safe_socket_read
 from libs.check_routeros.routeros_check.helper import  RouterOSVersion
 from typing import  Dict
 import re
 import json 
 import logging
 from libs.red import RedisDB
+from libs import traffic_math
 from libs.ssh_helper import SSH_Helper
 import os
 import netifaces
+import librouteros
+import librouteros.connections
+import librouteros.exceptions
+
+# EOF-safe, buffered librouteros socket reads (defined once in routeros_check.resource).
+# Re-applied here so the patch holds no matter which module imported librouteros first.
+librouteros.connections.SocketTransport.read = _safe_socket_read
 
 log = logging.getLogger("util")
 try:
@@ -58,6 +66,10 @@ def close_router(router):
 
 # --------------------------------------------------------------------------
 # date related common methods
+
+def parse_routeros_uptime(val):
+    """Parse RouterOS uptime string into total integer seconds (see libs.traffic_math)."""
+    return traffic_math.parse_routeros_uptime(val)
 
 tz_hki = pytz.timezone("UTC")
 tz_utc = pytz.utc
@@ -221,70 +233,133 @@ def check_device_firmware_update(dev, q):
             q.put({"id": dev.id, "reason": "Wrong user or password"})
 
 def get_interfaces_counters(router):
-   result = {}
-   for iface in router.api('/interface/print', stats=True):
-        result[iface['name']] = iface
-   return result
+    result = {}
+    raw_ifaces = []
+    try:
+        raw_ifaces = list(router.api('/interface/print', stats=True))
+    except Exception as e:
+        log.warning(f"/interface/print with stats=True failed, trying standard print: {e}")
+        try:
+            raw_ifaces = list(router.api('/interface/print'))
+        except Exception as e2:
+            log.error(f"/interface/print failed: {e2}")
+            return result
 
-def get_traffic(router,interfaces):
-   if 'aggregate' not in interfaces:
-       interfaces.append('aggregate')
-   
-   traffic={}
-   chunk_size = 90
-   for i in range(0, len(interfaces), chunk_size):
-       chunk = interfaces[i:i + chunk_size]
-       chunk_str = ",".join(chunk)
-       params = {'interface': chunk_str, 'once': b' '}
-       try:
-           results = tuple(router.api('/interface/monitor-traffic', **params))
-           for row in results:
-               traffic[row.get('name','total')]={
-                   'rx-packets-per-second':row.get('rx-packets-per-second',0),
-                   'rx-bits-per-second':row.get('rx-bits-per-second',0),
-                   'fp-rx-packets-per-second':row.get('fp-rx-packets-per-second',0),
-                   'fp-rx-bits-per-second':row.get('fp-rx-bits-per-second',0),
-                   'rx-drops-per-second':row.get('rx-drops-per-second',0),
-                   'rx-errors-per-second':row.get('rx-errors-per-second',0),
-                   'tx-packets-per-second':row.get('tx-packets-per-second',0),
-                   'tx-bits-per-second':row.get('tx-bits-per-second',0),
-                   'fp-tx-packets-per-second':row.get('fp-tx-packets-per-second',0),
-                   'fp-tx-bits-per-second':row.get('fp-tx-bits-per-second',0),
-                   'tx-drops-per-second':row.get('tx-drops-per-second',0),
-                   'tx-queue-drops-per-second':row.get('tx-queue-drops-per-second',0),
-                   'tx-errors-per-second':row.get('tx-errors-per-second',0),
-               }
-       except Exception as e:
-           log.error(f"get_traffic error for interfaces {chunk_str}: {e}")
-   return traffic
+    for iface in raw_ifaces:
+        name = iface.get('name')
+        if name:
+            result[name] = iface
+    return result
+
+def calculate_interface_rates(dev_id, interfaces, read_at=None):
+    """
+    Compute accurate poll-interval average rates (bps and pps) from 64-bit cumulative
+    counters (rx-byte, tx-byte, rx-packet, tx-packet) cached in Redis (iface_counters::<dev_id>).
+
+    Returns the set of interface names whose rates were computed from counters this poll.
+    Interfaces not in the set (cold start, counter reset, missing counters) need a
+    monitor-traffic fallback.
+
+    read_at: when the counters were read. The rate divides the counter delta by the time
+    between two reads, so the stamp must not include the Redis round trip that follows.
+    """
+    if not dev_id or not interfaces:
+        return set()
+    read_at = time.time() if read_at is None else read_at
+    try:
+        reddb = RedisDB({"dev_id": dev_id})
+        prev_counters = reddb.get_cached_counters(dev_id)
+        new_counters, valid = traffic_math.compute_interface_rates(prev_counters, interfaces, read_at)
+        if new_counters:
+            reddb.set_cached_counters(dev_id, new_counters, ttl=1800)
+        return valid
+    except Exception as e:
+        log.error(f"Error calculating interface rates for dev {dev_id}: {e}")
+        return set()
+
+def get_traffic(router, interfaces):
+    """Instantaneous rates via /interface/monitor-traffic (fallback source only)."""
+    traffic = {}
+    clean_interfaces = [
+        i for i in interfaces
+        if i and i != 'aggregate'
+        and ',' not in i
+        and not i.startswith(traffic_math.DYNAMIC_NAME_PREFIXES)
+        and '<' not in i and '>' not in i
+    ]
+    # Small chunks: large monitor-traffic batches time out on busy PPPoE/VPN routers.
+    chunk_size = 15
+    for i in range(0, len(clean_interfaces), chunk_size):
+        chunk = clean_interfaces[i:i + chunk_size]
+        chunk_str = ",".join(chunk)
+        params = {'interface': chunk_str, 'once': b' '}
+        try:
+            results = tuple(router.api('/interface/monitor-traffic', **params))
+            for row in results:
+                name = row.get('name')
+                if name:
+                    traffic[name] = {
+                        'rx-packets-per-second': row.get('rx-packets-per-second', 0),
+                        'rx-bits-per-second': row.get('rx-bits-per-second', 0),
+                        'fp-rx-packets-per-second': row.get('fp-rx-packets-per-second', 0),
+                        'fp-rx-bits-per-second': row.get('fp-rx-bits-per-second', 0),
+                        'rx-drops-per-second': row.get('rx-drops-per-second', 0),
+                        'rx-errors-per-second': row.get('rx-errors-per-second', 0),
+                        'tx-packets-per-second': row.get('tx-packets-per-second', 0),
+                        'tx-bits-per-second': row.get('tx-bits-per-second', 0),
+                        'fp-tx-packets-per-second': row.get('fp-tx-packets-per-second', 0),
+                        'fp-tx-bits-per-second': row.get('fp-tx-bits-per-second', 0),
+                        'tx-drops-per-second': row.get('tx-drops-per-second', 0),
+                        'tx-queue-drops-per-second': row.get('tx-queue-drops-per-second', 0),
+                        'tx-errors-per-second': row.get('tx-errors-per-second', 0),
+                    }
+        except Exception as e:
+            log.error(f"get_traffic error for interfaces {chunk_str}: {e}")
+    return traffic
 
 def get_interface_list(interfaces):
-   interfaces=list(interfaces.keys())
-   return interfaces
+    interfaces = list(interfaces.keys())
+    return interfaces
 
-def mergeDictionary(dict_1, dict_2):
+RATE_KEYS = ('rx-bits-per-second', 'tx-bits-per-second', 'rx-packets-per-second', 'tx-packets-per-second')
+
+def mergeDictionary(dict_1, dict_2, counter_valid=None):
+    """Merge /interface/print data (dict_1) with monitor-traffic data (dict_2), keyed by
+    the real interface name (never default-name: renamed ports would collide).
+
+    Rate source per interface: counter-based rate when the interface is in counter_valid
+    (even if that rate is 0 = idle), otherwise the monitor-traffic value, otherwise 0.
+    """
+    counter_valid = counter_valid or set()
     dict_3 = {}
-    keys=list(dict_1.keys())
+    keys = list(dict_1.keys())
     keys.extend(x for x in list(dict_2.keys()) if x not in keys)
     for key in keys:
         if key in dict_1 and key in dict_2:
-            new_key=key
-            if dict_1[key].get('default-name',False):
-                if dict_1[key]['default-name']!=new_key:
-                    new_key=dict_1[key].get('default-name',False)
-            dict_3[new_key] = {**dict_2[key] , **dict_1[key]}
+            merged = {**dict_2[key], **dict_1[key]}
+            if key not in counter_valid:
+                for rk in RATE_KEYS:
+                    merged[rk] = dict_2[key].get(rk, 0) or 0
+            dict_3[key] = merged
+        elif key in dict_1:
+            dict_3[key] = {**dict_1[key]}
         else:
-            if key in dict_1:
-                dict_3[key] = {**dict_1[key]}
-            else:
-                dict_3[key] = {**dict_2[key]}
+            dict_3[key] = {**dict_2[key]}
     return dict_3
 
-def get_network_data(router):
-   interfaces=get_interfaces_counters(router)
-   interfaces_list=get_interface_list(interfaces)
-   traffic=get_traffic(router,interfaces_list)
-   return mergeDictionary(interfaces,traffic)
+def get_network_data(router, dev_id=None):
+    """Interface table with per-interface rates.
+
+    Steady state: rates come from counter deltas only (one /interface/print call).
+    /interface/monitor-traffic is only called for interfaces without a valid counter
+    baseline (first poll after start/upgrade, counter reset, or no stats support).
+    """
+    interfaces = get_interfaces_counters(router)
+    read_at = time.time()
+    counter_valid = calculate_interface_rates(dev_id, interfaces, read_at) if dev_id else set()
+    fallback = traffic_math.monitor_traffic_candidates(interfaces, counter_valid)
+    traffic = get_traffic(router, fallback) if fallback else {}
+    return mergeDictionary(interfaces, traffic, counter_valid)
 
 def check_or_fix_event(events,eventtype,detail,comment=False):
     if comment:
@@ -297,10 +372,152 @@ def check_or_fix_event(events,eventtype,detail,comment=False):
     else:
         return False
 
-def grab_device_data(dev, q, sysconfig_flags=None):
+def record_offline_zeros(dev):
+    """Write 0 to the device's traffic rate sensors for this poll (device unreachable or
+    API failed) so charts show real downtime. Non-traffic sensors are left as gaps."""
+    try:
+        try:
+            sensors = json.loads(dev.sensors) if dev.sensors else []
+        except Exception:
+            sensors = []
+        zero_keys = traffic_math.offline_zero_sensors(sensors)
+        reddb = RedisDB({"dev_id": dev.id, "keys": zero_keys})
+        reddb.add_dev_data({k: 0.0 for k in zero_keys})
+    except Exception as e:
+        log.warning(f"Could not record zero data for offline dev {getattr(dev, 'id', '?')}: {e}")
+
+def fetch_reboot_reason(router, default):
+    """Newest system log line explaining a reboot (topics may be 'system,error,critical',
+    'system,info', ...). Falls back to default."""
+    try:
+        entries = list(router.api.path('/log'))
+    except Exception as e:
+        log.warning(f"Could not fetch reboot log: {e}")
+        return default
+    return traffic_math.pick_reboot_reason(entries, default)
+
+# ---------------------------------------------------------------------------
+# Poller API-options cache
+# Building API options costs ~4-5 SQL queries + 3 decryptions per device (default
+# credentials, PAM credential resolution, port). The poller does it for every device every
+# minute. Options are cached per process for CREDENTIAL_CACHE_SECONDS; a failed login with
+# cached options rebuilds them immediately (password rotated by vault / edited by admin).
+CREDENTIAL_CACHE_SECONDS = int(getattr(config, "CREDENTIAL_CACHE_SECONDS", 300) or 0)
+_api_options_cache = {}
+
+
+def _api_options_key(dev):
+    return (dev.id, dev.ip, str(getattr(dev, 'port', '') or ''), bool(getattr(dev, 'ssl', False)),
+            getattr(dev, 'user_name', None), getattr(dev, 'password', None))
+
+
+def get_api_options_cached(dev, now=None):
+    """Returns (options, from_cache). Opens and releases its own DB connection only on a miss."""
+    now = time.time() if now is None else now
+    key = _api_options_key(dev)
+    hit = _api_options_cache.get(dev.id)
+    if CREDENTIAL_CACHE_SECONDS > 0 and hit and hit[0] == key and (now - hit[1]) < CREDENTIAL_CACHE_SECONDS:
+        return dict(hit[2]), True
+    with database.connection_context():
+        options = build_api_options(dev)
+    if CREDENTIAL_CACHE_SECONDS > 0:
+        _api_options_cache[dev.id] = (key, now, dict(options))
+    return options, False
+
+
+def invalidate_api_options(dev_id):
+    _api_options_cache.pop(dev_id, None)
+
+
+def connect_router_for_poll(dev):
+    """RouterOS API connection for the poller. A failure with cached options (e.g. password
+    just rotated) is retried once with freshly built options."""
+    options, from_cache = get_api_options_cached(dev)
+    router = RouterOSCheckResource(options)
+    try:
+        router.api  # RouterOSCheckResource connects lazily: force the login here
+        return router
+    except Exception:
+        invalidate_api_options(dev.id)
+        close_router(router)
+        if not from_cache:
+            raise
+        options, _ = get_api_options_cached(dev)
+        router = RouterOSCheckResource(options)
+        router.api
+        return router
+
+
+# ---------------------------------------------------------------------------
+# Static (rarely-changing) device info cache for the poller
+# routerboard, identity and wireless mode change rarely but cost 3 API commands per device
+# per minute; syslog/RADIUS enforcement costs 2-5 more. They are refreshed every
+# STATIC_POLL_SECONDS (default 300, 0 = every poll) and immediately after a reboot, while a
+# firmware update is pending/running, or after the device was unreachable.
+STATIC_POLL_SECONDS = int(getattr(config, "STATIC_POLL_SECONDS", 300) or 0)
+_static_cache = {}
+
+
+class _SkipStatic(Exception):
+    pass
+
+
+def invalidate_static_info(dev_id):
+    _static_cache.pop(dev_id, None)
+
+
+def static_refresh_due(dev, now=None):
+    now = time.time() if now is None else now
+    if STATIC_POLL_SECONDS <= 0:
+        return True
+    if getattr(dev, 'status', None) in ('updating', 'rebooting') or getattr(dev, 'firmware_to_install', None):
+        return True
+    hit = _static_cache.get(dev.id)
+    return not hit or (now - hit['at']) >= STATIC_POLL_SECONDS
+
+
+def _read_static_info(router):
+    info = {'routerboard': None, 'identity': {}, 'wifi_result': None, 'device_type': 'router'}
+    try:
+        rb = tuple(router.api.path("/system/routerboard"))
+        info['routerboard'] = dict(rb[0]) if rb else None
+    except Exception as e:
+        if 'no such command' not in str(e):
+            log.error(e)
+    ident = tuple(router.api.path("/system/identity"))
+    info['identity'] = dict(ident[0]) if ident else {}
+    try:
+        wifi_results = tuple(router.api.path("/interface/wireless"))
+        wifi_result = dict(wifi_results[0])
+        info['wifi_result'] = wifi_result
+        mode = wifi_result.get('mode')
+        if mode in ['ap-bridge', 'bridge', 'wds-slave']:
+            info['device_type'] = mode
+        elif mode in ['station', 'station-wds', 'station-pseudobridge', 'station-pseudobridge-clone', 'station-bridge']:
+            info['device_type'] = 'station'
+        elif mode in ['alignment-only', 'nstreme-dual-slave']:
+            info['device_type'] = 'special'
+    except Exception:
+        pass
+    return info
+
+
+def get_static_info(dev, router, refresh=False, now=None):
+    now = time.time() if now is None else now
+    hit = _static_cache.get(dev.id)
+    if hit and not refresh:
+        return hit['info']
+    info = _read_static_info(router)
+    _static_cache[dev.id] = {'at': now, 'info': info}
+    return info
+
+
+def grab_device_data(dev, q, sysconfig_flags=None, events_map=None):
     max_attempts = 3
     attempts = 0
-    port=get_device_port(dev)
+    # Release the DB connection right away: never hold it across router I/O.
+    with database.connection_context():
+        port=get_device_port(dev)
     success = False
     time_to_wait=0.1
     while attempts < max_attempts:
@@ -312,30 +529,29 @@ def grab_device_data(dev, q, sysconfig_flags=None):
         time_to_wait += 0.1
     if success:
         # get all device events which src is "Data Puller" and status is 0
-        with database.connection_context():
-            events = list(db_events.get_events_by_src_and_status("Data Puller", 0, dev.id).dicts())
-            check_or_fix_event(events, "connection", "Unreachable")
-        options=build_api_options(dev)
+        if events_map is not None:
+            events = events_map.get(dev.id, [])
+        else:
+            with database.connection_context():
+                events = list(db_events.get_events_by_src_and_status("Data Puller", 0, dev.id).dicts())
+        if events:
+            with database.connection_context():
+                check_or_fix_event(events, "connection", "Unreachable")
         router = None
         try:
-            router=RouterOSCheckResource(options)
-            _installed_version=router._get_routeros_version()
+            router=connect_router_for_poll(dev)
+            options=router._cmd_options
+            # /system/resource once per poll (uptime, cpu, memory, version, arch).
             call = router.api.path(
               "/system/resource"
             )
             results = tuple(call)
-            result: Dict[str, str] = results[0]
+            result: Dict[str, str] = dict(results[0])
             try:
-                call = router.api.path(
-                "/system/routerboard"
-                )
-                routerboard = tuple(call)
-                routerboard: Dict[str, str] = routerboard[0]
-                result.update(routerboard)
-            except Exception as e:
-                if 'no such command' not in str(e):
-                    log.error(e)
-                pass
+                _installed_version = _version_from_resource(result)
+            except Exception:
+                _installed_version = router._get_routeros_version()
+            resource_row = dict(result)
             try:
                 call = router.api.path(
                   "/system/health"
@@ -344,37 +560,26 @@ def grab_device_data(dev, q, sysconfig_flags=None):
             except Exception as e:
                 log.warning("Failed to fetch /system/health for {}: {}".format(dev.ip, e))
                 health = ()
-            
-            call = router.api.path(
-                    "/system/identity"
-                )
-            name = tuple(call)
-            name: Dict[str, str] = name[0]
-            result.update(name)
-            try:
-                call = router.api.path(
-                    "/interface/wireless"
-                )
-                wifi_results = tuple(call)
-                wifi_result: Dict[str, str] = wifi_results[0]
-                device_type='router'
-                if wifi_result['mode'] in ['ap-bridge','bridge','wds-slave']:
-                    device_type=wifi_result['mode']
-                elif wifi_result['mode'] in ['station','station-wds' , 'station-pseudobridge' , 'station-pseudobridge-clone' , 'station-bridge']:
-                    device_type='station'
-                elif wifi_result['mode'] in  ['alignment-only','nstreme-dual-slave']:
-                    device_type='special'
-                else:
-                    device_type='router'
-            except:
-                device_type='router'
+
+            # Rarely-changing data (routerboard, identity, wireless mode): every
+            # STATIC_POLL_SECONDS, or immediately when the device is updating/rebooting.
+            static_refresh = static_refresh_due(dev)
+            static = get_static_info(dev, router, refresh=static_refresh)
+            if static.get('routerboard'):
+                result.update(static['routerboard'])
+            result.update(static.get('identity') or {})
+            device_type = static.get('device_type', 'router')
+            wifi_result = static.get('wifi_result')
         except Exception as e:
             log.error(e)
             log.warning(dev.ip)
             q.put({"id": dev.id,"detail":"API Connection","reason":e,"done":False})
+            invalidate_static_info(dev.id)
+            record_offline_zeros(dev)
             return True
-        with database.connection_context():
-            check_or_fix_event(events, "connection", "API Connection")
+        if events:
+            with database.connection_context():
+                check_or_fix_event(events, "connection", "API Connection")
         try:
             keys=["free-memory","cpu-load","free-hdd-space"]
             if len(health):
@@ -440,15 +645,22 @@ def grab_device_data(dev, q, sysconfig_flags=None):
             log.error(health)
             q.put({"id": dev.id,"reason":"Could not health data from device","detail":"Get Health","done":False})
             return True
-        with database.connection_context():
-            check_or_fix_event(events, "connection", "Get Health")
+        if events:
+            with database.connection_context():
+                check_or_fix_event(events, "connection", "Get Health")
         try:
             # arch=result['architecture-name']
             try:
-                is_availbe , current , arch , upgrade_availble = check_update(options, router=router)
-                dev.update_availble=is_availbe
-                dev.upgrade_availble=upgrade_availble
-                dev.current_firmware=current
+                is_availbe , current , arch , upgrade_availble = check_update(
+                    options, router=router, sysconfig_flags=sysconfig_flags,
+                    prefetched={'resource': resource_row, 'routerboard': static.get('routerboard')})
+                if dev.update_availble != is_availbe:
+                    dev.update_availble = is_availbe
+                if dev.upgrade_availble != upgrade_availble:
+                    dev.upgrade_availble = upgrade_availble
+                cur_str = str(current) if current else ""
+                if dev.current_firmware != cur_str:
+                    dev.current_firmware = cur_str
             except:
                 pass
             if sysconfig_flags:
@@ -460,7 +672,7 @@ def grab_device_data(dev, q, sysconfig_flags=None):
                     force_syslog = True if db_sysconfig.get_sysconfig('force_syslog') == "True" else False
                     force_radius = True if db_sysconfig.get_sysconfig('force_radius') == "True" else False
                     rad_secret = db_sysconfig.get_sysconfig('rad_secret') if force_radius else ""
-            if force_radius:
+            if force_radius and static_refresh:
                 try:
                     peer_ip = resolve_peer_ip(dev)
                     secret = rad_secret
@@ -472,16 +684,23 @@ def grab_device_data(dev, q, sysconfig_flags=None):
                         db_events.config_event(dev.id, 'Data Puller', 'radius configuration', 'Error', 0, "Force radius Failed")
                     pass
             try:
+                if not static_refresh:
+                    # Syslog/RADIUS enforcement runs with the static refresh cadence.
+                    raise _SkipStatic()
                 syslog_configured = check_syslog_config(dev, router, force_syslog)
                 if dev.syslog_configured != syslog_configured:
                     dev.syslog_configured = syslog_configured
                 with database.connection_context():
                     check_or_fix_event(events, "config", "syslog configuration")
+            except _SkipStatic:
+                pass
             except:
                 with database.connection_context():
                     db_events.config_event(dev.id, 'Data Puller', 'syslog configuration', 'Error', 0, "Force SysLog Failed")
                 pass
-            dev.current_firmware=_installed_version
+            inst_ver_str = str(_installed_version) if _installed_version else ""
+            if inst_ver_str and dev.current_firmware != inst_ver_str:
+                dev.current_firmware = inst_ver_str
             try:
                 if dev.firmware_to_install and _installed_version:
                     if RouterOSVersion(_installed_version) >= RouterOSVersion(dev.firmware_to_install):
@@ -496,28 +715,67 @@ def grab_device_data(dev, q, sysconfig_flags=None):
                             check_or_fix_event(events, "firmware", "Firmware repositpry")
             except Exception as e:
                 log.warning(f"Error checking firmware completion in grab_device_data: {e}")
-            dev.uptime=result['uptime']
-            dev.router_type=device_type
-            if dev.name!=result['name']:
-                dev.name=result['name']
-            if device_type!='router':
-                dev.wifi_config=json.dumps(wifi_result)
+            new_uptime = result.get('uptime', '')
+            curr_sec = parse_routeros_uptime(new_uptime)
+            prev_sec = parse_routeros_uptime(dev.uptime)
 
-            interfaces=get_network_data(router)
-            interfaces_keys=interfaces.keys()
+            # Monotonic Uptime Guard & Unexpected Reboot Detection Invariant:
+            # 1. If curr_sec < prev_sec on a running system, an unexpected reboot occurred (power cut, CPU temp, crash).
+            # 2. If dev.uptime is empty or steady-state cadence (>= 600s / 10 mins) reached, update uptime in DB.
+            is_reboot = bool(dev.uptime and curr_sec < prev_sec)
+            cadence_reached = bool(not dev.uptime or (curr_sec - prev_sec >= 600) or is_reboot)
 
-            data={}
+            if is_reboot:
+                invalidate_static_info(dev.id)  # re-read routerboard/identity/wireless next poll
+                was_expected = dev.status in ('updating', 'rebooting')
+                old_uptime_str = dev.uptime
+                dev.uptime = new_uptime
+
+                # Fetch detailed reboot reason from RouterOS system logs
+                reboot_reason = f"Device reboot detected (uptime reset from {old_uptime_str} to {new_uptime})"
+                if not was_expected:
+                    reboot_reason = fetch_reboot_reason(router, reboot_reason)
+
+                    with database.connection_context():
+                        db_events.state_event(dev.id, "Data Puller", "Router Rebooted", "info", 1, reboot_reason)
+                    log.info(f"Reboot detected on dev {dev.id} ({dev.ip}): {reboot_reason}")
+            elif cadence_reached:
+                dev.uptime = new_uptime
+
+            if dev.router_type != device_type:
+                dev.router_type = device_type
+            if dev.name != result.get('name'):
+                dev.name = result.get('name')
+            if device_type != 'router':
+                new_wifi = json.dumps(wifi_result, sort_keys=True)
+                if dev.wifi_config != new_wifi:
+                    dev.wifi_config = new_wifi
+
+            interfaces = get_network_data(router, dev_id=dev.id)
+            interfaces_keys = list(interfaces.keys())
+
+            data = {}
             for key in keys:
                 if key in result:
-                    data[key]=result[key]
+                    data[key] = result[key]
                 else:
-                    data[key]=0
+                    data[key] = 0
+
+            # Device wire totals (bridge/bond members counted, containers/tunnels not).
+            data.update(traffic_math.compute_device_totals(interfaces))
+
             for intkeys in interfaces_keys:
-                keys.extend(["rx-"+intkeys,"tx-"+intkeys,"rxp-"+intkeys,"txp-"+intkeys])
-                data["rx-"+intkeys]=interfaces[intkeys]['rx-bits-per-second']
-                data["tx-"+intkeys]=interfaces[intkeys]['tx-bits-per-second']
-                data["rxp-"+intkeys]=interfaces[intkeys]['rx-packets-per-second']
-                data["txp-"+intkeys]=interfaces[intkeys]['tx-packets-per-second']
+                iface_info = interfaces[intkeys]
+                # Dynamic client tunnels are not registered as permanent TimeSeries / dev.sensors
+                if traffic_math.is_dynamic_interface(intkeys, iface_info):
+                    continue
+                keys.extend(["rx-" + intkeys, "tx-" + intkeys, "rxp-" + intkeys, "txp-" + intkeys])
+                data["rx-" + intkeys] = iface_info.get('rx-bits-per-second', 0) or 0
+                data["tx-" + intkeys] = iface_info.get('tx-bits-per-second', 0) or 0
+                data["rxp-" + intkeys] = iface_info.get('rx-packets-per-second', 0) or 0
+                data["txp-" + intkeys] = iface_info.get('tx-packets-per-second', 0) or 0
+
+            keys.extend(["rx-total", "tx-total", "rxp-total", "txp-total"])
             wireless_keys,wireless_data=[],[]
             neighbours=[]
             if ISPRO:
@@ -541,18 +799,23 @@ def grab_device_data(dev, q, sysconfig_flags=None):
             reddb=RedisDB(redopts)
             
             with database.connection_context():
-                current_sensors = set(json.loads(dev.sensors)) if dev.sensors else set()
+                try:
+                    current_sensors = set(json.loads(dev.sensors)) if dev.sensors else set()
+                except Exception:
+                    current_sensors = set()
                 new_sensors = set(keys)
                 
                 # Only trigger if we've found a brand new sensor we've never seen before
                 if new_sensors - current_sensors:
                     log.info("updating keys for device {}".format(dev.id))
                     # Accumulate sensors so we don't forget temporarily disconnected ones
-                    updated_sensors = list(current_sensors.union(new_sensors))
+                    updated_sensors = sorted(current_sensors.union(new_sensors))
                     dev.sensors = json.dumps(updated_sensors)
                     reddb.dev_create_keys()
-                dev.save()
-                check_or_fix_event(events, "connection", "DB Write")
+                if dev.is_dirty():
+                    dev.save(only=dev.dirty_fields)
+                if events:
+                    check_or_fix_event(events, "connection", "DB Write")
             reddb.add_dev_data(data)
         except Exception as e:
             log.error(e)
@@ -563,6 +826,8 @@ def grab_device_data(dev, q, sysconfig_flags=None):
             close_router(router)
     else:
         q.put({"id": dev.id, "reason":"device not reachable with port {}".format(port),"detail":"Unreachable", "done":False})
+        invalidate_static_info(dev.id)
+        record_offline_zeros(dev)
         return True
     q.put({"id": dev.id,"done":True,'data':data})
     return True
@@ -845,40 +1110,76 @@ def FourcePermToRouter(dev,perm):
     finally:
         close_router(router)
 
-def check_update(options, router=False):
-    # Safe lookup of sysconfig with graceful fallbacks
-    try:
-        ofa_cfg = db_sysconfig.get_sysconfig('old_firmware_action')
-        ofa = ofa_cfg if ofa_cfg else "keep"
-    except Exception:
-        ofa = "keep"
+def _version_from_resource(resource):
+    """RouterOSVersion from a /system/resource row ('7.17 (stable)' -> 7.17)."""
+    return RouterOSVersion(str(resource.get("version", "")).partition(" ")[0])
+
+
+def check_update(options, router=False, sysconfig_flags=None, prefetched=None):
+    """(update_available, installed_version, arch, routerboard_upgrade).
+
+    prefetched: optional {'resource': dict, 'routerboard': dict|None} already read by the
+    caller in this poll - avoids re-reading /system/resource and /system/routerboard.
+    'routerboard': None means "no RouterBOARD" (CHR/x86) and is not re-queried.
+    """
+    # Safe lookup of sysconfig with cached flags or graceful fallbacks
+    if sysconfig_flags:
+        ofa = sysconfig_flags.get('old_firmware_action', 'keep')
+        cached_old_ver = sysconfig_flags.get('old_version')
+        cached_latest_ver = sysconfig_flags.get('latest_version')
+    else:
+        try:
+            with database.connection_context():
+                ofa_cfg = db_sysconfig.get_sysconfig('old_firmware_action')
+                ofa = ofa_cfg if ofa_cfg else "keep"
+        except Exception:
+            ofa = "keep"
+        cached_old_ver = None
+        cached_latest_ver = None
 
     own_router = False
     try:
-        if not router:
-            router = RouterOSCheckResource(options)
-            own_router = True
-        _installed_version = router._get_routeros_version()
+        if prefetched and prefetched.get('resource'):
+            _installed_version = _version_from_resource(prefetched['resource'])
+        else:
+            if not router:
+                router = RouterOSCheckResource(options)
+                own_router = True
+            _installed_version = router._get_routeros_version()
         try:
             if ofa == "keep" and _installed_version < RouterOSVersion('6.99.99'):
-                old_ver = db_sysconfig.get_sysconfig('old_version')
+                if cached_old_ver is not None:
+                    old_ver = cached_old_ver
+                else:
+                    with database.connection_context():
+                        old_ver = db_sysconfig.get_sysconfig('old_version')
                 _latest_version = RouterOSVersion(str(old_ver)) if old_ver else False
             else:
-                latest_ver = db_sysconfig.get_sysconfig('latest_version')
+                if cached_latest_ver is not None:
+                    latest_ver = cached_latest_ver
+                else:
+                    with database.connection_context():
+                        latest_ver = db_sysconfig.get_sysconfig('latest_version')
                 _latest_version = RouterOSVersion(str(latest_ver)) if latest_ver else False
         except Exception:
             _latest_version = False
 
-        call = router.api.path("/system/resource")
-        results = tuple(call)
-        result: Dict[str, str] = results[0] if results else {}
+        if prefetched and prefetched.get('resource'):
+            result = dict(prefetched['resource'])
+        else:
+            call = router.api.path("/system/resource")
+            results = tuple(call)
+            result: Dict[str, str] = results[0] if results else {}
         arch = result.get('architecture-name', '')
 
         # RouterBOARD inspection (safe against virtual, CHR, and empty responses)
         upgrade = False
         try:
-            call_rb = router.api.path("/system/routerboard")
-            rb_results = tuple(call_rb)
+            if prefetched and 'routerboard' in prefetched:
+                rb_results = (prefetched['routerboard'],) if prefetched['routerboard'] else ()
+            else:
+                call_rb = router.api.path("/system/routerboard")
+                rb_results = tuple(call_rb)
             if rb_results:
                 result.update(rb_results[0])
                 current_rb = result.get('current-firmware')
