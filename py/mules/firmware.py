@@ -9,6 +9,7 @@ import time
 import concurrent.futures
 from libs import util, firm_lib
 from libs.db import db_tasks, db_device, db_sysconfig
+from libs.db.db import database, tune_process_db_pool
 import config
 import logging
 import queue
@@ -22,41 +23,87 @@ try:
 except ImportError:
     ISPRO = False
 
-# Configuration
-MAX_CONCURRENT_THREADS = getattr(config, "FIRMWARE_CONCURRENCY", 40)
+def get_dynamic_firmware_workers(num_devices):
+    """
+    Scale concurrent firmware uploads dynamically based on device count.
+    Firmware packages are 15-35MB each; excessive parallel uploads choke WAN bandwidth
+    and exhaust DB connections.
+    """
+    base_limit = getattr(config, "FIRMWARE_CONCURRENCY", 30)
+    if num_devices <= 20:
+        workers = min(num_devices, 8)
+    elif num_devices <= 100:
+        workers = min(num_devices, 15)
+    elif num_devices <= 500:
+        workers = min(num_devices, 25)
+    else:
+        workers = min(num_devices, 35)
+    return max(1, min(workers, base_limit))
+
+FIRMWARE_PROGRESS_LOG_SECONDS = 300
+
+
+def _wait_with_progress(futures, label):
+    """Wait for ALL firmware jobs to finish - deliberately without a deadline, because
+    abandoning a router mid-upgrade is worse than a slow batch. Every few minutes the
+    devices still in progress are logged, and worker exceptions are logged (they were
+    silently dropped before)."""
+    pending = set(futures)
+    started = time.time()
+    while pending:
+        done, pending = concurrent.futures.wait(pending, timeout=FIRMWARE_PROGRESS_LOG_SECONDS)
+        for f in done:
+            exc = f.exception()
+            if exc is not None:
+                dev = futures[f]
+                log.error(f"{label} worker failed for dev {getattr(dev, 'id', '?')} ({getattr(dev, 'ip', '')}): {exc}")
+        if pending:
+            still = [futures[f] for f in pending]
+            log.info(f"{label}: {len(still)} device(s) still in progress after {int(time.time() - started)}s: "
+                     f"{[getattr(d, 'ip', '?') for d in still[:20]]}")
+
 
 def process_firmware_updates(devices):
-    """Process firmware updates using thread pool"""
+    """Process firmware updates using a bounded thread pool (no time limit: an upgrade in
+    progress is never abandoned; progress is logged instead)."""
     if not devices:
         return
     
-    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT_THREADS) as executor:
-        futures = []
-        for dev in devices:
+    tune_process_db_pool(role="firmware", num_devices=len(devices))
+    workers = get_dynamic_firmware_workers(len(devices))
+    
+    def _firmware_worker(dev):
+        try:
             q = queue.Queue()
             if ISPRO:
-                future = executor.submit(utilpro.update_device, dev, {"version_to_install": dev.firmware_to_install}, False, q)
+                utilpro.update_device(dev, {"version_to_install": dev.firmware_to_install}, False, q)
             else:
-                future = executor.submit(firm_lib.update_device, dev, q)
-            futures.append(future)
-        
-        # Wait for all tasks to complete
-        concurrent.futures.wait(futures)
+                firm_lib.update_device(dev, q)
+        finally:
+            database.close()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(_firmware_worker, dev): dev for dev in devices}
+        _wait_with_progress(futures, "Firmware update")
 
 def process_routerboot_upgrades(devices):
-    """Process RouterBOOT upgrades using thread pool"""
+    """Process RouterBOOT upgrades using a bounded thread pool (no time limit, progress logged)."""
     if not devices:
         return
     
-    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_CONCURRENT_THREADS) as executor:
-        futures = []
-        for dev in devices:
+    tune_process_db_pool(role="firmware", num_devices=len(devices))
+    workers = get_dynamic_firmware_workers(len(devices))
+
+    def _routerboot_worker(dev):
+        try:
             q = queue.Queue()
-            future = executor.submit(firm_lib.upgrade_routerboot, dev, q)
-            futures.append(future)
-        
-        # Wait for all tasks to complete
-        concurrent.futures.wait(futures)
+            firm_lib.upgrade_routerboot(dev, q)
+        finally:
+            database.close()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(_routerboot_worker, dev): dev for dev in devices}
+        _wait_with_progress(futures, "RouterBOOT upgrade")
 
 def updater():
     task = db_tasks.firmware_service_status()
@@ -136,6 +183,7 @@ def updater():
     finally:
         task.status = 0
         task.save()
+        database.close()
     return False
 
 def main():
