@@ -40,6 +40,13 @@ class RouterOSVersion(object):
         self._cmp_pre_names = ("pre")
 
     def __eq__(self, other):
+        if isinstance(other, str):
+            try:
+                other = RouterOSVersion(other)
+            except Exception:
+                return False
+        elif not isinstance(other, RouterOSVersion):
+            return False
         for attr_name in self._cmp_attribute_names:
             if getattr(self, attr_name) != getattr(other, attr_name):
                 return False
@@ -51,6 +58,8 @@ class RouterOSVersion(object):
         return self > other or self == other
 
     def __gt__(self, other):
+        if isinstance(other, str):
+            other = RouterOSVersion(other)
         for attr_name in self._cmp_attribute_names:
             if getattr(self, attr_name) > getattr(other, attr_name):
                 return True
@@ -59,13 +68,15 @@ class RouterOSVersion(object):
         if getattr(self, "pre") > getattr(other, "pre"):
             return True
         if getattr(self, "pre") < getattr(other, "pre"):
-                return False
+            return False
         return False
 
     def __le__(self, other):
         return self < other or self == other
 
     def __lt__(self, other):
+        if isinstance(other, str):
+            other = RouterOSVersion(other)
         for attr_name in self._cmp_attribute_names:
             if getattr(self, attr_name) < getattr(other, attr_name):
                 return True
@@ -74,7 +85,7 @@ class RouterOSVersion(object):
         if getattr(self, "pre") < getattr(other, "pre"):
             return True
         if getattr(self, "pre") > getattr(other, "pre"):
-                return False
+            return False
         return False
 
     def __repr__(self):

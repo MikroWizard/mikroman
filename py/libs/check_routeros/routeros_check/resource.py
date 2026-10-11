@@ -8,6 +8,57 @@ from typing import Any, Dict, List, Optional, Union
 
 import librouteros
 import librouteros.query
+import librouteros.connections
+import librouteros.exceptions
+
+SOCKET_READ_CHUNK = 65536
+
+
+def _close_quietly(sock):
+    try:
+        sock.close()
+    except Exception:
+        pass
+
+
+# Hardening + speed for librouteros SocketTransport.read:
+#  * EOF / abrupt peer disconnection raises ConnectionClosed (librouteros spins forever).
+#  * Buffered: librouteros reads every API word with 2-3 tiny reads (length prefix, then
+#    the word). Unbuffered, each is a recv() syscall and a GIL release/re-acquire; with
+#    the poller's 100+ threads those GIL hand-offs cost more CPU than the polling itself
+#    (load test, 1,500 devices: CPU per device roughly tripled from 40 to 120 threads).
+#    One recv() now fills a per-connection buffer that serves many words.
+#  * A timeout or socket error closes the socket: the API stream is out of sync after a
+#    half-read reply (a late reply would be taken as the answer to the next command), and
+#    every further command on it would wait for its own timeout. Closed, they fail at once.
+def _safe_socket_read(self, length: int) -> bytes:
+    buf = self.__dict__.get('_mw_rbuf')
+    if buf is None:
+        buf = self._mw_rbuf = bytearray()
+        self._mw_rpos = 0
+    pos = self._mw_rpos
+    while len(buf) - pos < length:
+        if pos:
+            del buf[:pos]
+            pos = self._mw_rpos = 0
+        try:
+            chunk = self.sock.recv(SOCKET_READ_CHUNK)
+        except OSError:
+            _close_quietly(self.sock)
+            raise
+        if not chunk:
+            _close_quietly(self.sock)
+            raise librouteros.exceptions.ConnectionClosed('Connection unexpectedly closed.')
+        buf += chunk
+    data = bytes(buf[pos:pos + length])
+    pos += length
+    if pos >= len(buf):
+        buf.clear()
+        pos = 0
+    self._mw_rpos = pos
+    return data
+
+librouteros.connections.SocketTransport.read = _safe_socket_read
 import nagiosplugin
 
 from .helper import logger, RouterOSVersion
