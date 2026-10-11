@@ -26,7 +26,11 @@ def migrate(migrator, database, fake=False, **kwargs):
         logging.error(f"Failed to load KEK: {e}")
         raise e
 
-    devices_to_migrate = Devices.select().where(
+    # Explicit columns: the Devices model also has columns added by later migrations
+    # (e.g. 058 parent_id / protocol_config). SELECT * via the model fails on a fresh install.
+    devices_to_migrate = Devices.select(
+        Devices.id, Devices.user_name, Devices.password, Devices.owner, Devices.device_type
+    ).where(
         Devices.credential_migrated == False,
         Devices.user_name.is_null(False),
         Devices.user_name != ''
@@ -63,8 +67,7 @@ def migrate(migrator, database, fake=False, **kwargs):
                 modified=now
             )
 
-            dev.credential_migrated = True
-            dev.save()
+            Devices.update(credential_migrated=True).where(Devices.id == dev.id).execute()
             
             success_count += 1
         except Exception as e:

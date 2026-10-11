@@ -155,7 +155,7 @@ def migrate(migrator, database, fake=False, **kwargs):
     # 2. terminal_policies_pro table additions (safe if table exists in Pro, ignored in Free)
     dlp_json_str = json.dumps(DEFAULT_SESSION_DLP).replace("'", "''")
     migrator.sql(f"""
-        DO 30808
+        DO $$
         BEGIN
             IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'terminal_policies_pro') THEN
                 ALTER TABLE terminal_policies_pro
@@ -165,7 +165,7 @@ def migrate(migrator, database, fake=False, **kwargs):
                 SET session_dlp = '{dlp_json_str}'::jsonb
                 WHERE session_dlp IS NULL;
             END IF;
-        END 30808;
+        END $$;
     """)
 
     # 3. Ensure windows and generic brands exist
@@ -207,12 +207,12 @@ def rollback(migrator, database, fake=False, **kwargs):
         migrator.sql(f"DELETE FROM device_templates WHERE brand='{t['brand']}' AND os_type='{t['os_type']}' AND is_system=TRUE")
 
     migrator.sql("""
-        DO 30808
+        DO $$
         BEGIN
             IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'terminal_policies_pro') THEN
                 ALTER TABLE terminal_policies_pro DROP COLUMN IF EXISTS session_dlp;
             END IF;
-        END 30808;
+        END $$;
     """)
     migrator.sql("DROP INDEX IF EXISTS idx_devices_parent_id")
     migrator.sql("ALTER TABLE devices DROP COLUMN IF EXISTS protocol_config")
