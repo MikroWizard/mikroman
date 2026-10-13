@@ -21,10 +21,16 @@ REGEX_VERSION_PATTERN = r"""
 """
 
 
+# Pre-release order used by RouterOS: 7.16beta3 < 7.16rc1 < 7.16 (a release is newer than
+# any of its pre-releases).
+PRE_RELEASE_RANK = {"a": 0, "alpha": 0, "b": 1, "beta": 1, "pre": 2, "preview": 2, "c": 3, "rc": 3}
+RELEASE_RANK = 9
+
+
 class RouterOSVersion(object):
     def __init__(self, version_string: str):
         regex = re.compile(r"^\s*" + REGEX_VERSION_PATTERN + r"\s*$", re.VERBOSE | re.IGNORECASE)
-        m = regex.match(version_string)
+        m = regex.match(str(version_string))
         if not m:
             raise ValueError(f"Unable to parse version string: '{version_string}'")
 
@@ -32,61 +38,61 @@ class RouterOSVersion(object):
         self.pres = m.group("pre")
         if not self.pres:
             self.pres =""
-        
-        # At the moment we don't handle the pre releases like alpha, beta or rc
-        # We should try to work with major and minor version
+        pre_type = (m.group("pre_type") or "").lower()
+        self._pre_rank = PRE_RELEASE_RANK.get(pre_type, RELEASE_RANK) if pre_type else RELEASE_RANK
+        self._pre_serial = int(m.group("pre_serial") or 0) if pre_type else 0
 
         self._cmp_attribute_names = ("major", "minor", "patch")
         self._cmp_pre_names = ("pre")
 
+    def sort_key(self):
+        """(major, minor, patch, pre-release rank, pre-release number). Trailing zero
+        components do not matter (7.13 == 7.13.0) and a release sorts after its
+        pre-releases (7.15rc1 < 7.15)."""
+        return (self.major, self.minor, self.patch, self._pre_rank, self._pre_serial)
+
+    @staticmethod
+    def _coerce(other):
+        if isinstance(other, RouterOSVersion):
+            return other
+        return RouterOSVersion(str(other))
+
     def __eq__(self, other):
-        if isinstance(other, str):
-            try:
-                other = RouterOSVersion(other)
-            except Exception:
-                return False
-        elif not isinstance(other, RouterOSVersion):
+        try:
+            other = self._coerce(other)
+        except Exception:
             return False
-        for attr_name in self._cmp_attribute_names:
-            if getattr(self, attr_name) != getattr(other, attr_name):
-                return False
-            if getattr(self, "pre") != getattr(other, "pre"):
-                return False
-        return True
+        return self.sort_key() == other.sort_key()
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __hash__(self):
+        return hash(self.sort_key())
 
     def __ge__(self, other):
-        return self > other or self == other
+        return self.sort_key() >= self._coerce(other).sort_key()
 
     def __gt__(self, other):
-        if isinstance(other, str):
-            other = RouterOSVersion(other)
-        for attr_name in self._cmp_attribute_names:
-            if getattr(self, attr_name) > getattr(other, attr_name):
-                return True
-            if getattr(self, attr_name) < getattr(other, attr_name):
-                return False
-        if getattr(self, "pre") > getattr(other, "pre"):
-            return True
-        if getattr(self, "pre") < getattr(other, "pre"):
-            return False
-        return False
+        return self.sort_key() > self._coerce(other).sort_key()
 
     def __le__(self, other):
-        return self < other or self == other
+        return self.sort_key() <= self._coerce(other).sort_key()
 
     def __lt__(self, other):
-        if isinstance(other, str):
-            other = RouterOSVersion(other)
-        for attr_name in self._cmp_attribute_names:
-            if getattr(self, attr_name) < getattr(other, attr_name):
-                return True
-            if getattr(self, attr_name) > getattr(other, attr_name):
-                return False
-        if getattr(self, "pre") < getattr(other, "pre"):
-            return True
-        if getattr(self, "pre") > getattr(other, "pre"):
-            return False
-        return False
+        return self.sort_key() < self._coerce(other).sort_key()
+
+    @property
+    def is_prerelease(self) -> bool:
+        return self._pre_rank != RELEASE_RANK
+
+    def canonical(self) -> str:
+        """Version string as MikroTik publishes it: no trailing '.0' patch (7.13, not
+        7.13.0), pre-release suffix kept (7.16rc2). Used for repository folders and URLs."""
+        parts = list(self.release)
+        while len(parts) > 2 and parts[-1] == 0:
+            parts.pop()
+        return ".".join(str(v) for v in parts) + self.pres
 
     def __repr__(self):
         return f"{self.__class__.__name__}('{self}')"

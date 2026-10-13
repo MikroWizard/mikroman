@@ -68,6 +68,13 @@ def run_hooks(hooks, hook_type, device, template, context=None):
 def _execute_routeros_api_hook(hook, device, hook_type, context):
     out = {}
 
+    # post_disconnect 'restore' only has work when pre_connect changed something (it saved
+    # the original state under state_key): no API session otherwise.
+    if hook_type == "post_disconnect" and hook.get("action", "restore") == "restore":
+        state_key = hook.get("state_key")
+        if not state_key or not context.get(state_key):
+            return out
+
     # 1. Resolve export_flags from DB current_firmware (cached by datagrabber / util.py)
     if hook.get("capture_export_flags"):
         version_str = getattr(device, "current_firmware", None)

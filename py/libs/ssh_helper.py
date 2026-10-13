@@ -15,6 +15,12 @@ import logging
 log = logging.getLogger("SSH_HELPER")
 
 
+# A router that accepts the TCP connection and then stops answering must not block the
+# caller forever (firmware pre-update backup, cloner).
+SSH_CONNECT_TIMEOUT = 20
+SSH_COMMAND_TIMEOUT = 300   # seconds without output from the command (large /export on slow CPUs)
+
+
 class SSH_Helper(object):
     def __init__(self, options):
         self.dev_id = options.get('dev_id', False)
@@ -80,9 +86,12 @@ class SSH_Helper(object):
                 username=self.username,
                 password=self.password,
                 look_for_keys=False,
-                allow_agent=False
+                allow_agent=False,
+                timeout=SSH_CONNECT_TIMEOUT,
+                banner_timeout=SSH_CONNECT_TIMEOUT,
+                auth_timeout=SSH_CONNECT_TIMEOUT,
             )
-            _x, stdouts, _y = self.ssh.exec_command(" ".join(command))
+            _x, stdouts, _y = self.ssh.exec_command(" ".join(command), timeout=SSH_COMMAND_TIMEOUT)
             config = stdouts.read().decode().strip()
             # remove date/time in 1st line
             config = re.sub(r"^# \S+ \S+ by (.+)$", r'# by \1', config, flags=re.MULTILINE)
@@ -100,9 +109,12 @@ class SSH_Helper(object):
                 username=self.username,
                 password=self.password,
                 look_for_keys=False,
-                allow_agent=False
+                allow_agent=False,
+                timeout=SSH_CONNECT_TIMEOUT,
+                banner_timeout=SSH_CONNECT_TIMEOUT,
+                auth_timeout=SSH_CONNECT_TIMEOUT,
             )
-            _x, stdouts, _y = self.ssh.exec_command(command)
+            _x, stdouts, _y = self.ssh.exec_command(command, timeout=SSH_COMMAND_TIMEOUT)
             return stdouts.read().decode().strip()
         finally:
             self.close()
