@@ -45,8 +45,37 @@ DATABASE_PASSWORD = srvconf["PYSRV_DATABASE_PASSWORD"]
 DATABASE_POOL_SIZE = int(srvconf.get("PYSRV_DATABASE_POOL_SIZE", 20))
 # Database pool wait timeout in seconds when all connections are checked out.
 DATABASE_POOL_TIMEOUT = int(srvconf.get("PYSRV_DATABASE_POOL_TIMEOUT", 30))
+# Scheduled tasks (cron -> task_run.py, one process each) that may run at the same time.
+# Each gets a DB pool of 4; they are counted in the connection budget of every process.
+DB_CRON_JOBS = int(srvconf.get("PYSRV_DB_CRON_JOBS", 2))
 # Max concurrent threads for background task executors.
 MAX_CONCURRENT_THREADS = int(srvconf.get("PYSRV_MAX_CONCURRENT_THREADS", 10))
+# Parallel router sessions of one backup / snippet / sequence / execution job.
+# 0 = auto by job size (<=100 devices: MAX_CONCURRENT_THREADS, <=500: 25, more: 40).
+JOB_CONCURRENCY = int(srvconf.get("PYSRV_JOB_CONCURRENCY", 0))
+# Seconds a spooler job may start new devices. 0 = auto: spooler-harakiri - 300 s
+# (devices already running get the rest), so a big job returns partial results
+# instead of being killed by harakiri. Scheduled tasks have no limit.
+JOB_DEADLINE = int(srvconf.get("PYSRV_JOB_DEADLINE", 0))
+# MikroTik commands over the non-interactive SSH exec channel (one request, no prompt
+# handling, ~0.1 s instead of seconds per device): 'template' = only templates flagged
+# connection.is_non_interactive, 'all' = every MikroTik device, 'off' = never.
+MIKROTIK_EXEC = str(srvconf.get("PYSRV_MIKROTIK_EXEC", "template"))
+# Retention (libs/retention.py, run once a day by the firmware mule). 0 = keep forever.
+# Days of command_execution_log rows (every backup / snippet / command run).
+RETENTION_EXEC_LOG_DAYS = int(srvconf.get("PYSRV_RETENTION_EXEC_LOG_DAYS", 180))
+# Days of task_results rows (snippet, scan, bulk-add results).
+RETENTION_TASK_RESULTS_DAYS = int(srvconf.get("PYSRV_RETENTION_TASK_RESULTS_DAYS", 90))
+# Days of failed sequence history (successful runs are already pruned per device).
+RETENTION_SEQUENCE_HISTORY_DAYS = int(srvconf.get("PYSRV_RETENTION_SEQUENCE_HISTORY_DAYS", 90))
+# Config versions and backup rows older than these days are removed, except the newest
+# RETENTION_VERSIONS_KEEP of every device, which are always kept.
+RETENTION_VERSIONS_DAYS = int(srvconf.get("PYSRV_RETENTION_VERSIONS_DAYS", 365))
+RETENTION_VERSIONS_KEEP = int(srvconf.get("PYSRV_RETENTION_VERSIONS_KEEP", 30))
+# Remove stored config / output files no row references any more (1 = on, 0 = off).
+RETENTION_BLOB_GC = int(srvconf.get("PYSRV_RETENTION_BLOB_GC", 1))
+# Local hour (0-23) the daily cleanup starts.
+RETENTION_HOUR = int(srvconf.get("PYSRV_RETENTION_HOUR", 3))
 # Seconds before an idle DB connection is closed. Min 60, recommend 180-600.
 DB_STALE_TIMEOUT = int(srvconf.get("PYSRV_DB_STALE_TIMEOUT", 300))
 # Socket connect timeout for IP scanning. LAN=0.2, WAN=0.5, VPN/slow=1.0.
@@ -64,6 +93,13 @@ CREDENTIAL_CACHE_SECONDS = int(srvconf.get("PYSRV_CREDENTIAL_CACHE_SECONDS", 300
 STATIC_POLL_SECONDS = int(srvconf.get("PYSRV_STATIC_POLL_SECONDS", 300))
 # Max concurrent firmware update threads. Firmware uploads are heavy per device.
 FIRMWARE_CONCURRENCY = int(srvconf.get("PYSRV_FIRMWARE_CONCURRENCY", 40))
+# Routers downloading a package from this server at the same time (/tool/fetch is served by
+# the uWSGI web workers: keep at least one worker free for the UI).
+FIRMWARE_MAX_TRANSFERS = int(srvconf.get("PYSRV_FIRMWARE_MAX_TRANSFERS", 3))
+# Seconds a rebooted router may take to come back before the update is reported as failed.
+FIRMWARE_REBOOT_TIMEOUT = int(srvconf.get("PYSRV_FIRMWARE_REBOOT_TIMEOUT", 900))
+# Seconds a queued firmware request waits for an unreachable router before it is dropped.
+FIRMWARE_QUEUE_MAX_AGE = int(srvconf.get("PYSRV_FIRMWARE_QUEUE_MAX_AGE", 24 * 3600))
 CRYPT_KEY = srvconf["PYSRV_CRYPT_KEY"]
 # Key Encryption Key for PAM envelope encryption (Task 5).
 # Generate with: python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"

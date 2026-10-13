@@ -159,7 +159,7 @@ def list_auth_log():
             try:
                 r_client = _get_redis_client()
                 stale_tg = list(auth.select().where(
-                    (auth.by == 'Terminal-Gateway') & (auth.ended == 0)
+                    (auth.by.in_(db_AA.TERMINAL_GATEWAY_BY)) & (auth.ended == 0)
                 ))
                 for srow in stale_tg:
                     sid = srow.sessionid
@@ -167,7 +167,13 @@ def list_auth_log():
                         continue
                     sess = TerminalSessionPro.get_or_none(id=sid)
                     if sess is None or sess.ended is not None or sess.status != 'active':
-                        srow.ended = int(time.time())
+                        now_ts = int(time.time())
+                        ended_ts = now_ts
+                        if sess is not None and sess.ended and sess.started and srow.started:
+                            # Close at the real session length (gateway sets sess.ended), never past now
+                            length = int((sess.ended - sess.started).total_seconds())
+                            ended_ts = min(now_ts, int(srow.started) + max(length, 0))
+                        srow.ended = ended_ts
                         srow.save()
                         if r_client:
                             meta = r_client.get(f"terminal_gw_meta:{sid}")

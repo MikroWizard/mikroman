@@ -11,10 +11,22 @@ from itertools import count
 from peewee import *
 
 from libs.db.db_device import Devices
-from libs.db.db import User,BaseModel
+from libs.db.db import User,BaseModel,database
 import time
 import logging
 log = logging.getLogger("db_AA")
+
+# Auth.by of Terminal Gateway rows: 'WebBox' for Winbox, 'Terminal-Gateway-<protocol>'
+# for the others. 'Terminal-Gateway' is the value of rows written before the split.
+TERMINAL_GATEWAY_BY = ('Terminal-Gateway', 'Terminal-Gateway-ssh', 'Terminal-Gateway-telnet',
+                       'Terminal-Gateway-rdp', 'Terminal-Gateway-vnc', 'WebBox')
+NON_LOGIN_BY = ('Web-Proxy', 'proxy') + TERMINAL_GATEWAY_BY
+
+def terminal_gateway_by(protocol):
+    proto = (protocol or 'ssh').lower()
+    if proto in ('winbox', 'webbox'):
+        return 'WebBox'
+    return 'Terminal-Gateway-{}'.format(proto)
 
 import random
 import string
@@ -41,8 +53,98 @@ class Auth(BaseModel):
         # whether the index is unique or not.
         db_table = 'auth'
 
+    # RADIUS Acct-Session-Id is a per-router counter (RouterOS restarts it after a reboot,
+    # and two routers can use the same value), while some databases have a unique index
+    # on auth.sessionid ('Sess'). A row that holds an id needed by a new login is renamed
+    # to '<id>_ended_<row id>' - unique by construction (the old '<id>_ended' rename failed
+    # from the second reuse on and the login was lost).
+    @staticmethod
+    def _free_sessionid(sid, keep_id=None):
+        rows = Auth.select(Auth.id).where(Auth.sessionid == sid)
+        for row in rows:
+            if keep_id is not None and row.id == keep_id:
+                continue
+            Auth.update(sessionid="{}_ended_{}".format(sid, row.id)).where(Auth.id == row.id).execute()
+
+    @staticmethod
+    def _save_with_sessionid(obj, sid):
+        try:
+            with database.atomic():          # savepoint: a unique violation never breaks an outer transaction
+                obj.save()
+        except IntegrityError:
+            Auth._free_sessionid(sid, keep_id=obj.id)
+            obj.save()
+
+    @staticmethod
+    def _close_radius_session(devid, sid, timestamp):
+        """Accounting Stop: close this device's open session with this id. Its row may have
+        been renamed when another router reused the id. Never touches other devices or
+        sessions that are already closed."""
+        open_row = ((Auth.ended.is_null(True)) | (Auth.ended == 0))
+        # by is NULL until a syslog message names the service: 'by != x' alone is NULL in SQL
+        not_proxy = (Auth.by.is_null(True)) | (Auth.by != 'Web-Proxy')
+        base = (Auth.devid == devid) & not_proxy & open_row
+        n = Auth.update(ended=timestamp).where(base & (Auth.sessionid == sid)).execute()
+        if n:
+            return n
+        renamed = Auth.select(Auth.id).where(base & Auth.sessionid.startswith("{}_ended_".format(sid))) \
+            .order_by(Auth.started.desc()).first()
+        if renamed is not None:
+            return Auth.update(ended=timestamp).where(Auth.id == renamed.id).execute()
+        return 0
+
+    @staticmethod
+    def close_device_radius_sessions(devid, timestamp):
+        """RADIUS Accounting-On/Off: close the open RADIUS-accounted logins of a router.
+        WebFig-proxy / terminal-gateway sessions are tracked by their own code."""
+        return Auth.update(ended=timestamp).where(
+            (Auth.devid == devid) & (Auth.ltype == 'loggedin') &
+            (Auth.sessionid.is_null(False)) & (Auth.sessionid != '') &
+            ((Auth.ended.is_null(True)) | (Auth.ended == 0)) &
+            ((Auth.by.is_null(True)) | (Auth.by.not_in(NON_LOGIN_BY)))
+        ).execute()
+
+    # Terminal Gateway sessions log in to the router with a device account, and the
+    # router reports that login/logout over syslog like any local login. Those events
+    # belong to the gateway's own Auth row (by in TERMINAL_GATEWAY_BY, message
+    # '... as <device user>') and are dropped. Matching is time-bounded so direct
+    # logins with the same account (Winbox/SSH/WebFig/Telnet) are still logged:
+    #  - login:  a gateway row for that account started in the last TG_LOGIN_WINDOW s
+    #  - logout: a gateway row for that account still open, or closed in the last
+    #            TG_LOGOUT_GRACE s (the router's logout often arrives after the
+    #            gateway closed the row)
+    TG_LOGIN_WINDOW = 300
+    TG_LOGOUT_GRACE = 120
+    TG_OPEN_MAX_AGE = 86400
+
+    @staticmethod
+    def is_terminal_gateway_event(devid, cred_username, ltype, timestamp=None):
+        u = (cred_username or '').strip()
+        if not u:
+            return False
+        ts = timestamp or int(time.time())
+        suffix = " as {}".format(u)
+        rows = Auth.select(Auth.started, Auth.ended, Auth.message).where(
+            (Auth.devid == devid) &
+            (Auth.by.in_(TERMINAL_GATEWAY_BY)) &
+            (Auth.started >= ts - Auth.TG_OPEN_MAX_AGE)
+        )
+        for row in rows:
+            if not (row.message or '').endswith(suffix):
+                continue
+            ended = row.ended or 0
+            active = (ended == 0) or (ended >= ts - Auth.TG_LOGOUT_GRACE)
+            if not active:
+                continue
+            if ltype == 'loggedin':
+                if (row.started or 0) >= ts - Auth.TG_LOGIN_WINDOW:
+                    return True
+            else:
+                return True
+        return False
+
     def add_log(devid,type,username,ip,by,sessionid=False,timestamp=False,message=None):
-        log.error(f"DEBUG add_log ENTRY: devid={devid}, type={type}, username={username}, ip={ip}, by={by}, sessionid={sessionid}, timestamp={timestamp}, message={message}")
+        log.debug(f"add_log: devid={devid}, type={type}, username={username}, ip={ip}, by={by}, sessionid={sessionid}, timestamp={timestamp}, message={message}")
         if by=='proxy' or by=='Web-Proxy':
             ts = timestamp or int(time.time())
             u_str = username.strip() if username else ''
@@ -194,12 +296,15 @@ class Auth(BaseModel):
             if sessionid:
                 # RADIUS accounting login (has sessionid but no connection details).
                 # Find any row for this login event within 5 seconds (syslog or first RADIUS packet).
+                # Never Web-Proxy / Terminal-Gateway rows: those keep their own session
+                # id (recording link, close by gateway) and must not take a RADIUS id.
                 auth = Auth.select().where(
                     Auth.devid == devid,
                     Auth.ltype == type,
                     Auth.username == username.strip(),
                     Auth.started > timestamp - 5,
-                    Auth.started < timestamp + 5
+                    Auth.started < timestamp + 5,
+                    (Auth.by.is_null(True)) | (Auth.by.not_in(NON_LOGIN_BY))
                 ).order_by(Auth.started.desc()).limit(1)
                 auth_list = list(auth)
                 if len(auth_list) > 0:
@@ -208,26 +313,12 @@ class Auth(BaseModel):
                         # Winbox opens multiple sessions concurrently; we already recorded one of them.
                         # Ignore extra session packets to prevent duplicate rows.
                         return
-                    try:
-                        a.sessionid = sessionid
-                        a.save()
-                    except Exception:
-                        # Sessionid already used by an old session.
-                        # Rename old session's id to free the constraint, then retry.
-                        Auth.update(sessionid=sessionid + '_ended').where(Auth.sessionid == sessionid).execute()
-                        a.sessionid = sessionid
-                        a.save()
+                    a.sessionid = sessionid
+                    Auth._save_with_sessionid(a, sessionid)
                     return
                 # No syslog row found — create new row with sessionid
-                try:
-                    event = Auth(devid=devid, ltype=type, username=username.strip(), ip=ip.strip(), by=by, started=timestamp, sessionid=sessionid, message=message)
-                    event.save()
-                except Exception:
-                    # Sessionid already used by an old session.
-                    # Rename old session's id to free the constraint, then insert new.
-                    Auth.update(sessionid=sessionid + '_ended').where(Auth.sessionid == sessionid).execute()
-                    event = Auth(devid=devid, ltype=type, username=username.strip(), ip=ip.strip(), by=by, started=timestamp, sessionid=sessionid, message=message)
-                    event.save()
+                event = Auth(devid=devid, ltype=type, username=username.strip(), ip=ip.strip(), by=by, started=timestamp, sessionid=sessionid, message=message)
+                Auth._save_with_sessionid(event, sessionid)
             else:
                 # Local login from syslog (message='local', no sessionid)
                 if by:
@@ -238,7 +329,7 @@ class Auth(BaseModel):
             if by == 'Web-Proxy' or by == 'proxy':
                 return
             if sessionid:
-                Auth.update(ended = timestamp).where((Auth.sessionid==sessionid) & (Auth.by != 'Web-Proxy')).execute()
+                Auth._close_radius_session(devid, sessionid, timestamp)
             else:
                 if message=='radius':
                     pass
@@ -251,11 +342,14 @@ class Auth(BaseModel):
                         Auth.username == username.strip(),
                         Auth.ip == ip.strip(),
                         (Auth.ended.is_null(True) | (Auth.ended == 0)),
-                        (Auth.by != 'Web-Proxy') & (Auth.by != 'proxy')
+                        (Auth.by.is_null(True)) | (Auth.by.not_in(NON_LOGIN_BY))
                     ).order_by(Auth.started.desc()).limit(1)
                     unclosed_list = list(unclosed)
                     if len(unclosed_list) > 0:
                         Auth.update(ended=timestamp).where(Auth.id == unclosed_list[0].id).execute()
+                    elif Auth.is_terminal_gateway_event(devid, username, 'loggedout', timestamp):
+                        # Logout of the gateway's own device login (its login was dropped)
+                        return
                     else:
                         # Fallback: no matching unclosed login found
                         if by:

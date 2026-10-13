@@ -83,6 +83,7 @@ def _maybe_apply_budget(db, role=None, force=False):
                 st.update(pid=pid, at=now, role=role)
                 return
             topo = db_budget.topology_from_uwsgi_opt(getattr(_uwsgi, "opt", None) if _uwsgi else None)
+            topo["cron_jobs"] = max(0, int(getattr(config, "DB_CRON_JOBS", 2)))
             budget = db_budget.compute_budget(limits[0], limits[1], topo)
             size, source = budget[role], "auto (max_connections=%s, total budget %s)" % (limits[0], budget["total"])
         changed = bool(size and size != db._max_connections)

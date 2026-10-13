@@ -19,6 +19,8 @@ log = logging.getLogger("db_budget")
 SAFETY_MARGIN = 10          # connections kept free for psql, migrations, monitoring, other apps
 WEB_CONNS_PER_THREAD = 2    # a web request rarely needs more than 1 (+1 for nested contexts)
 OTHER_MULE_CONNS = 3        # radius / syslog / updater
+CRON_JOB_CONNS = 4          # a scheduled task (task_run.py, own process): measured < 2 in use on
+                            # average while backing up 1500 devices with 40 threads
 POLLER_SHARE = 0.25
 FIRMWARE_SHARE = 0.15
 MIN_POOL = {"web": 2, "spooler": 3, "poller": 4, "firmware": 3, "mule": 2, "cli": 4}
@@ -26,6 +28,8 @@ MAX_POOL = {"web": 8, "spooler": 40, "poller": 60, "firmware": 40, "mule": 6, "c
 
 DEFAULT_TOPOLOGY = {
     "web": 4, "web_threads": 1, "spoolers": 4, "pollers": 1, "firmware": 1, "other_mules": 3,
+    # scheduled tasks (cron -> task_run.py) that may run at the same time (PYSRV_DB_CRON_JOBS)
+    "cron_jobs": 2,
 }
 
 
@@ -116,6 +120,8 @@ def _clamp(v, role):
 
 def compute_budget(max_connections, reserved=3, topology=None):
     """Per-process pool size for every role so that the sum stays under the server limit.
+    'cli' is the pool of a scheduled task process (task_run.py); topology['cron_jobs'] of them
+    are counted in the total.
 
     Returns dict(web, spooler, poller, firmware, mule, cli, total, usable).
     """
@@ -125,7 +131,9 @@ def compute_budget(max_connections, reserved=3, topology=None):
 
     web = _clamp(topo["web_threads"] * WEB_CONNS_PER_THREAD, "web")
     mule = _clamp(OTHER_MULE_CONNS, "mule")
-    fixed = web * topo["web"] + mule * topo["other_mules"]
+    cli = _clamp(CRON_JOB_CONNS, "cli")
+    cron = max(0, int(topo.get("cron_jobs") or 0))
+    fixed = web * topo["web"] + mule * topo["other_mules"] + cli * cron
     remaining = max(0, usable - fixed)
 
     poller = _clamp(remaining * POLLER_SHARE / max(1, topo["pollers"]), "poller") if topo["pollers"] else 0
@@ -134,7 +142,7 @@ def compute_budget(max_connections, reserved=3, topology=None):
     spooler = _clamp(left / max(1, topo["spoolers"]), "spooler") if topo["spoolers"] else 0
 
     total = (web * topo["web"] + mule * topo["other_mules"] + poller * topo["pollers"]
-             + firmware * topo["firmware"] + spooler * topo["spoolers"])
+             + firmware * topo["firmware"] + spooler * topo["spoolers"] + cli * cron)
     # Minimums can overshoot on very small servers: scale the big roles down to fit.
     if total > usable:
         over = total - usable
@@ -152,8 +160,7 @@ def compute_budget(max_connections, reserved=3, topology=None):
                     firmware -= cut
                 over -= cut * count
         total = (web * topo["web"] + mule * topo["other_mules"] + poller * topo["pollers"]
-                 + firmware * topo["firmware"] + spooler * topo["spoolers"])
-    cli = _clamp(spooler or 4, "cli")
+                 + firmware * topo["firmware"] + spooler * topo["spoolers"] + cli * cron)
     return {"web": web, "spooler": spooler, "poller": poller, "firmware": firmware,
             "mule": mule, "cli": cli, "total": total, "usable": usable}
 
