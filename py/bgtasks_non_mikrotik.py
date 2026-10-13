@@ -13,6 +13,7 @@ import ipaddress
 from libs.db import db_tasks, db_syslog, db_device
 from libs import util, kek_provider, envelope_crypto
 from libs import task_tracker
+from libs import job_control
 from libs.db.db_device import Devices
 from libs.db.db import reset_db, database
 from libs.db.db_groups import DevGroupRel
@@ -52,6 +53,8 @@ def bulk_add_non_mikrotik_devices(*args, **kwargs):
             task.save()
 
             devices = kwargs.get('devices', [])
+            if kwargs.get('payload_id'):
+                devices = job_control.load_payload(kwargs['payload_id']) or []
             user_id = kwargs.get('user_id')
             now = datetime.datetime.now(datetime.timezone.utc)
 
@@ -204,6 +207,8 @@ def bulk_add_non_mikrotik_devices(*args, **kwargs):
             log.error(f"bulk_add_non_mikrotik_devices error: {e}")
             return False
         finally:
+            if kwargs.get('payload_id'):
+                job_control.drop_payload(kwargs['payload_id'])
             if task:
                 try:
                     task.status = 0

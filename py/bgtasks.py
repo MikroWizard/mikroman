@@ -10,12 +10,13 @@ from playhouse.shortcuts import model_to_dict
 from libs import util,firm_lib
 from libs import compat_runner
 from libs import task_tracker
+from libs import job_control
 from libs import config_runner as cfg_runner
 import config
 import time
 import os
 import sys
-from libs.db import db_tasks,db_device,db_events,db_user_group_perm
+from libs.db import db_tasks,db_device,db_events,db_user_group_perm,db_user_tasks
 from threading import Thread
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import queue
@@ -29,6 +30,7 @@ from libs.check_routeros.routeros_check.resource import RouterOSCheckResource
 from typing import Dict 
 import json
 import datetime
+import uuid
 try:
     from libs import utilpro
     import task_run_pro
@@ -140,143 +142,67 @@ def check_devices_for_update(*args, **kwargs):
 @spool(pass_arguments=True)
 @task_tracker.track_task(110)
 def update_device(*args, **kwargs):
+    """Queue a firmware update / RouterBOOT upgrade request for the selected devices.
+
+    The firmware mule runs the queued requests (mules/firmware.py): no spooler time limit,
+    one worker per router (lease), restart-safe. This spool job only selects the devices
+    and queues them, so it finishes in seconds whatever the fleet size."""
     reset_db()
-    task=db_tasks.update_job_status()
-    if task.action=='cancel':
-        cancel_task('Firmware Update',task)
-        return False
-    if task.status:
-        return False
-    task.status=1
+    task = db_tasks.update_job_status()
+    task.status = 1
     task.save()
     try:
-        if kwargs.get('devices',False):
-            devids=kwargs.get('devices',False)
-            devs=False
-            uid=kwargs.get('uid',False)
-            current_task=kwargs.get('task',"update")
-            if "0" == devids:
-                devs=list(db_user_group_perm.DevUserGroupPermRel.get_user_devices(uid))
-            else:
-                devids=devids.split(",")
-                devs=list(db_user_group_perm.DevUserGroupPermRel.get_user_devices_by_ids(uid,devids))
-            version_to_install = kwargs.get('version')
-            packages_mode = kwargs.get('mode', 'full')
-            packages_to_install = kwargs.get('packages')
-            auto_upgrade_rb = kwargs.get('auto_upgrade_rb', True)
-            delivery_method = kwargs.get('delivery_method', 'local_repo')
+        devids = kwargs.get('devices', False)
+        if not devids:
+            return False
+        uid = kwargs.get('uid', False)
+        current_task = kwargs.get('task', "update")
+        if "0" == devids:
+            devs = list(db_user_group_perm.DevUserGroupPermRel.get_user_devices(uid))
+        else:
+            devs = list(db_user_group_perm.DevUserGroupPermRel.get_user_devices_by_ids(uid, devids.split(",")))
+        eligible_devs = []
+        for dev in devs:
+            # RouterOS firmware operations are MikroTik only
+            if dev.device_type and dev.device_type != 'mikrotik':
+                continue
+            if not dev.update_availble and current_task != "upgrade" and devids == "0":
+                continue
+            eligible_devs.append(dev)
 
-            q = queue.Queue()
-            eligible_devs = []
-            is_testing = ('unittest' in sys.modules or os.getenv('TEST_ENV') == '1' or 'test' in sys.argv[0].lower())
-            for dev in devs:
-                # Skip non-MikroTik devices for RouterOS firmware operations
-                if dev.device_type and dev.device_type != 'mikrotik':
-                    continue
-                port = util.get_device_port(dev)
-                if not is_testing and not util.check_port(dev.ip, port):
-                    log.warning(f"Device {dev.name} ({dev.ip}) is offline/unreachable on port {port}. Skipping firmware update.")
-                    q.put({"id": dev.id, "status": False, "reason": f"Device unreachable with port {port}"})
-                    continue
-                if current_task == 'upgrade':
-                    if not dev.upgrade_device:
-                        dev.upgrade_device = True
-                        dev.save()
-                if dev.failed_attempt > 0:
-                    dev.failed_attempt = 0
-                    dev.save()
-                if not dev.update_availble and current_task != "upgrade" and kwargs.get('devices') == "0":
-                    continue
-                eligible_devs.append(dev)
+        if ISPRO and hasattr(utilpro, "order_devices_for_upgrade"):
+            try:
+                eligible_devs = utilpro.order_devices_for_upgrade(eligible_devs)
+            except Exception as e:
+                log.warning(f"Device update ordering skipped: {e}")
 
-            if ISPRO and hasattr(utilpro, "order_devices_for_upgrade"):
-                try:
-                    eligible_devs = utilpro.order_devices_for_upgrade(eligible_devs)
-                except Exception as e:
-                    log.warning(f"Device update ordering skipped: {e}")
-
-            if eligible_devs:
-                previous_status = {dev.id: dev.status for dev in eligible_devs}
-                with database.atomic():
-                    for dev in eligible_devs:
-                        dev.status = "updating"
-                        if dev.failed_attempt > 0:
-                            dev.failed_attempt = 0
-                        dev.save()
-
-                def _skip_if_cancelled(dev, q):
-                    """Stop requested: never start a new device; revert its 'updating' mark.
-                    Devices already uploading/rebooting are left to finish."""
-                    if not task_tracker.cancel_requested(110):
-                        return False
-                    try:
-                        with database.connection_context():
-                            Devices.update(status=previous_status.get(dev.id) or "active").where(
-                                (Devices.id == dev.id) & (Devices.status == "updating")).execute()
-                    except Exception as e:
-                        log.warning(f"Could not revert status of dev {dev.id} after cancel: {e}")
-                    q.put({"id": dev.id, "status": False, "reason": "Cancelled by user before start"})
-                    return True
-
-                def _update_native_worker(dev, q, auto_upgrade_rb):
-                    try:
-                        if _skip_if_cancelled(dev, q):
-                            return
-                        firm_lib.update_device_native(dev, q, auto_upgrade_rb=auto_upgrade_rb)
-                    finally:
-                        database.close()
-
-                def _update_worker(dev, q, version_to_install, packages_mode, packages_to_install, auto_upgrade_rb):
-                    try:
-                        if _skip_if_cancelled(dev, q):
-                            return
-                        firm_lib.update_device(
-                            dev, q,
-                            version_to_install=version_to_install,
-                            packages_mode=packages_mode,
-                            packages_to_install=packages_to_install,
-                            auto_upgrade_rb=auto_upgrade_rb
-                        )
-                    finally:
-                        database.close()
-
-                with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_THREADS, len(eligible_devs))) as executor:
-                    if delivery_method == 'native':
-                        futures = {
-                            executor.submit(_update_native_worker, dev, q, auto_upgrade_rb): dev
-                            for dev in eligible_devs
-                        }
-                    else:
-                        futures = {
-                            executor.submit(
-                                _update_worker, dev, q,
-                                version_to_install,
-                                packages_mode,
-                                packages_to_install,
-                                auto_upgrade_rb
-                            ): dev
-                            for dev in eligible_devs
-                        }
-                    for future in as_completed(futures):
-                        dev = futures[future]
-                        try:
-                            future.result(timeout=600)
-                        except Exception as e:
-                            log.error(f"Device update worker failure for dev {getattr(dev, 'id', '?')}: {e}")
-                            q.put({"id": getattr(dev, "id", None), "status": False, "reason": f"Worker failure: {e}"})
-            res = []
-            while not q.empty():
-                try:
-                    res.append(q.get_nowait())
-                except queue.Empty:
-                    break
+        if current_task == 'upgrade':
+            request = {"kind": "routerboot"}
+        else:
+            request = {
+                "kind": "update",
+                "version": kwargs.get('version'),
+                "mode": kwargs.get('mode', 'full'),
+                "packages": kwargs.get('packages'),
+                "auto_upgrade_rb": kwargs.get('auto_upgrade_rb', True),
+                "delivery_method": kwargs.get('delivery_method', 'local_repo'),
+                "channel": kwargs.get('channel') or None,
+            }
+        res = firm_lib.enqueue_device_updates(eligible_devs, request, origin="user:{}".format(uid))
+        queued = sum(1 for r in res if r.get("status"))
+        log.info(f"Firmware {current_task}: {queued} device(s) queued, {len(res) - queued} skipped")
+        for r in res:
+            if not r.get("status"):
+                log.info(f"Firmware {current_task} not queued for device {r.get('id')}: {r.get('reason')}")
+        return res
     except Exception as e:
         log.error(e)
         return False
     finally:
-        task.status=0
+        task.status = 0
         task.save()
-    return False
+        database.close()
+
 
 @spool(pass_arguments=True)
 @task_tracker.track_task(140)
@@ -323,73 +249,94 @@ def download_firmware(*args, **kwargs):
 @spool(pass_arguments=True)
 @task_tracker.track_task(120)
 def backup_devices(*args, **kwargs):
+    """Backup of devices. kwargs: device_ids (list of ids). Older spool files carry
+    'devices' (Devices rows) - still accepted. A request that arrives while a backup runs
+    is queued (re-spooled), never dropped."""
     reset_db()
-    task=db_tasks.backup_job_status()
-    if task.action=='cancel':
-        cancel_task('Backup',task)
+    claim = job_control.claim_job(120)
+    if claim is None:
+        job_control.requeue(backup_devices, kwargs, what="backup")
         return False
-    if task.status:
-        return False
-    task.status=1
-    task.save()
-    # time.sleep(5)
+    job_control.dequeued("backup_devices", kwargs)
     try:
-        if kwargs.get('devices',False):
-            devices=kwargs.get('devices',False)
-            if len(devices):
-                q = queue.Queue()
-                def _backup_worker(dev, q):
-                    try:
-                        if task_tracker.cancel_requested(120):
-                            q.put({"id": dev.id, "devid": dev.id, "devip": getattr(dev, "ip", ""),
-                                   "status": True, "state": True, "cancelled": True,
-                                   "reason": "Cancelled by user before start"})
-                            return
-                        compat_runner.backup_routers(dev, q)
-                    finally:
-                        database.close()
-
-                if devices:
-                    with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_THREADS, len(devices))) as executor:
-                        futures = {executor.submit(_backup_worker, dev, q): dev for dev in devices}
-                        for future in as_completed(futures):
-                            dev = futures[future]
-                            try:
-                                future.result(timeout=600)
-                            except Exception as e:
-                                log.error(f"Backup worker failure for dev {getattr(dev, 'id', '?')}: {e}")
-                                q.put({
-                                    "id": getattr(dev, "id", None),
-                                    "devid": getattr(dev, "id", None),
-                                    "devip": getattr(dev, "ip", ""),
-                                    "devname": getattr(dev, "name", ""),
-                                    "status": False,
-                                    "state": False,
-                                    "reason": f"Worker failure: {e}",
-                                    "detail": "Worker error",
-                                })
-                res = []
-                with database.connection_context():
-                    while not q.empty():
-                        try:
-                            qres = q.get_nowait()
-                            status = qres.get('status', qres.get('state', False))
-                            if not status:
-                                dev_id = qres.get('id', qres.get('devid'))
-                                if dev_id:
-                                    db_events.connection_event(dev_id, 'Backup', qres.get("detail", "connection"), "Critical", 0, qres.get("reason", "problem in getting backup for device"))
-                            res.append(qres)
-                        except queue.Empty:
-                            break
-            else:
-                return False
+        device_ids = _ids_from_kwargs(kwargs)
+        if not device_ids:
+            return False
+        results = job_control.run_devices(
+            device_ids, _backup_one, deadline=job_control.job_deadline(),
+            should_cancel=lambda: task_tracker.cancel_requested(120), skipped=_backup_skipped)
+        failed = [r for r in results if r and not r.get("status") and not r.get("skipped")]
+        if failed:
+            with database.connection_context():
+                for r in failed:
+                    db_events.connection_event(r["id"], 'Backup', r.get("detail", "connection"), "Critical", 0,
+                                               r.get("reason") or "problem in getting backup for device")
+        log.info("Backup job: %d devices, %d ok, %d failed, %d not run", len(results),
+                 sum(1 for r in results if r and r.get("status") and not r.get("skipped")), len(failed),
+                 sum(1 for r in results if r and r.get("skipped")))
     except Exception as e:
-        log.error(e)
+        log.exception("backup_devices failed: %s", e)
         return False
     finally:
-        task.status=0
-        task.save()
+        job_control.release_job(claim)
     return False
+
+
+def _ids_from_kwargs(kwargs):
+    ids = kwargs.get('device_ids')
+    if ids is None:
+        ids = [getattr(d, 'id', d) for d in (kwargs.get('devices') or [])]
+    out = []
+    for i in ids or []:
+        try:
+            out.append(int(i))
+        except (TypeError, ValueError):
+            continue
+    return list(dict.fromkeys(out))
+
+
+def _backup_one(dev_id):
+    res = cfg_runner.run_device_job({"device_id": dev_id, "command_key": "show_config"})
+    ok = res.get("status") == "ok"
+    out = {"id": dev_id, "devid": dev_id, "devip": res.get("device_ip", ""), "devname": res.get("device_name", ""),
+           "status": ok, "state": ok}
+    if not ok:
+        out["reason"] = (res.get("error") or "problem in getting backup for device")[:500]
+        out["detail"] = {"auth_error": "auth", "timeout": "timeout"}.get(res.get("status"), "connection")
+    return out
+
+
+def _backup_skipped(dev_id, reason, message):
+    if reason not in (job_control.SKIP_BUSY, job_control.SKIP_CANCELLED, job_control.SKIP_DEADLINE):
+        return {"id": dev_id, "devid": dev_id, "devip": "", "status": False, "state": False,
+                "reason": message, "detail": "Worker error"}
+    # not run (stop, time limit, router busy with another job): no failure event
+    return {"id": dev_id, "devid": dev_id, "devip": "", "status": False, "state": False, "skipped": reason,
+            "cancelled": reason == job_control.SKIP_CANCELLED, "reason": message}
+
+def _create_default_connections(mikrotiks):
+    try:
+        macs = [d['mac'] for d in mikrotiks]
+        inserted_devices = list(Devices.select().where(Devices.mac.in_(macs)))
+        now = datetime.datetime.now(datetime.timezone.utc)
+        by_mac = {m['mac']: m for m in mikrotiks}
+        for dev in inserted_devices:
+            m_data = by_mac.get(dev.mac)
+            if not m_data:
+                continue
+            api_port = m_data.get('port') or 8728
+            # API connection (MikroTik default)
+            if not DeviceConnections.select().where(DeviceConnections.device_id == dev.id, DeviceConnections.protocol == 'api').exists():
+                DeviceConnections.create(device_id=dev.id, protocol='api', port=api_port, auth_mode='credential', is_default=True, created=now, modified=now)
+            # Default SSH
+            if not DeviceConnections.select().where(DeviceConnections.device_id == dev.id, DeviceConnections.protocol == 'ssh').exists():
+                DeviceConnections.create(device_id=dev.id, protocol='ssh', port=22, auth_mode='credential', is_default=False, created=now, modified=now)
+            # Default WebFig
+            if not DeviceConnections.select().where(DeviceConnections.device_id == dev.id, DeviceConnections.protocol == 'webfig').exists():
+                DeviceConnections.create(device_id=dev.id, protocol='webfig', port=80, auth_mode='credential', is_default=False, created=now, modified=now)
+    except Exception as e:
+        log.error(f"Error creating DeviceConnections for bulk added devices: {e}")
+
 
 def extract_device_from_macdiscovery(line):
     regex = r"(\d{1,3}.\d{1,3}.\d{1,3}.\d{1,3}).*?([0-9A-Fa-f]{1,2}:[0-9A-Fa-f]{1,3}:[0-9A-Fa-f]{1,3}:[0-9A-Fa-f]{1,3}:[0-9A-Fa-f]{1,3}:[0-9A-Fa-f]{1,3})\s+(.+?(?= \(M))\s+(\(.+\))\s+up (\d{1,5} days \d{1,5} hours)\s+?([A-Za-z0-9]{1,9}-?[A-Za-z0-9]{1,9})\s+?([a-z]{1,7}[0-9]{0,2}/?[a-z]{1,7}[0-9]{0,2})"
@@ -729,105 +676,103 @@ def scan_with_ip(*args, **kwargs):
 @spool(pass_arguments=True)
 @task_tracker.track_task(160)
 def exec_snipet(*args, **kwargs):
+    """Run a snippet task on devices. kwargs: utask_id (user task id) or task (row, older
+    spool files), devices ("0" = all devices of the user, or list of ids), uid. A request
+    that arrives while another snippet job runs is queued, never dropped."""
     reset_db()
-    task=db_tasks.exec_snipet_status()
-    if task.action=='cancel':
-        cancel_task('Snipet Exec',task)
+    claim = job_control.claim_job(160)
+    if claim is None:
+        job_control.requeue(exec_snipet, kwargs, what="snippet")
         return False
-    if task.status:
-        return False
-    task.status=1
-    task.save()
-    now=datetime.datetime.now()
-    default_ip=kwargs.get('default_ip',False)
+    job_control.dequeued("exec_snipet", kwargs)
     try:
-        if kwargs.get('devices',False) and kwargs.get('task',False):
-            devids=kwargs.get('devices',False)
-            devs=False
-            uid=kwargs.get('uid',False)
-            utask=kwargs.get('task',False)
-            taskdata=json.loads(utask.data)
+        devids = kwargs.get('devices', False)
+        uid = kwargs.get('uid', False)
+        with database.connection_context():
+            utask = kwargs.get('task', False)
+            if kwargs.get('utask_id'):
+                utask = db_user_tasks.UserTasks.get_or_none(db_user_tasks.UserTasks.id == int(kwargs['utask_id']))
+            if not devids or not utask:
+                return False
+            taskdata = json.loads(utask.data)
             if "0" == devids:
-                devs=list(db_user_group_perm.DevUserGroupPermRel.get_user_devices(uid))
+                devs = list(db_user_group_perm.DevUserGroupPermRel.get_user_devices(uid))
             else:
-                devids=devids
-                devs=list(db_user_group_perm.DevUserGroupPermRel.get_user_devices_by_ids(uid,devids))
-            q = queue.Queue()
-            eligible_devs = []
-            for dev in devs:
-                peer_ip=util.resolve_peer_ip(dev)
-                if not peer_ip and '[mikrowizard]' in taskdata['snippet']['code']:
-                    log.error("no peer ip")
-                    continue
-                snipet_code=taskdata['snippet']['code']
-                if '[mikrowizard]' in taskdata['snippet']['code']:
-                    snipet_code=snipet_code.replace('[mikrowizard]', peer_ip)
-                eligible_devs.append((dev, snipet_code))
-            
-            if eligible_devs:
-                store_in_backup = bool(taskdata.get('store_in_backup', False))
-                snippet_id = taskdata.get('snippet', {}).get('id')
-                def _snipet_worker(dev, code, q):
-                    try:
-                        if task_tracker.cancel_requested(160):
-                            q.put({"id": dev.id, "devid": dev.id, "devip": getattr(dev, "ip", ""),
-                                   "devname": getattr(dev, "name", ""), "status": False,
-                                   "result": "Cancelled by user before start"})
-                            return
-                        compat_runner.run_snippets(dev, code, q, user_task_id=utask.id, snippet_id=snippet_id, store_in_backup=store_in_backup)
-                    finally:
-                        database.close()
-                with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_THREADS, len(eligible_devs))) as executor:
-                    futures = {executor.submit(_snipet_worker, dev, code, q): dev for dev, code in eligible_devs}
-                    for future in as_completed(futures):
-                        dev = futures[future]
-                        try:
-                            future.result(timeout=600)
-                        except Exception as e:
-                            log.error("Snippet worker failure for dev %s: %s", getattr(dev, "id", "?"), e)
-                            q.put({
-                                "id": getattr(dev, "id", None),
-                                "devid": getattr(dev, "id", None),
-                                "devip": getattr(dev, "ip", ""),
-                                "devname": getattr(dev, "name", ""),
-                                "status": False,
-                                "state": False,
-                                "result": f"Execution error: {e}",
-                            })
-            res=[]
-            while not q.empty():
-                try:
-                    res.append(q.get_nowait())
-                except queue.Empty:
-                    break
-            
-            try:
-                db_tasks.add_task_result('snipet_exec', json.dumps(res),json.dumps(model_to_dict(utask),default=serialize_datetime),utask.id)
-            except Exception as e:
-                log.error(e)
-                pass
+                devs = list(db_user_group_perm.DevUserGroupPermRel.get_user_devices_by_ids(uid, devids))
+            device_ids = list(dict.fromkeys(d.id for d in devs))
+        code = taskdata['snippet']['code']
+        store_in_backup = bool(taskdata.get('store_in_backup', False))
+        snippet_id = taskdata.get('snippet', {}).get('id')
+        utask_id = utask.id
+
+        def _one(dev_id):
+            return _snippet_one(dev_id, code, utask_id, snippet_id, store_in_backup)
+
+        res = job_control.run_devices(
+            device_ids, _one, deadline=job_control.job_deadline(),
+            should_cancel=lambda: task_tracker.cancel_requested(160), skipped=_snippet_skipped)
+        log.info("Snippet task %s: %d devices, %d ok", utask_id, len(res),
+                 sum(1 for r in res if r and r.get("status")))
+        try:
+            with database.connection_context():
+                db_tasks.add_task_result('snipet_exec', json.dumps(res), json.dumps(model_to_dict(utask), default=serialize_datetime), utask_id)
+        except Exception as e:
+            log.error("snippet results of task %s not saved: %s", utask_id, e)
     except Exception as e:
-        log.error(e)
+        log.exception("exec_snipet failed: %s", e)
         return False
     finally:
-        task.status=0
-        task.save()
+        job_control.release_job(claim)
     return False
+
+
+def _snippet_one(dev_id, code, utask_id, snippet_id, store_in_backup):
+    """One device of a snippet job; result in the format the UI shows."""
+    with database.connection_context():
+        dev = Devices.get_by_id(dev_id)
+        devip, devname = dev.ip, getattr(dev, "name", "")
+        if '[mikrowizard]' in code:
+            peer_ip = util.resolve_peer_ip(dev)
+            if not peer_ip:
+                return {"id": dev_id, "devid": dev_id, "devip": devip, "devname": devname, "status": False,
+                        "state": False, "result": "Exec Failed: MikroWizard server address unknown for this "
+                                                  "device ([mikrowizard] needs the peer IP or the default IP)"}
+            code = code.replace('[mikrowizard]', peer_ip)
+    r = cfg_runner.run_device_job({
+        "device_id": dev_id, "snippet_content": code, "snippet_id": snippet_id, "command_key": None,
+        "user_task_id": utask_id, "capture_output": True, "store_in_backup": store_in_backup,
+        "skip_versioning": not store_in_backup,
+    })
+    ok = r.get("status") == "ok"
+    if ok:
+        result = r.get("output_raw") or r.get("output_normalized") or "executed successfully"
+    else:
+        result = "Exec Failed: {}".format(r.get("error") or "unknown error")
+    return {"id": dev_id, "devid": dev_id, "devip": devip, "devname": devname, "status": ok, "state": ok,
+            "result": result}
+
+
+def _snippet_skipped(dev_id, reason, message):
+    return {"id": dev_id, "devid": dev_id, "devip": "", "devname": "", "status": False, "state": False,
+            "result": message if reason != "error" else "Exec Failed: " + message, "skipped": reason}
 
 @spool(pass_arguments=True)
 @task_tracker.track_task(185)
 def exec_multi_brand(*args, **kwargs):
+    """Multi-brand execution of one run (kwargs run_id = execution_run_id returned by the API).
+    Each run has its own tasks row (task_id = run id): status, stop and logs all use it."""
     reset_db()
-    task = db_tasks.exec_multi_brand_status()
-    if task.action == "cancel":
-        cancel_task("Multi-Brand Exec", task)
+    run_id = kwargs.get("run_id") or kwargs.get("task_id")
+    if not run_id:
+        run_id = str(uuid.uuid4())       # spool file of an older version
+        kwargs["run_id"] = run_id
+    job_control.ensure_task_row(185, "Multi-Brand Exec", run_id)
+    claim = job_control.claim_job(185, task_id=run_id)
+    if claim is None:
+        job_control.requeue(exec_multi_brand, kwargs, what="execution")
         return False
-    if task.status:
-        return False
-    task.status = 1
-    task.save()
+    job_control.dequeued("exec_multi_brand", kwargs)
     try:
-        now = datetime.datetime.now()
         devices = kwargs.get("devices", [])
         device_ids = kwargs.get("device_ids", [])
         if not device_ids and devices:
@@ -837,74 +782,67 @@ def exec_multi_brand(*args, **kwargs):
         user_task_id = kwargs.get("user_task_id")
         job_config = {
             "device_ids": device_ids,
+            "execution_run_id": run_id,
             "command_key": kwargs.get("command_key"),
             "custom_command": kwargs.get("custom_command"),
             "snippet_id": kwargs.get("snippet_id"),
             "snippet_content": kwargs.get("snippet_content"),
             "is_config_mode": kwargs.get("is_config_mode", False),
             "user_task_id": user_task_id,
-            "max_workers": MAX_CONCURRENT_THREADS,
-            "should_cancel": lambda: task_tracker.cancel_requested(185),
+            "deadline": job_control.job_deadline(),
+            "should_cancel": lambda: task_tracker.cancel_requested(185, run_id),
         }
         results = cfg_runner.run_bulk_job(job_config)
         try:
-            db_tasks.add_task_result(
-                "multi_brand_exec",
-                json.dumps(results),
-                json.dumps({"device_ids": device_ids, "user_task_id": user_task_id}, default=serialize_datetime),
-                user_task_id,
-            )
+            with database.connection_context():
+                db_tasks.add_task_result(
+                    "multi_brand_exec",
+                    json.dumps(results),
+                    json.dumps({"device_ids": device_ids, "user_task_id": user_task_id, "execution_run_id": run_id},
+                               default=serialize_datetime),
+                    user_task_id,
+                )
         except Exception as e:
             log.error("exec_multi_brand add_task_result failed: %s", e)
     except Exception as e:
-        log.error("exec_multi_brand: %s", e)
+        log.exception("exec_multi_brand: %s", e)
         return False
     finally:
-        task.status = 0
-        task.save()
+        job_control.release_job(claim)
+        job_control.prune_run_rows(185)
     return False
 
 @spool(pass_arguments=True)
 @task_tracker.track_task(175)
 def exec_sequence(*args, **kwargs):
+    """Run a sequence task. kwargs: utask_id (or utask row, older spool files). A request that
+    arrives while another sequence runs is queued, never dropped."""
     reset_db()
-    try:
-        task = db_tasks.exec_sequence_status()
-    except:
-        task = None
-        
-    if task and task.action=='cancel':
-        cancel_task('Sequence Exec',task)
+    if not ISPRO:
         return False
-        
-    if task and task.status:
+    claim = job_control.claim_job(175)
+    if claim is None:
+        job_control.requeue(exec_sequence, kwargs, what="sequence")
         return False
-        
-    if task:
-        task.status=1
-        task.save()
+    job_control.dequeued("exec_sequence", kwargs)
     try:
-        if not ISPRO:
-            return False
-            
-        utask=kwargs.get('utask',False)
+        utask = kwargs.get('utask', False)
+        if kwargs.get('utask_id'):
+            with database.connection_context():
+                utask = db_user_tasks.UserTasks.get_or_none(db_user_tasks.UserTasks.id == int(kwargs['utask_id']))
         if utask and task_run_pro:
-            res = task_run_pro.run_sequence_task(utask)
-            
+            res = task_run_pro.run_sequence_task(utask, deadline=job_control.job_deadline())
+            log.info("Sequence task %s executed on %d devices", utask.id, len(res or []))
             try:
-                log.info("Sequence Executed: {}".format(utask.id))      
-                log.info("Sequence Result: {}".format(res))
-                db_tasks.add_task_result('sequence_exec', json.dumps(res), json.dumps(model_to_dict(utask), default=serialize_datetime), utask.id)
+                with database.connection_context():
+                    db_tasks.add_task_result('sequence_exec', json.dumps(res), json.dumps(model_to_dict(utask), default=serialize_datetime), utask.id)
             except Exception as e:
-                log.error(e)
-                pass
+                log.error("sequence results of task %s not saved: %s", utask.id, e)
     except Exception as e:
-        log.error(e)
+        log.exception("exec_sequence failed: %s", e)
         return False
     finally:
-        if task:
-            task.status=0
-            task.save()
+        job_control.release_job(claim)
     return False
 
 @spool(pass_arguments=True)
@@ -953,6 +891,8 @@ def bulk_add_devices(*args, **kwargs):
         task.save()
         
         devices=kwargs.get('devices',[])
+        if kwargs.get('payload_id'):
+            devices=job_control.load_payload(kwargs['payload_id']) or []
         task_id=kwargs.get('task_id','')
         
         if not devices:
@@ -1173,58 +1113,29 @@ def bulk_add_devices(*args, **kwargs):
         try:
             if mikrotiks:
                 log.info(f"Bulk Add: Inserting/Updating {len(mikrotiks)} devices in database")
+                update_fields = {Devices.ip:EXCLUDED.ip,
+                                 Devices.uptime:EXCLUDED.uptime,
+                                 Devices.name:EXCLUDED.name,
+                                 Devices.interface:EXCLUDED.interface,
+                                 Devices.details:EXCLUDED.details,
+                                 Devices.ssl:EXCLUDED.ssl,
+                                 Devices.port:EXCLUDED.port,
+                                 Devices.device_type:EXCLUDED.device_type,
+                                 Devices.template_id:EXCLUDED.template_id}
                 try:
                     Devices.insert_many(mikrotiks).on_conflict(conflict_target=Devices.mac,
-                                                            conflict_where=MAC_CONFLICT_WHERE,
-                                                            update={Devices.ip:EXCLUDED.ip,
-                                                                    Devices.uptime:EXCLUDED.uptime,
-                                                                    Devices.name:EXCLUDED.name,
-                                                                    Devices.interface:EXCLUDED.interface,
-                                                                    Devices.details:EXCLUDED.details,
-                                                                    Devices.ssl:EXCLUDED.ssl,
-                                                                    Devices.port:EXCLUDED.port,
-                                                                    Devices.device_type:EXCLUDED.device_type,
-                                                                    Devices.template_id:EXCLUDED.template_id}).execute()
-                                                                    
+                                                               conflict_where=MAC_CONFLICT_WHERE,
+                                                               update=update_fields).execute()
                 except Exception as e:
-                    if "ON CONFLICT DO UPDATE command cannot affect row a second time" in str(e):
-                        log.warning("Bulk Add: Duplicate MACs in same batch. Retrying with deduplication...")
-                        unique_mikrotiks = {dev['mac']: dev for dev in mikrotiks}
-                        Devices.insert_many(list(unique_mikrotiks.values())).on_conflict(conflict_target=Devices.mac,
-                                                            conflict_where=MAC_CONFLICT_WHERE,
-                                                            update={Devices.ip:EXCLUDED.ip,
-                                                                    Devices.uptime:EXCLUDED.uptime,
-                                                                    Devices.name:EXCLUDED.name,
-                                                                    Devices.interface:EXCLUDED.interface,
-                                                                    Devices.details:EXCLUDED.details,
-                                                                    Devices.ssl:EXCLUDED.ssl,
-                                                                    Devices.port:EXCLUDED.port,
-                                                                    Devices.device_type:EXCLUDED.device_type}).execute()
-                                                                    
-                    # --- Task 18.3 & 18.1: Create default DeviceConnections for auto-discovered devices ---
-                    try:
-                        macs = [d['mac'] for d in mikrotiks]
-                        inserted_devices = list(Devices.select().where(Devices.mac.in_(macs)))
-                        now = datetime.datetime.now(datetime.timezone.utc)
-                        for dev in inserted_devices:
-                            m_data = next((m for m in mikrotiks if m['mac'] == dev.mac), None)
-                            if not m_data: continue
-                            api_port = m_data.get('port') or 8728
-                            
-                            # API connection (MicroTik default)
-                            if not DeviceConnections.select().where(DeviceConnections.device_id == dev.id, DeviceConnections.protocol == 'api').exists():
-                                DeviceConnections.create(device_id=dev.id, protocol='api', port=api_port, auth_mode='credential', is_default=True, created=now, modified=now)
-                            # Default SSH
-                            if not DeviceConnections.select().where(DeviceConnections.device_id == dev.id, DeviceConnections.protocol == 'ssh').exists():
-                                DeviceConnections.create(device_id=dev.id, protocol='ssh', port=22, auth_mode='credential', is_default=False, created=now, modified=now)
-                            # Default WebFig
-                            if not DeviceConnections.select().where(DeviceConnections.device_id == dev.id, DeviceConnections.protocol == 'webfig').exists():
-                                DeviceConnections.create(device_id=dev.id, protocol='webfig', port=80, auth_mode='credential', is_default=False, created=now, modified=now)
-                    except Exception as e:
-                        log.error(f"Error creating DeviceConnections for bulk added devices: {e}")
-                    # --------------------------------------------------------------------------------------
-                    else:
-                        raise e
+                    if "ON CONFLICT DO UPDATE command cannot affect row a second time" not in str(e):
+                        raise
+                    log.warning("Bulk Add: Duplicate MACs in same batch. Retrying with deduplication...")
+                    unique_mikrotiks = {dev['mac']: dev for dev in mikrotiks}
+                    Devices.insert_many(list(unique_mikrotiks.values())).on_conflict(conflict_target=Devices.mac,
+                                                                                     conflict_where=MAC_CONFLICT_WHERE,
+                                                                                     update=update_fields).execute()
+                # Task 18.3 & 18.1: default DeviceConnections (api / ssh / webfig) of the added devices
+                _create_default_connections(mikrotiks)
         except Exception as e:
             log.error(e)
             
@@ -1234,6 +1145,13 @@ def bulk_add_devices(*args, **kwargs):
         log.error(e)
         return True
     finally:
+        if kwargs.get('payload_id'):
+            job_control.drop_payload(kwargs['payload_id'])
         if task:
             task.status=0
             task.save()
+
+
+# Spool functions of other modules: the spooler imports only this module (spooler-import),
+# so they must be registered from here to be runnable by the spooler.
+import bgtasks_non_mikrotik  # noqa: E402,F401
