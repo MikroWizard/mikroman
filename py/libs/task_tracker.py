@@ -353,6 +353,17 @@ def stop_task(task_signal, task_id=None, kill=os.kill, force=False, now=None):
     """
     now = time.time() if now is None else now
     removed = remove_queued_spool_files(task_signal, task_id)
+    if removed and int(task_signal) == 185:
+        # multi-brand runs have one row each: a run removed from the queue is over
+        try:
+            T = db_tasks.Tasks
+            cond = (T.signal == 185) & (T.status == False) & (T.action != "done")  # noqa: E712
+            if task_id:
+                cond = cond & (T.task_id == str(task_id))
+            with database.connection_context():
+                T.update(action="done").where(cond).execute()
+        except Exception as e:
+            log.warning("task_tracker: could not close queued multi-brand runs: %s", e)
     first_press = _mark_cancel_requested(task_signal, now)
     escalate = force or (now - first_press) >= FORCE_KILL_GRACE
 

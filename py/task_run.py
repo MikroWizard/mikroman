@@ -11,11 +11,11 @@ os.environ["PYSRV_CONFIG_PATH"] = "/conf/server-conf.json"
 
 import config
 from libs import util, firm_lib
-from libs import compat_runner
-from libs.db import db_user_tasks
+from libs import job_control
+from libs.db import db_user_tasks, db_tasks
+from libs.db.db_device import Devices
 from libs.db.db import database, tune_process_db_pool
 from libs.webutil import app, login_required, get_myself, buildResponse
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import reduce
 import logging
 from cron_descriptor import get_description
@@ -29,10 +29,7 @@ except ImportError:
     task_run_pro = None
     ISPRO = False
 
-try:
-    from libs import config_runner as cfg_runner
-except ImportError:
-    cfg_runner = None
+from libs import config_runner as cfg_runner
 
 log = logging.getLogger("api.usertasks")
 
@@ -94,86 +91,53 @@ def _heartbeat(task_id, hostname, stop_event):
 
 
 def backup_devs(devices):
-    tune_process_db_pool(role="bgtasks", num_devices=len(devices))
-    num_threads = len(devices)
-    q = queue.Queue()
+    tune_process_db_pool(role="cli", num_devices=len(devices))
 
-    def thread_worker(dev, q_obj):
-        try:
-            compat_runner.backup_routers(dev, q_obj)
-        finally:
-            database.close()
+    def worker(dev_id):
+        res = cfg_runner.run_device_job({"device_id": dev_id, "command_key": "show_config"})
+        ok = res.get("status") == "ok"
+        return {"id": dev_id, "devid": dev_id, "devip": res.get("device_ip", ""),
+                "devname": res.get("device_name", ""), "status": ok, "state": ok,
+                "reason": None if ok else (res.get("error") or "Backup failed")[:500]}
 
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {executor.submit(thread_worker, dev, q): dev for dev in devices}
-        for future in as_completed(futures):
-            dev = futures[future]
-            try:
-                future.result(timeout=600)
-            except Exception as e:
-                log.error(f"Backup thread failure for dev {getattr(dev, 'id', '?')}: {e}")
-                q.put({
-                    "id": getattr(dev, "id", None),
-                    "devid": getattr(dev, "id", None),
-                    "devip": getattr(dev, "ip", ""),
-                    "devname": getattr(dev, "name", ""),
-                    "status": False,
-                    "state": False,
-                    "reason": f"Thread failure: {e}",
-                })
+    def skipped(dev_id, reason, message):
+        return {"id": dev_id, "devid": dev_id, "status": False, "state": False, "reason": message,
+                "skipped": reason if reason != "error" else None}
 
-    res = []
+    res = job_control.run_devices([d.id for d in devices], worker, skipped=skipped)
     with database.connection_context():
-        while not q.empty():
-            try:
-                qres = q.get_nowait()
-                if not qres.get("state", True):
-                    util.log_alert("backup", qres.get("id", 0), "Backup failed")
-                res.append(qres)
-            except queue.Empty:
-                break
+        for qres in res:
+            if not qres.get("state", True) and not qres.get("skipped"):
+                util.log_alert("backup", qres.get("id", 0), "Backup failed")
     return res
 
 
 def run_snippets(devices, snippet, template_key=None, user_task_id=None, snippet_id=None, store_in_backup=False):
-    tune_process_db_pool(role="bgtasks", num_devices=len(devices))
-    num_threads = len(devices)
-    q = queue.Queue()
+    tune_process_db_pool(role="cli", num_devices=len(devices))
 
-    def thread_worker(dev, snippet_content, q_obj, tmpl_key):
-        try:
-            compat_runner.run_snippets(dev, snippet_content, q_obj, tmpl_key, user_task_id=user_task_id, snippet_id=snippet_id, store_in_backup=store_in_backup)
-        finally:
-            database.close()
+    def worker(dev_id):
+        with database.connection_context():
+            dev = Devices.get_by_id(dev_id)
+            devip, devname = dev.ip, getattr(dev, "name", "")
+        r = cfg_runner.run_device_job({
+            "device_id": dev_id, "snippet_content": snippet, "snippet_id": snippet_id,
+            "command_key": template_key, "user_task_id": user_task_id, "capture_output": True,
+            "store_in_backup": store_in_backup, "skip_versioning": not store_in_backup,
+        })
+        ok = r.get("status") == "ok"
+        result = (r.get("output_raw") or r.get("output_normalized") or "executed successfully") if ok else False
+        return {"id": dev_id, "devid": dev_id, "devip": devip, "devname": devname, "status": ok, "state": ok,
+                "result": result, "error": None if ok else r.get("error")}
 
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {executor.submit(thread_worker, dev, snippet, q, template_key): dev for dev in devices}
-        for future in as_completed(futures):
-            dev = futures[future]
-            try:
-                future.result(timeout=600)
-            except Exception as e:
-                log.error(f"Snippet thread failure for dev {getattr(dev, 'id', '?')}: {e}")
-                q.put({
-                    "id": getattr(dev, "id", None),
-                    "devid": getattr(dev, "id", None),
-                    "devip": getattr(dev, "ip", ""),
-                    "devname": getattr(dev, "name", ""),
-                    "status": False,
-                    "state": False,
-                    "result": False,
-                })
+    def skipped(dev_id, reason, message):
+        return {"id": dev_id, "devid": dev_id, "status": False, "state": False, "result": False,
+                "error": message, "skipped": reason if reason != "error" else None}
 
-    res = []
+    res = job_control.run_devices([d.id for d in devices], worker, skipped=skipped)
     with database.connection_context():
-        while not q.empty():
-            try:
-                qres = q.get_nowait()
-                if "result" in qres and not qres["result"]:
-                    util.log_alert("run_snippet", qres.get("id", 0), "Run Snippet failed")
-                res.append(qres)
-            except queue.Empty:
-                break
+        for qres in res:
+            if "result" in qres and not qres["result"] and not qres.get("skipped"):
+                util.log_alert("run_snippet", qres.get("id", 0), "Run Snippet failed")
     return res
 
 
@@ -222,6 +186,11 @@ if __name__ == "__main__":
                 template_key = getattr(utask.snippetid, "template_command_key", None)
                 snippet_id = utask.snippetid.id if utask.snippetid else None
                 res = run_snippets(devices=devices, snippet=snippet, template_key=template_key, user_task_id=utask.id, snippet_id=snippet_id, store_in_backup=store_in_backup)
+                try:
+                    with database.connection_context():
+                        db_tasks.add_task_result("snippet", json.dumps(res), json.dumps({"task_id": utask.id}), utask.id)
+                except Exception as e:
+                    log.error("scheduled snippet results of task %s not saved: %s", utask.id, e)
 
         elif utask.task_type == "config_backup":
             log.error("TASK TYPE CONFIG BACKUP")
