@@ -194,8 +194,11 @@ class Auth(BaseModel):
             rand=''.join(random.choice(string.ascii_lowercase + string.digits) for _ in range(8))
             if message=='radius':
                 # Syslog detected a radius-user failure. Try to find the matching
-                # row that radius.py already created within a 5-second window.
+                # row that radius.py already created within a 5-second window
+                # (on this router: the same username failing on several routers at
+                # once must keep one row per router).
                 auth=Auth.select().where(
+                    Auth.devid==devid,
                     Auth.ltype==type,
                     Auth.username==username.strip(),
                     Auth.started > timestamp-5,

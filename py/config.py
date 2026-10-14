@@ -72,6 +72,14 @@ RETENTION_SEQUENCE_HISTORY_DAYS = int(srvconf.get("PYSRV_RETENTION_SEQUENCE_HIST
 # RETENTION_VERSIONS_KEEP of every device, which are always kept.
 RETENTION_VERSIONS_DAYS = int(srvconf.get("PYSRV_RETENTION_VERSIONS_DAYS", 365))
 RETENTION_VERSIONS_KEEP = int(srvconf.get("PYSRV_RETENTION_VERSIONS_KEEP", 30))
+# Days of device event history (events: syslog DHCP / wireless / link / reboot, poller and
+# alert events). Only resolved events are removed; unresolved ones are always kept.
+RETENTION_EVENTS_DAYS = int(srvconf.get("PYSRV_RETENTION_EVENTS_DAYS", 365))
+# Days of device login history (auth: local, RADIUS, Terminal Gateway, WebFig). Rows linked to
+# a session recording are kept.
+RETENTION_AUTH_DAYS = int(srvconf.get("PYSRV_RETENTION_AUTH_DAYS", 365))
+# Days of device configuration change history (account).
+RETENTION_ACCOUNT_DAYS = int(srvconf.get("PYSRV_RETENTION_ACCOUNT_DAYS", 365))
 # Remove stored config / output files no row references any more (1 = on, 0 = off).
 RETENTION_BLOB_GC = int(srvconf.get("PYSRV_RETENTION_BLOB_GC", 1))
 # Local hour (0-23) the daily cleanup starts.
@@ -84,6 +92,10 @@ SOCKET_SCAN_TIMEOUT = float(srvconf.get("PYSRV_SOCKET_SCAN_TIMEOUT", 0.2))
 DATAGRABBER_CONCURRENCY = int(srvconf.get("PYSRV_DATAGRABBER_CONCURRENCY", 25))
 # Sharding configuration for multiple data grabber mules (e.g. "2,6" or "[2,6]")
 DATAGRABBER_MULES = srvconf.get("PYSRV_DATAGRABBER_MULES", "")
+# Several syslog mules for very busy fleets (opt-in; unset = one syslog mule, the default for
+# every normal installation). Mule ids of the syslog mules in uwsgi.ini order, e.g. "3,8": the
+# first one reads UDP 5014 and hands every router's messages to one fixed mule (by its address).
+SYSLOG_MULES = srvconf.get("PYSRV_SYSLOG_MULES", "")
 # Hard ceiling (seconds) for one poll cycle; hung device threads are abandoned after this.
 DATAGRABBER_CYCLE_DEADLINE = int(srvconf.get("PYSRV_DATAGRABBER_CYCLE_DEADLINE", 240))
 # Seconds the poller reuses a device's resolved API credentials (0 = resolve every poll).

@@ -6,6 +6,7 @@
 # Author: Tomi.Mickelsson@iki.fi modified by sepehr.ha@gmail.com
 
 from peewee import *
+from playhouse.pool import MaxConnectionsExceeded
 from playhouse.shortcuts import model_to_dict
 from psycopg2.extensions import ISOLATION_LEVEL_READ_COMMITTED
 
@@ -31,6 +32,10 @@ BUDGET_REFRESH_SECONDS = 600
 _budget_lock = threading.Lock()
 _budget_state = {"pid": None, "at": 0.0, "role": None, "size": None, "busy": False}
 _last_warning = {"at": 0.0}
+
+# Errors worth retrying: pool exhausted, connection refused/lost. Callers that must not lose
+# a write (syslog) retry these instead of swallowing them.
+TRANSIENT_DB_ERRORS = (OperationalError, InterfaceError, MaxConnectionsExceeded)
 
 
 def _rate_limited_warning(msg, every=30.0):

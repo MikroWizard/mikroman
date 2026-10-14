@@ -19,15 +19,19 @@ log = logging.getLogger("db_budget")
 SAFETY_MARGIN = 10          # connections kept free for psql, migrations, monitoring, other apps
 WEB_CONNS_PER_THREAD = 2    # a web request rarely needs more than 1 (+1 for nested contexts)
 OTHER_MULE_CONNS = 3        # radius / syslog / updater
+SYSLOG_SHARE = 0.05         # syslog mule: extra connections from the spare budget (measured +9 % msg/s
+                            # from 3 to 6, tests/loadtest/syslog_load.py); default installs keep 3
 CRON_JOB_CONNS = 4          # a scheduled task (task_run.py, own process): measured < 2 in use on
                             # average while backing up 1500 devices with 40 threads
 POLLER_SHARE = 0.25
 FIRMWARE_SHARE = 0.15
-MIN_POOL = {"web": 2, "spooler": 3, "poller": 4, "firmware": 3, "mule": 2, "cli": 4}
-MAX_POOL = {"web": 8, "spooler": 40, "poller": 60, "firmware": 40, "mule": 6, "cli": 20}
+MIN_POOL = {"web": 2, "spooler": 3, "poller": 4, "firmware": 3, "mule": 2, "cli": 4, "syslog": 3}
+MAX_POOL = {"web": 8, "spooler": 40, "poller": 60, "firmware": 40, "mule": 6, "cli": 20, "syslog": 6}
 
 DEFAULT_TOPOLOGY = {
     "web": 4, "web_threads": 1, "spoolers": 4, "pollers": 1, "firmware": 1, "other_mules": 3,
+    # of the other_mules: syslog mules (they get the "syslog" pool instead of the "mule" one)
+    "syslog_mules": 1,
     # scheduled tasks (cron -> task_run.py) that may run at the same time (PYSRV_DB_CRON_JOBS)
     "cron_jobs": 2,
 }
@@ -108,6 +112,7 @@ def topology_from_uwsgi_opt(opt):
         "firmware": sum(1 for m in mules if "firmware" in m) if mules else 1,
     }
     topo["other_mules"] = (len(mules) - topo["pollers"] - topo["firmware"]) if mules else DEFAULT_TOPOLOGY["other_mules"]
+    topo["syslog_mules"] = sum(1 for m in mules if "syslog" in m) if mules else DEFAULT_TOPOLOGY["syslog_mules"]
     # A poller / firmware mule must always have a share, even if the layout was unreadable.
     topo["pollers"] = max(1, topo["pollers"])
     topo["firmware"] = max(1, topo["firmware"])
@@ -123,7 +128,9 @@ def compute_budget(max_connections, reserved=3, topology=None):
     'cli' is the pool of a scheduled task process (task_run.py); topology['cron_jobs'] of them
     are counted in the total.
 
-    Returns dict(web, spooler, poller, firmware, mule, cli, total, usable).
+    Returns dict(web, spooler, poller, firmware, mule, syslog, cli, total, usable).
+    The syslog mule(s) are part of other_mules; each gets the "syslog" pool: the "mule" pool plus a
+    share of the spare budget (SYSLOG_SHARE), so a default server (max_connections=100) keeps 3.
     """
     topo = dict(DEFAULT_TOPOLOGY)
     topo.update(topology or {})
@@ -135,13 +142,17 @@ def compute_budget(max_connections, reserved=3, topology=None):
     cron = max(0, int(topo.get("cron_jobs") or 0))
     fixed = web * topo["web"] + mule * topo["other_mules"] + cli * cron
     remaining = max(0, usable - fixed)
+    syslog_mules = max(0, min(int(topo.get("syslog_mules") or 0), topo["other_mules"]))
+    syslog = max(mule, _clamp(remaining * SYSLOG_SHARE, "syslog")) if syslog_mules else 0
+    remaining = max(0, remaining - (syslog - mule) * syslog_mules)
+    extra = (syslog - mule) * syslog_mules if syslog_mules else 0
 
     poller = _clamp(remaining * POLLER_SHARE / max(1, topo["pollers"]), "poller") if topo["pollers"] else 0
     firmware = _clamp(remaining * FIRMWARE_SHARE / max(1, topo["firmware"]), "firmware") if topo["firmware"] else 0
     left = remaining - poller * topo["pollers"] - firmware * topo["firmware"]
     spooler = _clamp(left / max(1, topo["spoolers"]), "spooler") if topo["spoolers"] else 0
 
-    total = (web * topo["web"] + mule * topo["other_mules"] + poller * topo["pollers"]
+    total = (web * topo["web"] + mule * topo["other_mules"] + extra + poller * topo["pollers"]
              + firmware * topo["firmware"] + spooler * topo["spoolers"] + cli * cron)
     # Minimums can overshoot on very small servers: scale the big roles down to fit.
     if total > usable:
@@ -159,10 +170,10 @@ def compute_budget(max_connections, reserved=3, topology=None):
                 else:
                     firmware -= cut
                 over -= cut * count
-        total = (web * topo["web"] + mule * topo["other_mules"] + poller * topo["pollers"]
+        total = (web * topo["web"] + mule * topo["other_mules"] + extra + poller * topo["pollers"]
                  + firmware * topo["firmware"] + spooler * topo["spoolers"] + cli * cron)
     return {"web": web, "spooler": spooler, "poller": poller, "firmware": firmware,
-            "mule": mule, "cli": cli, "total": total, "usable": usable}
+            "mule": mule, "syslog": syslog or mule, "cli": cli, "total": total, "usable": usable}
 
 
 def detect_role(uwsgi_mod):
@@ -190,12 +201,15 @@ def detect_role(uwsgi_mod):
             return "poller"
         if "firmware" in script:
             return "firmware"
+        if "syslog" in script:
+            return "syslog"
         return "mule"
     return "web"
 
 
 ROLE_ALIASES = {"bgtasks": "spooler", "worker": "spooler", "poller": "poller",
-                "firmware": "firmware", "web": "web", "spooler": "spooler", "mule": "mule", "cli": "cli"}
+                "firmware": "firmware", "web": "web", "spooler": "spooler", "mule": "mule", "cli": "cli",
+                "syslog": "syslog"}
 
 
 def read_server_limits(execute_sql):
