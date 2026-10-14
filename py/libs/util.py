@@ -131,6 +131,33 @@ def get_device_port(dev):
     except:
         return 8729 if getattr(dev, 'ssl', False) else 8728
 
+def get_mikrotik_service(dev, service_name, timeout=5):
+    """Read a service (ssh/winbox/telnet/www...) from /ip/service over the API.
+
+    Returns {'port': int, 'disabled': bool} or None when the device API is
+    unreachable or the service row is missing. Callers fall back to their
+    stored/default port on None.
+    """
+    router = None
+    try:
+        if not check_port(dev.ip, get_device_port(dev)):
+            return None
+        options = build_api_options(dev)
+        options['timeout'] = timeout
+        router = RouterOSCheckResource(options)
+        for res in tuple(router.api.path("/ip/service")):
+            if res.get('name') == service_name:
+                return {
+                    'port': int(res.get('port')),
+                    'disabled': bool(res.get('disabled')),
+                }
+        return None
+    except Exception as e:
+        log.warning(f"Failed to read /ip/service {service_name} on device {dev.id}: {e}")
+        return None
+    finally:
+        close_router(router)
+
 def _detect_source_ip(target_ip):
     """Local source IP the server uses to reach target_ip (UDP route lookup).
 
@@ -512,6 +539,10 @@ def get_static_info(dev, router, refresh=False, now=None):
     return info
 
 
+# Sensors written to Redis for internal use (network map mem %) but not shown as
+# device-page charts. Kept out of dev.sensors.
+UNCHARTED_SENSORS = {"total-memory"}
+
 def grab_device_data(dev, q, sysconfig_flags=None, events_map=None):
     max_attempts = 3
     attempts = 0
@@ -519,6 +550,7 @@ def grab_device_data(dev, q, sysconfig_flags=None, events_map=None):
     with database.connection_context():
         port=get_device_port(dev)
     success = False
+    curr_sec = None          # uptime (seconds) of a successful poll, for device_state
     time_to_wait=0.1
     while attempts < max_attempts:
         if check_port(dev.ip,port):
@@ -581,7 +613,7 @@ def grab_device_data(dev, q, sysconfig_flags=None, events_map=None):
             with database.connection_context():
                 check_or_fix_event(events, "connection", "API Connection")
         try:
-            keys=["free-memory","cpu-load","free-hdd-space"]
+            keys=["free-memory","total-memory","cpu-load","free-hdd-space"]
             if len(health):
                 #since routeros v7 they changed health res from api
                 excluded_keys=['cpu-overtemp-check','active-fan','fan-mode','heater-control','psu2-state','cpu-overtemp-startup-delay','fan-on-threshold','heater-threshold','use-fan','cpu-overtemp-threshold','fan-switch','psu1-state','state','state-after-reboot']
@@ -727,7 +759,7 @@ def grab_device_data(dev, q, sysconfig_flags=None, events_map=None):
 
             if is_reboot:
                 invalidate_static_info(dev.id)  # re-read routerboard/identity/wireless next poll
-                was_expected = dev.status in ('updating', 'rebooting')
+                was_expected = dev.status in ('updating', 'rebooting', 'upgrading')
                 old_uptime_str = dev.uptime
                 dev.uptime = new_uptime
 
@@ -803,13 +835,14 @@ def grab_device_data(dev, q, sysconfig_flags=None, events_map=None):
                     current_sensors = set(json.loads(dev.sensors)) if dev.sensors else set()
                 except Exception:
                     current_sensors = set()
-                new_sensors = set(keys)
+                new_sensors = set(keys) - UNCHARTED_SENSORS
                 
                 # Only trigger if we've found a brand new sensor we've never seen before
-                if new_sensors - current_sensors:
+                # (or a stale uncharted one still registered from an older build)
+                if (new_sensors - current_sensors) or (current_sensors & UNCHARTED_SENSORS):
                     log.info("updating keys for device {}".format(dev.id))
                     # Accumulate sensors so we don't forget temporarily disconnected ones
-                    updated_sensors = sorted(current_sensors.union(new_sensors))
+                    updated_sensors = sorted(current_sensors.union(new_sensors) - UNCHARTED_SENSORS)
                     dev.sensors = json.dumps(updated_sensors)
                     reddb.dev_create_keys()
                 if dev.is_dirty():
@@ -829,7 +862,7 @@ def grab_device_data(dev, q, sysconfig_flags=None, events_map=None):
         invalidate_static_info(dev.id)
         record_offline_zeros(dev)
         return True
-    q.put({"id": dev.id,"done":True,'data':data})
+    q.put({"id": dev.id,"done":True,'data':data,"uptime_s":curr_sec})
     return True
 
 

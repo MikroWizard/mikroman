@@ -10,7 +10,7 @@ import time
 import os
 import signal
 from concurrent.futures import ThreadPoolExecutor, as_completed, wait
-from libs import util
+from libs import util, fw_state, device_state
 import config
 from libs.db import db_device, db_sysconfig, db_events
 from libs.db.db import database, tune_process_db_pool, get_db_stats, reset_db_stats
@@ -26,6 +26,8 @@ except ImportError:
     uwsgi = None
 
 log = logging.getLogger("Data_grabber")
+# poll results that mean the router did not answer (shown "Offline" in the devices list)
+OFFLINE_DETAILS = ("Unreachable", "API Connection")
 
 # --- Tuning constants ---
 MIN_INTERVAL = 30  # Minimum seconds to rest between grab cycles
@@ -337,9 +339,14 @@ def grab_device_data(timer=2):
         res = []
         totals = empty_fleet_totals()
         has_data = False
+        online, offline = {}, []     # device_state: who answered this cycle (uptime) / who did not
         with database.connection_context():
             while not q.empty():
                 qres = q.get_nowait()
+                if qres.get("detail") in OFFLINE_DETAILS:
+                    offline.append(qres["id"])
+                elif qres.get("done") and qres.get("uptime_s") is not None:
+                    online[qres["id"]] = qres["uptime_s"]
                 if not qres.get("reason", False):
                     data = qres.get("data", None)
                     if data:
@@ -352,7 +359,7 @@ def grab_device_data(timer=2):
                 else:
                     dev_obj = db_device.get_device(qres['id'])
                     dev_status = dev_obj.get('status') if dev_obj else ''
-                    if dev_status in ['updating', 'rebooting']:
+                    if dev_status in ['updating', 'rebooting', 'upgrading'] and fw_state.expect_offline(qres['id']):
                         log.info(f"Device {qres['id']} is currently {dev_status} (rebooting to apply update). Skipping unreachable alert.")
                     else:
                         db_events.connection_event(
@@ -360,6 +367,11 @@ def grab_device_data(timer=2):
                             qres.get("detail", "connection"), "Critical", 0,
                             qres.get("reason", "problem in data puller")
                         )
+
+        try:
+            device_state.record_cycle(RedisDB({}).r, online, offline)
+        except Exception as e:
+            log.warning(f"Could not record device online state: {e}")
 
         redopts = {"dev_id": 'all', "keys": list(FLEET_TOTAL_KEYS)}
         try:

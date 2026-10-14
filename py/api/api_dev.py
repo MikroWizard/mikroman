@@ -13,7 +13,7 @@ import re
 
 import config
 from flask import redirect, request, session
-from libs import ping, util
+from libs import ping, util, device_state
 from libs.db import (
     db_device,
     db_groups,
@@ -128,11 +128,26 @@ def list_devs():
             .paginate(page, limit)
             .dicts()
         )
+        devs = list(devs)
+        # Live state from the poller (one Redis read for the page): an unreachable router shows
+        # "Offline" instead of the last uptime stored in the DB, an online one its current uptime.
+        try:
+            states = device_state.get_states(RedisDB({}).r, [d["id"] for d in devs])
+        except Exception as e:
+            log.warning("Could not read device online state: %s", e)
+            states = {}
         for dev in devs:
             temp = dev
             del temp["user_name"]
             del temp["password"]
-            if " " not in temp["uptime"]:
+            st = states.get(str(temp["id"]))
+            temp["online"] = st["online"] if st else None
+            temp["offline_since"] = st.get("since") if st and not st["online"] else None
+            if st and not st["online"]:
+                temp["uptime"] = device_state.OFFLINE_TEXT
+            elif st:
+                temp["uptime"] = device_state.format_uptime(st["uptime_s"])
+            if temp["uptime"] and temp["uptime"] != device_state.OFFLINE_TEXT and " " not in temp["uptime"]:
                 temp["uptime"] = (
                     temp["uptime"]
                     .replace("w", " week ")
@@ -770,7 +785,13 @@ def dev_sensors():
     end_time = datetime.datetime.now()
     try:
         res = {}
-        res["sensors"] = json.loads(dev["sensors"])
+        # Non-chart sensors (e.g. total-memory, used by the network map for mem %) live in
+        # Redis but must never reach the widget list: "total" in the name would also send
+        # them down the traffic-total branch and the page would get a sensor without data.
+        res["sensors"] = [
+            s for s in (json.loads(dev["sensors"] or "[]") or [])
+            if s not in util.UNCHARTED_SENSORS
+        ]
         redopts = {
             "dev_id": dev["id"],
             "keys": res["sensors"],
