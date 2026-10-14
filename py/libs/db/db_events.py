@@ -74,7 +74,7 @@ def connection_event(devid,src,detail,level,status=0,comment=""):
             event.save()
             _maybe_alert_on_new(event)
         elif event and status:
-            list(event)[0].update(status=status).execute()
+            Events.update(status=status).where(Events.id == list(event)[0].id).execute()
 
 def config_event(devid,src,detail,level,status=0,comment=""):
     #check if we have same event for device before adding new one
@@ -90,7 +90,7 @@ def config_event(devid,src,detail,level,status=0,comment=""):
         event.save()
         _maybe_alert_on_new(event)
     elif event and status:
-        list(event)[0].update(status=status).execute()
+        Events.update(status=status).where(Events.id == list(event)[0].id).execute()
 
 
 
@@ -108,7 +108,7 @@ def firmware_event(devid,src,detail,level,status=0,comment=""):
         event.save()
         _maybe_alert_on_new(event)
     elif event and status:
-        list(event)[0].update(status=status).execute()
+        Events.update(status=status).where(Events.id == list(event)[0].id).execute()
 
 def health_event(devid, src, detail, level, status=0, comment=""):
     #check if we have same event for device before adding new one
@@ -124,7 +124,7 @@ def health_event(devid, src, detail, level, status=0, comment=""):
         event.save()
         _maybe_alert_on_new(event)
     elif event and status:
-        list(event)[0].update(status=status).execute()
+        Events.update(status=status).where(Events.id == list(event)[0].id).execute()
 
 def state_event(devid, src, detail, level, status=0, comment=""):
     #check if we have same event for device before adding new one
@@ -140,7 +140,7 @@ def state_event(devid, src, detail, level, status=0, comment=""):
         event.save()
         _maybe_alert_on_new(event)
     elif event and status:
-        list(event)[0].update(status=status).execute()
+        Events.update(status=status).where(Events.id == list(event)[0].id).execute()
     elif not event and status:
         event=Events(devid=devid, eventtype="state", detail=detail, level=level, src=src, status=status, comment=comment)
         event.save()

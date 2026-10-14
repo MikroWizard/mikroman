@@ -15,6 +15,9 @@
 #   backups                RETENTION_VERSIONS_KEEP per device (and command), always kept;
 #                          also the newest configuration backup row of every device
 #   blob files             versions/{raw,norm}/.. files no row references (RETENTION_BLOB_GC)
+#   events                 resolved events older than RETENTION_EVENTS_DAYS (open ones are kept)
+#   auth                   login history older than RETENTION_AUTH_DAYS (rows with a recording kept)
+#   account                config change history older than RETENTION_ACCOUNT_DAYS
 #
 # Blob files are shared (content addressed): one is removed only when no config version,
 # execution log or backup row references it and it was not written or reused for
@@ -124,6 +127,38 @@ def prune_sequence_history(days, stop=None):
         "pro_sequence_history",
         "status IS DISTINCT FROM 'success' AND created < LOCALTIMESTAMP - %s::interval",
         (_interval(days),), stop)
+
+
+def _column_exists(table, column):
+    with database.connection_context():
+        return database.execute_sql(
+            "SELECT 1 FROM information_schema.columns WHERE table_schema = 'public'"
+            " AND table_name = %s AND column_name = %s", (table, column)).fetchone() is not None
+
+
+def prune_events(days, stop=None):
+    """Resolved events (DHCP / wireless / link history, fixed alerts); open ones are kept."""
+    if days <= 0:
+        return 0
+    return _delete_in_batches("events", "status = true AND eventtime < LOCALTIMESTAMP - %s::interval",
+                              (_interval(days),), stop)
+
+
+def prune_auth(days, stop=None):
+    """Login history. Rows linked to a session recording (recording_path, Pro) are kept."""
+    if days <= 0:
+        return 0
+    where = "created < LOCALTIMESTAMP - %s::interval"
+    if _column_exists("auth", "recording_path"):
+        where += " AND (recording_path IS NULL OR recording_path = '')"
+    return _delete_in_batches("auth", where, (_interval(days),), stop)
+
+
+def prune_account(days, stop=None):
+    """Configuration change history."""
+    if days <= 0:
+        return 0
+    return _delete_in_batches("account", "created < LOCALTIMESTAMP - %s::interval", (_interval(days),), stop)
 
 
 def _has_index_on(table, column):
@@ -334,6 +369,18 @@ def run_all(stop=None):
         except Exception as e:
             summary["blobs"] = "error: {}".format(e)
             log.error("retention: blob cleanup failed: %s", e)
+    # Device log tables: independent of the blob cleanup above (no stored files reference them)
+    for name, fn in (("events", lambda: prune_events(c.RETENTION_EVENTS_DAYS, stop)),
+                     ("auth", lambda: prune_auth(c.RETENTION_AUTH_DAYS, stop)),
+                     ("account", lambda: prune_account(c.RETENTION_ACCOUNT_DAYS, stop))):
+        try:
+            summary[name] = fn()
+        except Stopped:
+            summary["stopped"] = True
+            return summary
+        except Exception as e:
+            summary[name] = "error: {}".format(e)
+            log.error("retention: %s failed: %s", name, e)
     summary["seconds"] = round(time.time() - started, 1)
     log.info("retention: %s", summary)
     return summary
