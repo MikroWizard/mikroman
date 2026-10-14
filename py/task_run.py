@@ -224,7 +224,9 @@ if __name__ == "__main__":
 
         elif utask.task_type == "firmware":
             log.info("firmware update task")
-            if ISPRO:
+            # Pro task runner with a valid license; otherwise the free one (no Latest Cloud,
+            # no PtP ordering) so the scheduled update still runs
+            if ISPRO and utilpro.check_license_dev_limit_exp():
                 res = utilpro.run_firmware_task(utask)
             else:
                 res = firm_lib.run_firmware_task(utask)

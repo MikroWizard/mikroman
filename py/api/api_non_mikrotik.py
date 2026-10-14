@@ -21,6 +21,7 @@ except ImportError:
         return True, None
 from libs import util, kek_provider, envelope_crypto
 import bgtasks_non_mikrotik
+from libs import job_control
 try:
     from libs import utilpro
     ISPRO = True
@@ -747,10 +748,13 @@ def bulk_add_non_mikrotik():
     task_id = f"bulk_add_nonmikrotik_{now.strftime('%Y%m%d_%H%M%S')}_{hash(str(devices)) % 1000000}"
 
     db_tasks.create_bulk_add_task(task_id)
-    db_syslog.add_syslog_event(user, "Bulk Add (Non-MikroTik)", "start", get_ip(), get_agent(), json.dumps(input_data))
+    redacted = dict(input_data, devices=[{k: ("***" if "pass" in k.lower() else v) for k, v in d.items()}
+                                         if isinstance(d, dict) else d for d in devices])
+    db_syslog.add_syslog_event(user, "Bulk Add (Non-MikroTik)", "start", get_ip(), get_agent(), json.dumps(redacted))
 
+    # the device list (with passwords) never goes into the spool file (64 KB limit, plain text)
     bgtasks_non_mikrotik.bulk_add_non_mikrotik_devices(
-        devices=clean_devices,
+        payload_id=job_control.stash_payload(clean_devices),
         user_id=user.id,
         task_id=task_id
     )

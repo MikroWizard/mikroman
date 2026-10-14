@@ -170,23 +170,34 @@ def update_device(*args, **kwargs):
                 continue
             eligible_devs.append(dev)
 
-        if ISPRO and hasattr(utilpro, "order_devices_for_upgrade"):
+        if ISPRO and kwargs.get('ptp_safe_ordering', True) and hasattr(utilpro, "order_devices_for_upgrade"):
             try:
-                eligible_devs = utilpro.order_devices_for_upgrade(eligible_devs)
+                if utilpro.check_license_dev_limit_exp():
+                    eligible_devs = utilpro.order_devices_for_upgrade(eligible_devs)
             except Exception as e:
                 log.warning(f"Device update ordering skipped: {e}")
+
+        version = kwargs.get('version')
+        if current_task != 'upgrade' and version == 'latest_cloud':
+            # Pro 'Latest Cloud': newest release of the chosen mikrotik.com channel
+            version = None
+            if ISPRO and hasattr(utilpro, "latest_cloud_version") and utilpro.check_license_dev_limit_exp():
+                version = utilpro.latest_cloud_version(kwargs.get('channel'))
+            if not version:
+                log.warning("Firmware update: Latest Cloud version not available (Pro license or mikrotik.com) - nothing queued")
+                return [{"id": d.id, "status": False, "reason": "Latest Cloud version not available"} for d in eligible_devs]
 
         if current_task == 'upgrade':
             request = {"kind": "routerboot"}
         else:
             request = {
                 "kind": "update",
-                "version": kwargs.get('version'),
+                "version": version,
                 "mode": kwargs.get('mode', 'full'),
                 "packages": kwargs.get('packages'),
                 "auto_upgrade_rb": kwargs.get('auto_upgrade_rb', True),
                 "delivery_method": kwargs.get('delivery_method', 'local_repo'),
-                "channel": kwargs.get('channel') or None,
+                "channel": kwargs.get('channel') if kwargs.get('delivery_method') == 'native' else None,
             }
         res = firm_lib.enqueue_device_updates(eligible_devs, request, origin="user:{}".format(uid))
         queued = sum(1 for r in res if r.get("status"))
@@ -202,6 +213,42 @@ def update_device(*args, **kwargs):
         task.status = 0
         task.save()
         database.close()
+
+
+@spool(pass_arguments=True)
+def reboot_devices(*args, **kwargs):
+    """Reboot the selected MikroTik devices (devices list batch action). Only devices of the
+    user; routers in a firmware update or a backup / snippet job are skipped (firm_lib.reboot_device)."""
+    reset_db()
+    try:
+        devids = [x for x in str(kwargs.get('devices') or "").split(",") if x.strip().isdigit()]
+        if not devids:
+            return False
+        uid = kwargs.get('uid', False)
+        by = kwargs.get('by', "")
+        devs = [d for d in db_user_group_perm.DevUserGroupPermRel.get_user_devices_by_ids(uid, devids)
+                if not d.device_type or d.device_type == 'mikrotik']
+        if not devs:
+            log.info("Reboot: no MikroTik device of the user among the selected ones")
+            return False
+
+        def _reboot(dev):
+            try:
+                return dev, firm_lib.reboot_device(dev, by=by)
+            finally:
+                database.close()
+        workers = max(1, min(MAX_CONCURRENT_THREADS, len(devs)))
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            results = list(executor.map(_reboot, devs))
+        done = sum(1 for _, (ok, _r) in results if ok)
+        log.info(f"Reboot: {done} of {len(results)} device(s) rebooted")
+        for dev, (ok, reason) in results:
+            if not ok:
+                log.warning(f"Reboot of {dev.name} ({dev.ip}) not done: {reason}")
+        return True
+    except Exception as e:
+        log.error(f"Reboot job failed: {e}")
+        return False
 
 
 @spool(pass_arguments=True)

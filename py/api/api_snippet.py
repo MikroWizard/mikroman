@@ -12,6 +12,7 @@ from libs.webutil import app, login_required,buildResponse,get_myself,get_ip,get
 from libs.db.db_groups import devs, get_devs_of_groups
 from functools import reduce
 import bgtasks
+from libs import job_control
 import operator
 import logging
 import json
@@ -166,12 +167,10 @@ def exec_snippet():
             'created': datetime.datetime.now()
         }
         task=utasks.create(**data)
-        status=db_tasks.exec_snipet_status().status
-        if not status:
-            bgtasks.exec_snipet(task=task,default_ip=default_ip,devices=taskdata['memebrs'],uid=uid)
-            res={'status': True}
-        else:
-            res={'status': status}
+        # ids only (a spool request is limited to 64 KB); queued when a snippet job runs
+        spool_args = dict(utask_id=task.id, default_ip=default_ip, devices=taskdata['memebrs'], uid=uid)
+        job_control.check_spool_size(spool_args)
+        bgtasks.exec_snipet(**spool_args)
         #add members to task
         db_syslog.add_syslog_event(get_myself(), "Snippet","execute", get_ip(),get_agent(),json.dumps(input))
         return buildResponse([{'status': 'success'}],200)

@@ -10,6 +10,7 @@ from flask import request
 from libs.db import db_tasks,db_syslog
 from libs.webutil import app, login_required,buildResponse,get_myself,get_ip,get_agent
 import bgtasks
+from libs import job_control
 import json
 import logging
 log = logging.getLogger("api.scanner")
@@ -69,8 +70,10 @@ def bulk_add_devices():
     task_id = f"bulk_add_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{hash(str(devices)) % 1000000}"
     
     db_tasks.create_bulk_add_task(task_id)
-    db_syslog.add_syslog_event(get_myself(), "Bulk Add", "start", get_ip(), get_agent(), json.dumps(input))
-    bgtasks.bulk_add_devices(devices=devices, user=get_myself(), task_id=task_id)
+    redacted = dict(input, devices=[{k: ("***" if "pass" in k.lower() else v) for k, v in d.items()} for d in devices])
+    db_syslog.add_syslog_event(get_myself(), "Bulk Add", "start", get_ip(), get_agent(), json.dumps(redacted))
+    # the device list (with passwords) never goes into the spool file
+    bgtasks.bulk_add_devices(payload_id=job_control.stash_payload(devices), user=get_myself(), task_id=task_id)
     
     return buildResponse({'taskId': task_id}, 200)
 

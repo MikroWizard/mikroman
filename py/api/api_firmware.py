@@ -14,7 +14,13 @@ from libs import util,firm_lib
 from libs.webutil import app, login_required, get_myself,buildResponse,get_myself,get_ip,get_agent
 import bgtasks
 import re
+import os
 import logging
+try:
+    from libs import utilpro
+    ISPRO = True
+except ImportError:
+    ISPRO = False
 
 log = logging.getLogger("api.firmware")
 import json
@@ -46,55 +52,77 @@ def check_task_status():
     status=db_tasks.update_check_status().status
     return jsonify({'status': status})
 
+def _update_options(input):
+    """Firmware update options shared by the device and the device group update:
+    (kwargs for bgtasks.update_device, error text or None)."""
+    version = input.get('version') or None
+    delivery_method = input.get('delivery_method', 'local_repo')
+    mode = input.get('mode') or 'full'
+    if delivery_method == 'native':
+        mode = 'full'                    # the router updates RouterOS and every package itself
+    if version == 'latest_cloud' and not ISPRO:
+        return None, "Latest Cloud is a Pro feature"
+    options = {
+        "version": version,
+        "mode": mode,
+        "packages": input.get('packages') if delivery_method != 'native' else None,
+        "auto_upgrade_rb": input.get('auto_upgrade_rb', True),
+        "delivery_method": delivery_method,
+        "channel": input.get('channel'),
+        "ptp_safe_ordering": input.get('ptp_safe_ordering', True),
+    }
+    err = firm_lib.update_request_error({"kind": "update", "mode": mode, "delivery_method": delivery_method})
+    return options, err
+
+
 @app.route('/api/firmware/update_firmware', methods = ['POST'])
 @login_required(role='admin',perm={'device':'full'})
 def update_device():
-    """Update devices with optional version, package list, mode, and auto-upgrade RouterBOOT"""
-    status=db_tasks.update_job_status().status
+    """Queue a firmware update (version or 'latest_cloud' + channel - Pro, scope full /
+    firmware_only, additional packages, auto-upgrade RouterBOOT, PtP station-first ordering - Pro).
+    Requests are queued per device and run by the firmware mule, so a new request is never
+    dropped because another one is still running."""
     input=request.json or {}
     devids=input.get('devids',"0")
-    version=input.get('version')
-    mode=input.get('mode', 'full')
-    packages=input.get('packages')
-    auto_upgrade_rb=input.get('auto_upgrade_rb', True)
-    delivery_method=input.get('delivery_method', 'local_repo')
     uid = session.get("userid") or False
     if not uid:
         return buildResponse({'result':'failed','err':"No User"}, 200)
-    if not status:
-        db_syslog.add_syslog_event(get_myself(), "Firmware","update", get_ip(),get_agent(),json.dumps(input))
-        bgtasks.update_device(
-            devices=devids,
-            uid=uid,
-            task="update",
-            version=version,
-            mode=mode,
-            packages=packages,
-            auto_upgrade_rb=auto_upgrade_rb,
-            delivery_method=delivery_method
-        )
-        res={'status': True}
-    else:
-        res={'status': status}
-    return buildResponse(res,200)
+    options, err = _update_options(input)
+    if err:
+        return buildResponse({'result':'failed','err':err}, 200)
+    db_syslog.add_syslog_event(get_myself(), "Firmware","update", get_ip(),get_agent(),json.dumps(input))
+    bgtasks.update_device(devices=devids, uid=uid, task="update", **options)
+    return buildResponse({'status': True},200)
 
 @app.route('/api/firmware/upgrade_firmware', methods = ['POST'])
 @login_required(role='admin',perm={'device':'full'})
 def upgrade_firmware():
-    """Update devices"""
-    status=db_tasks.update_job_status().status
-    input=request.json
+    """Queue a RouterBOOT upgrade for devices"""
+    input=request.json or {}
     devids=input.get('devids',"0")
     uid = session.get("userid") or False
     if not uid:
         return buildResponse({'result':'failed','err':"No User"}, 200)
-    if not status:
-        db_syslog.add_syslog_event(get_myself(), "Firmware","Upgrade", get_ip(),get_agent(),json.dumps(input))
-        bgtasks.update_device(devices=devids,uid=uid,task="upgrade")
-        res={'status': True}
-    else:
-        res={'status': status}
-    return buildResponse(res,200)
+    db_syslog.add_syslog_event(get_myself(), "Firmware","Upgrade", get_ip(),get_agent(),json.dumps(input))
+    bgtasks.update_device(devices=devids,uid=uid,task="upgrade")
+    return buildResponse({'status': True},200)
+
+@app.route('/api/firmware/reboot_devices', methods = ['POST'])
+@login_required(role='admin',perm={'device':'full'})
+def reboot_devices():
+    """Reboot the selected MikroTik devices (devices list batch action) in the background.
+    Explicit device ids only: '0' (all devices) is not accepted for a reboot."""
+    input=request.json or {}
+    uid = session.get("userid") or False
+    if not uid:
+        return buildResponse({'result':'failed','err':"No User"}, 200)
+    ids = [x.strip() for x in str(input.get('devids') or "").split(",") if x.strip().isdigit() and int(x) > 0]
+    if not ids:
+        return buildResponse({'result':'failed','err':"No devices selected"}, 200)
+    me = get_myself()
+    db_syslog.add_syslog_event(me, "Device","reboot", get_ip(),get_agent(),json.dumps(input))
+    bgtasks.reboot_devices(devices=",".join(ids), uid=uid, by=getattr(me, "username", "") or "")
+    return buildResponse({'status': True},200)
 
 @app.route('/api/firmware/get_firms', methods = ['POST'])
 @login_required(role='admin',perm={'settings':'full'})
@@ -203,15 +231,18 @@ def get_firmware(firmid):
         # if dev.arch != firm.architecture:
         #     return buildResponse({'result':'failed','err':"Wrong architecture"}, 200)
         path=firm.location
-        return send_file(path, as_attachment=True)
-    # log.error(dev)
-    return buildResponse({'result':'failed','err':"somthing went wrong"}, 200)
+        if path and os.path.isfile(path):
+            return send_file(path, as_attachment=True)
+    # 404 (not 200 + JSON): RouterOS /tool/fetch would otherwise store the error text as the
+    # package file and report the download as finished.
+    return buildResponse({'result':'failed','err':"Firmware not found"}, 404)
 
 @app.route('/api/devgroup/firmware_action', methods = ['POST'])
 @login_required(role='admin',perm={'device':'full'})
 def devgroup_firmware_action():
-    """Update or upgrade firmware for devices in a group"""
-    input = request.json
+    """Update or upgrade firmware for devices in a group (update: same options as
+    /api/firmware/update_firmware)"""
+    input = request.json or {}
     group_id = input.get('groupId')
     action = input.get('action')
     uid = session.get("userid")
@@ -238,17 +269,18 @@ def devgroup_firmware_action():
     if not devices:
         return buildResponse({'result':'failed','err':"No accessible devices in group"}, 200)
     
-    # Check if task is already running
-    status = db_tasks.update_job_status().status
-    if status:
-        return buildResponse({'status': status}, 200)
-    
     # Convert devices to comma-separated string
     devids = ",".join([str(dev.id) for dev in devices])
     
+    options = {}
+    if action == 'update':
+        options, err = _update_options(input)
+        if err:
+            return buildResponse({'result':'failed','err':err}, 200)
+
     # Start background task
     db_syslog.add_syslog_event(get_myself(), "Firmware", action, get_ip(), get_agent(), json.dumps(input))
-    bgtasks.update_device(devices=devids, uid=uid, task=action)
+    bgtasks.update_device(devices=devids, uid=uid, task=action, **options)
     
     return buildResponse({'status': True}, 200)
 
@@ -276,10 +308,10 @@ def get_device_packages():
     if not devid:
         return buildResponse({'result':'failed','err':"Missing devid"}, 200)
     
-    dev = db_device.get_device(devid)
+    dev = db_device.Devices.get_or_none(db_device.Devices.id == devid)
     if not dev:
         return buildResponse({'result':'failed','err':"Device not found"}, 200)
-    
+
     options = util.build_api_options(dev)
     router = None
     try:
@@ -293,7 +325,7 @@ def get_device_packages():
                 'disabled': r.get('disabled', False),
                 'scheduled': r.get('scheduled', '')
             }
-            for r in results if 'name' in r
+            for r in results if 'name' in r and r.get('available') not in (True, 'true', 'yes')
         ]
         return buildResponse({'packages': packages, 'arch': dev.arch, 'current_version': dev.current_firmware}, 200)
     except Exception as e:

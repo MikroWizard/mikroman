@@ -13,7 +13,8 @@ import uuid
 from flask import request, Response, session
 
 from libs.db import db_user_tasks, db_syslog, db_tasks, db_user_group_perm
-from libs.db.db_config_versions import list_executions
+from libs.db.db_config_versions import list_executions, CommandExecutionLog
+from libs import job_control
 from libs.webutil import app, login_required, buildResponse, get_myself, get_ip, get_agent
 import bgtasks
 
@@ -76,16 +77,7 @@ def executions_run():
         return buildResponse({"status": "failed", "error": "No command specified (command_key/custom_command/snippet_id)"}, 400)
 
     run_id = str(uuid.uuid4())
-
-    # Create signal task for cancel tracking
-    try:
-        db_tasks.create_exec_multi_brand_task(task_id=run_id)
-    except Exception:
-        pass
-
-    db_syslog.add_syslog_event(user, "Execution", "Run", get_ip(), get_agent(), json.dumps(input_data))
-
-    bgtasks.exec_multi_brand(
+    spool_args = dict(
         device_ids=selected,
         command_key=input_data.get("command_key"),
         custom_command=input_data.get("custom_command"),
@@ -94,7 +86,22 @@ def executions_run():
         is_config_mode=input_data.get("is_config_mode", False),
         user_task_id=input_data.get("user_task_id"),
         run_id=run_id,
+        task_id=run_id,
     )
+    try:
+        job_control.check_spool_size(spool_args)
+    except ValueError as e:
+        return buildResponse({"status": "failed", "error": "Command text is too large: {}".format(e)}, 400)
+
+    # Tasks row of this run: status, stop and results all use the run id
+    try:
+        db_tasks.create_exec_multi_brand_task(task_id=run_id)
+    except Exception:
+        pass
+
+    db_syslog.add_syslog_event(user, "Execution", "Run", get_ip(), get_agent(), json.dumps(input_data))
+
+    bgtasks.exec_multi_brand(**spool_args)
 
     return buildResponse({"status": "success", "execution_run_id": run_id, "device_count": len(selected)}, 200)
 
@@ -109,8 +116,6 @@ def executions_status():
 
     status_info = {"finished": False, "device_count": 0, "ok_count": 0, "error_count": 0, "version_count": 0}
     try:
-        from libs.db.db_config_versions import CommandExecutionLog
-        from playhouse.shortcuts import fn
         logs = list(CommandExecutionLog.select().where(
             CommandExecutionLog.execution_run_id == execution_run_id
         ))
@@ -122,8 +127,12 @@ def executions_status():
         pass
 
     try:
-        sig = db_tasks.get_task_by_signal(185)
-        status_info["finished"] = not bool(sig.status)
+        job_control.reconcile_stale_flags((185,))
+        T = db_tasks.Tasks
+        row = T.get_or_none((T.signal == 185) & (T.task_id == str(execution_run_id)))
+        if row is not None:
+            # 'done' is set when the run ends (job_control.release_job); queued runs are not done
+            status_info["finished"] = (not bool(row.status)) and row.action == "done"
     except Exception:
         pass
 

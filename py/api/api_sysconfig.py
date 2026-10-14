@@ -14,7 +14,8 @@ import signal
 import os
 from libs.db import db_sysconfig,db_syslog, db_tasks
 from libs import task_tracker
-from libs import util
+from libs import job_control
+from libs import util, firm_lib
 from libs.webutil import app, login_required,buildResponse,get_myself,get_ip,get_agent
 import time
 import logging
@@ -82,7 +83,8 @@ def sysconfig_save_all():
 def tasks_list():
     """get all tasks"""
     input = request.json
-    res=[]
+    # a job killed by harakiri / restart must not show 'running' forever
+    job_control.reconcile_stale_flags()
     res=db_tasks.get_all().dicts()
     for t in res:
         t['name']=t['name'].replace("-"," ").replace("_"," ")
@@ -110,6 +112,20 @@ def stop_task():
     except Exception as e:
         log.error(f"Error stopping task {task_signal}: {e}")
         return buildResponse({'result': 'failed', 'err': str(e)}, 200)
+    if task_signal == 110:
+        # Firmware updates are queued per device and run by the firmware mule: Stop drops
+        # the queued (not yet started) devices; devices being updated finish their step.
+        try:
+            dropped = firm_lib.cancel_queued_updates()
+        except Exception as e:
+            log.error(f"Error cancelling queued firmware updates: {e}")
+            dropped = 0
+        if dropped:
+            res['result'] = 'success'
+            res['cancelled_rows'] = (res.get('cancelled_rows') or 0) + dropped
+            if res.get('mode') == 'queued-only':
+                res['mode'] = 'graceful'
+
     log.info(f"Stop task {task_signal}: mode={res['mode']} removed={len(res['removed_files'])} killed={res['killed_pids']} cancelled_rows={res['cancelled_rows']}")
     if res['result'] != 'success':
         return buildResponse({'result': 'failed', 'err': 'No running or queued task'}, 200)

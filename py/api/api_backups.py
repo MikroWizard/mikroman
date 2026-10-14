@@ -9,6 +9,7 @@ from flask import request, jsonify, session
 from libs.db import db_tasks, db_backups, db_device, db_syslog, db_user_group_perm
 from libs.db.db_user_tasks import UserTasks, Snippets
 from libs import util
+from libs import job_control
 from libs.webutil import app, login_required, buildResponse, get_myself, get_ip, get_agent
 import bgtasks
 import logging
@@ -40,20 +41,31 @@ log = logging.getLogger("api.firmware")
 @app.route('/api/backup/make', methods=['POST'])
 @login_required(role='admin', perm={'backup': 'write'})
 def backup_create():
+    """Start a backup of the user's devices ("0" = all of them). The background job gets
+    device ids only (permission filtered here). When a backup is already running the
+    request is queued and runs after it; 'status' tells the UI that one was running."""
     input = request.json or {}
     devids = input.get('devids', False)
-    status = db_tasks.backup_job_status().status
-    if not status:
-        db_syslog.add_syslog_event(get_myself(), "Backup Managment", "Create", get_ip(), get_agent(), json.dumps(input))
-        if devids == "0":
-            all_devices = list(db_device.get_all_device())
-            bgtasks.backup_devices(devices=all_devices)
-        else:
-            devices = db_device.get_devices_by_id(devids)
-            bgtasks.backup_devices(devices=devices)
-        return buildResponse([{'status': status}], 200)
+    if not devids:
+        return buildResponse({'status': 'failed'}, 200, error="No devices selected")
+    uid = session.get("userid") or False
+    running = job_control.job_running(120)
+    if devids == "0":
+        devices = db_user_group_perm.DevUserGroupPermRel.get_user_devices(uid)
     else:
-        return buildResponse([{'status': status}], 200)
+        if not isinstance(devids, (list, tuple)):
+            devids = [devids]
+        devices = db_user_group_perm.DevUserGroupPermRel.get_user_devices_by_ids(uid, devids)
+    device_ids = sorted({d.id for d in devices})
+    if not device_ids:
+        return buildResponse({'status': 'failed'}, 200, error="No permitted devices selected")
+    try:
+        job_control.check_spool_size({"device_ids": device_ids, "uid": uid})
+    except ValueError as e:
+        return buildResponse({'status': 'failed'}, 200, error="Too many devices for one backup request: {}".format(e))
+    db_syslog.add_syslog_event(get_myself(), "Backup Managment", "Create", get_ip(), get_agent(), json.dumps(input))
+    bgtasks.backup_devices(device_ids=device_ids, uid=uid)
+    return buildResponse([{'status': running, 'queued': running, 'device_count': len(device_ids)}], 200)
 
 
 @app.route('/api/backup/list', methods=['POST'])
@@ -106,25 +118,20 @@ def backup_list():
         backups = utilpro.search_in_backups(search, backups)
 
     # Correlate metadata with CommandExecutionLog & UserTasks (v2.0.0 multi-brand support + v1.3.1 backward compatibility)
-    path_map = {}
+    # Each backup row is matched with the run of the same device that stored its raw file,
+    # nearest in time: unchanged configurations share one raw file (raw dedup), so the newest
+    # run with that file is not necessarily the one that wrote this row.
+    log_for_backup = {}
     if CommandExecutionLog and len(backups):
         try:
-            raw_paths = []
-            for back in backups:
-                p = back.dir or ""
-                if "raw/" in p:
-                    raw_paths.append("raw/" + p.split("raw/")[-1])
-                elif p.startswith("raw/"):
-                    raw_paths.append(p)
-            if raw_paths:
-                logs = list(CommandExecutionLog.select().where(CommandExecutionLog.raw_storage_path << raw_paths).order_by(CommandExecutionLog.id.desc()))
-                for l in logs:
-                    if l.raw_storage_path:
-                        dev_id = l.device_id_id if hasattr(l, 'device_id_id') else (l.device_id.id if hasattr(l.device_id, 'id') else l.device_id)
-                        if (dev_id, l.raw_storage_path) not in path_map:
-                            path_map[(dev_id, l.raw_storage_path)] = l
-                        if l.raw_storage_path not in path_map:
-                            path_map[l.raw_storage_path] = l
+            ids = [b.id for b in backups if b.devid_id and b.dir and "raw/" in b.dir]
+            pairs = db_backups.runs_of_backups(ids)
+            log_ids = sorted({lid for lid in pairs.values() if lid})
+            logs = {}
+            for i in range(0, len(log_ids), 1000):
+                for l in CommandExecutionLog.select().where(CommandExecutionLog.id << log_ids[i:i + 1000]):
+                    logs[l.id] = l
+            log_for_backup = {bid: logs[lid] for bid, lid in pairs.items() if lid in logs}
         except Exception as ex:
             log.warning("api_backups: CommandExecutionLog lookup failed: %s", ex)
 
@@ -157,19 +164,7 @@ def backup_list():
         command = "export"
         source_id = None
 
-        p = back.dir or ""
-        raw_key = None
-        if "raw/" in p:
-            raw_key = "raw/" + p.split("raw/")[-1]
-        elif p.startswith("raw/"):
-            raw_key = p
-
-        exec_log = None
-        if raw_key:
-            if back_dev_id and (back_dev_id, raw_key) in path_map:
-                exec_log = path_map[(back_dev_id, raw_key)]
-            else:
-                exec_log = path_map.get(raw_key)
+        exec_log = log_for_backup.get(back.id)
 
         if exec_log:
             cmd_key = exec_log.command_key
