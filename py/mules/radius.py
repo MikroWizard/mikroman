@@ -287,6 +287,24 @@ class RadServer(ServerAsync):
             dev_ip = pkt['NAS-IP-Address'][0]
             dev = db_device.query_device_by_ip(dev_ip)
             type = pkt['Acct-Status-Type'][0]
+            if not dev:                      # query_device_by_ip returns False when unknown
+                log.warning("Accounting %s from unknown router %s ignored" % (type, dev_ip))
+                reply = self.CreateReplyPacket(pkt)
+                protocol.send_response(reply, addr)
+                return
+            if type in ('Accounting-On', 'Accounting-Off'):
+                # The router (re)started or stops accounting (RFC 2866): every session it
+                # had is over and will never get its own Stop. These packets carry no
+                # User-Name.
+                closed = db_AA.Auth.close_device_radius_sessions(dev.id, ts)
+                log.info("Router %s sent %s: %d open login session(s) closed" % (dev_ip, type, closed))
+                reply = self.CreateReplyPacket(pkt)
+                protocol.send_response(reply, addr)
+                return
+            if type not in ('Start', 'Stop'):
+                reply = self.CreateReplyPacket(pkt)       # Interim-Update / Alive: nothing to log
+                protocol.send_response(reply, addr)
+                return
             user = pkt['User-Name'][0]
             userip = pkt['Calling-Station-Id'][0]
             sessionid = pkt['Acct-Session-Id'][0]
