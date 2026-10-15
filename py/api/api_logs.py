@@ -61,6 +61,44 @@ def _get_redis_client():
     except Exception:
         return None
 
+# Front updater (front-update.py in the mikrofront container) calls /api/get_version on every
+# update check (30-60 min). If it stops calling, the updater is dead and the UI can never update.
+FRONT_UPDATER_SEEN_KEY = "mw:front_updater_last_seen"
+FRONT_UPDATER_STALE_SECONDS = 3 * 1800
+# Older front builds render license_info.message as plain text only, so the layout uses
+# separators instead of markup.
+FRONT_UPDATER_STUCK_MESSAGE = (
+    "⚠ ACTION REQUIRED — the MikroFront auto-updater has stopped, so this web UI cannot receive updates. "
+    "Run this command once on the MikroWizard server:  ▶  "
+    "sudo sh -c 'docker exec mikrofront rm -f /etc/cron.d/mwcrontab; "
+    "touch /opt/mikrowizard/nginx-ssl-redirect.conf /opt/mikrowizard/nginx-ssl-server.conf; "
+    "docker restart mikrofront'"
+)
+
+def _mark_front_updater_seen():
+    try:
+        r_client = _get_redis_client()
+        if r_client:
+            r_client.set(FRONT_UPDATER_SEEN_KEY, int(time.time()))
+    except Exception as e:
+        log.warning(f"Could not store front updater heartbeat: {e}")
+
+def _front_updater_stuck():
+    try:
+        r_client = _get_redis_client()
+        if not r_client:
+            return False
+        now_ts = int(time.time())
+        last_seen = r_client.get(FRONT_UPDATER_SEEN_KEY)
+        if last_seen is None:
+            # No heartbeat recorded yet: start the clock now instead of flagging immediately
+            r_client.set(FRONT_UPDATER_SEEN_KEY, now_ts, nx=True)
+            return False
+        return now_ts - int(last_seen) > FRONT_UPDATER_STALE_SECONDS
+    except Exception as e:
+        log.warning(f"Could not read front updater heartbeat: {e}")
+        return False
+
 def peewee_sql_to_str(sql):
     return (sql[0] % tuple(sql[1]))
 
@@ -667,11 +705,22 @@ def dashboard_stats():
         else:
             res['license_info']['message'] = "You are currently using the Free version. Consider upgrading to Pro for extra features."
 
+    # license_info.message is the only free text older front builds render, so use it to reach
+    # installs whose front updater died (front shows it unless offline or unregistered).
+    if internet_connection and res.get('license') is not False and _front_updater_stuck():
+        # A status the old card does not know renders as a neutral white card with dark text,
+        # instead of dark text on the green "Pro/Free License Active" card.
+        res['license_info']['status'] = "front_updater_stuck"
+        res['license_info']['action_required'] = "none"
+        res['license_info']['front_updater_stuck'] = True
+        res['license_info']['message'] = FRONT_UPDATER_STUCK_MESSAGE
+
     return buildResponse(res, 200)
 
 @app.route('/api/get_version', methods = ['POST','GET'])
 def get_version():
     """return version info and serial in crypted format for front updater service"""
+    _mark_front_updater_seen()
     VERSIONFILE="_version.py"
     log.error("front_update_request")
     from _version import __version__
