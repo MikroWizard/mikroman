@@ -1,0 +1,2048 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+
+# api_terminal_pro.py: API for MikroWizard+ Terminal Gateway (PAM)
+# MikroWizard.com, Mikrotik router management solution
+# PRO feature — requires valid license
+
+from flask import request, Blueprint, Response, make_response
+import os
+import uuid
+import datetime
+import time
+import json
+from urllib.parse import quote
+import logging
+import redis
+import config
+import base64
+import secrets
+import os
+from libs.db import db_device
+from libs.db.db import User
+from libs.db.db_terminal_pro import (
+    TerminalSessionPro, TerminalCommandPro, SessionParticipantPro,
+    TerminalUserSettingPro, TerminalPolicyPro, TerminalGrantPolicyPro
+)
+from libs.db.db_pam import DeviceConnections
+from libs.credential_service import CredentialService
+from libs import kek_provider, envelope_crypto, util
+try:
+    from libs import utilpro
+except ImportError:
+    utilpro = None
+import re
+try:
+    from libs.mschap3.mschap import nt_password_hash
+except ImportError:
+    nt_password_hash = None
+try:
+    from libs.db.db_pro import AuthPro, UserPoro
+except ImportError:
+    AuthPro = None
+    UserPoro = None
+from libs.webutil import app, login_required, get_myself, buildResponse, get_ip, get_agent
+from libs.db import db_sysconfig, db_syslog
+from libs.db.db_user_group_perm import DevUserGroupPermRel
+from libs.db.db_pam import Credentials
+from libs.template_service import TemplateService
+from libs.db.db_groups import DevGroupRel
+from libs.mail_pro import send_email
+try:
+    from libs.db.db_alerts_pro import send_user_apprise
+except ImportError:
+    send_user_apprise = None
+
+from libs.db.db_terminal_pro import TerminalFavoritePro
+from libs.db.db import database
+from libs.agent_validation import validate_agent_modes
+from libs import terminal_gateway
+log = logging.getLogger("api_terminal_pro")
+
+# Connect to the same Redis instance used by the rest of the backend
+def _get_redis():
+    try:
+        if hasattr(config, 'SESSION_REDIS') and config.SESSION_REDIS:
+            return config.SESSION_REDIS
+    except Exception:
+        pass
+    try:
+        return config.flask_config["SESSION_REDIS"]
+    except Exception:
+        pass
+    try:
+        _rhost = getattr(config, "redishost", "127.0.0.1:6379")
+        _rpass = config.srvconf.get("PYSRV_REDIS_PASSWORD", "")
+        if _rpass:
+            return redis.from_url(f"redis://:{quote(str(_rpass))}@{_rhost}/0")
+        return redis.from_url(f"redis://{_rhost}")
+    except Exception:
+        return None
+
+r = _get_redis()
+log.info(f"api_terminal_pro loaded, Redis: {r.connection_pool.connection_kwargs.get('host')}:{r.connection_pool.connection_kwargs.get('port')}")
+
+terminal_pro_api = Blueprint('terminal_pro_api', __name__)
+
+
+def _license_blocked():
+    """Return an error response if Pro license is expired, invalid, or missing."""
+    if not utilpro or not utilpro.check_license_dev_limit_exp():
+        return buildResponse({
+            'status': 'failed',
+            'error': 'License expired or invalid. Terminal Gateway and Connection Manager are Pro features.'
+        }, 200, error="License Expired")
+    return None
+
+@terminal_pro_api.route('/api/terminal/agent-install-command', methods=['GET'])
+@login_required()
+def agent_install_command():
+    blocked = _license_blocked()
+    if blocked:
+        return blocked
+    user = get_myself()
+    device_id = request.args.get('device_id')
+    
+    if not device_id:
+        return buildResponse({"status": "failed", "error": "device_id is required"}, 400)
+        
+    if user.role == 'customer':
+        user_devices = DevUserGroupPermRel.get_user_devices(user.id)
+        dev = user_devices.where(db_device.Devices.id == device_id).get_or_none()
+    else:
+        dev = db_device.Devices.get_or_none(db_device.Devices.id == device_id)
+        
+    if not dev:
+        return buildResponse({"status": "failed", "error": "Device not found or access denied"}, 403)
+        
+    peer_ip = getattr(dev, "peer_ip", "")
+    if not peer_ip:
+        
+        peer_ip = db_sysconfig.get_sysconfig('system_url')
+        if not peer_ip:
+            peer_ip = db_sysconfig.get_sysconfig('default_ip')
+            
+    # Remove any trailing slashes or http prefixes if it's just an IP
+    # But system_url might have https://. 
+    # Let's ensure it has a scheme.
+    if peer_ip and not peer_ip.startswith("http"):
+        peer_ip = f"https://{peer_ip}"
+        
+    # Assuming the gateway is served under /agent via nginx proxy, or port 8201
+    # We will use the standard Nginx proxy path /agent/install.sh
+    # If the user has a custom port, they can edit it manually.
+    base_url = peer_ip.rstrip('/')
+    install_url = f"{base_url}/agent/install.sh"
+    
+    command = f"curl -sSL {install_url} | sudo bash"
+    
+    return buildResponse({
+        "status": "success",
+        "command": command,
+        "install_url": install_url
+    }, 200)
+
+
+@terminal_pro_api.route('/api/terminal/init', methods=['POST'])
+@login_required()
+def init_terminal():
+    blocked = _license_blocked()
+    if blocked:
+        return blocked
+    user = get_myself()
+    input_data = request.json
+
+    # PAM seat gate: every user (incl. admin) must have terminal access enabled
+    if utilpro and not utilpro.is_user_pam_enabled(user.id):
+        return buildResponse({
+            "status": "pam_required",
+            "error": "PAM access is not enabled for this user. Please ask your admin to enable a PAM seat."
+        }, 200)
+
+    device_id = input_data.get('device_id')
+    protocol = input_data.get('connection_type') or input_data.get('protocol')
+    if not protocol:
+        default_conn = DeviceConnections.get_or_none(
+            DeviceConnections.device_id == device_id,
+            DeviceConnections.is_default == True,
+            DeviceConnections.protocol != 'api'
+        )
+        if not default_conn:
+            default_conn = (
+                DeviceConnections.get_or_none(DeviceConnections.device_id == device_id, DeviceConnections.protocol == 'ssh')
+                or DeviceConnections.get_or_none(DeviceConnections.device_id == device_id, DeviceConnections.protocol == 'telnet')
+            )
+        protocol = (default_conn.protocol if default_conn else 'ssh')
+    protocol = protocol.lower()
+    canonical_protocol = 'winbox' if protocol in ('winbox', 'webbox') else protocol
+
+    if not device_id:
+        return buildResponse({"status": "failed", "error": "device_id is required"}, 400)
+
+    if user.role == 'customer':
+        user_devices = DevUserGroupPermRel.get_user_devices(user.id)
+        dev = user_devices.where(db_device.Devices.id == device_id).get_or_none()
+    else:
+        dev = db_device.Devices.get_or_none(db_device.Devices.id == device_id)
+    if not dev:
+        return buildResponse({"status": "failed", "error": "Device not found or access denied"}, 403)
+
+    is_mikrotik = getattr(dev, 'device_type', 'mikrotik') == 'mikrotik'
+    if canonical_protocol == 'winbox' and not is_mikrotik:
+        return buildResponse({"status": "failed", "error": "WebBox is only supported on MikroTik devices."}, 400)
+
+    # Terminal gateway capability check
+    if canonical_protocol == 'winbox':
+        webbox_ok, reason = terminal_gateway.is_webbox_supported()
+        if not webbox_ok:
+            if reason == 'not_installed':
+                return buildResponse({
+                    "status": "gateway_not_installed",
+                    "error": "Terminal Gateway is not installed. Please ask your administrator to install the terminal gateway addon.",
+                    "doc_url": "https://mikrowizard.com/docs/installing-terminal-gatway-addon/"
+                }, 200)
+            else:
+                return buildResponse({
+                    "status": "gateway_update_required",
+                    "error": "Your Terminal Gateway container is outdated and does not support WebBox. Please update the Terminal Gateway Docker container to the latest version to use this feature.",
+                    "doc_url": "https://mikrowizard.com/docs/updating-terminal-gateway-addon/"
+                }, 200)
+    else:
+        if not terminal_gateway.is_terminal_gateway_installed():
+            return buildResponse({
+                "status": "gateway_not_installed",
+                "error": "Terminal Gateway is not installed. Please ask your administrator to install the terminal gateway addon.",
+                "doc_url": "https://mikrowizard.com/docs/installing-terminal-gatway-addon/"
+            }, 200)
+
+    # Check parent/child relationship
+    parent_dev = None
+    if getattr(dev, 'parent_id', None):
+        parent_dev = db_device.Devices.get_or_none(db_device.Devices.id == dev.parent_id)
+    host_dev = parent_dev if parent_dev else dev
+    effective_ip = (host_dev.ip or host_dev.peer_ip or '').strip()
+
+    # Resolve DeviceConnections (PAM) for port + privileged credential
+    try:
+        conn = DeviceConnections.get(
+            DeviceConnections.device_id == device_id,
+            DeviceConnections.protocol == protocol
+        )
+    except DeviceConnections.DoesNotExist:
+        if parent_dev:
+            try:
+                conn = DeviceConnections.get(
+                    DeviceConnections.device_id == parent_dev.id,
+                    DeviceConnections.protocol == protocol
+                )
+            except DeviceConnections.DoesNotExist:
+                conn = None
+        else:
+            conn = None
+
+    default_ports = {'ssh': 22, 'telnet': 23, 'winbox': 8291, 'rdp': 3389, 'vnc': 5900}
+    port = conn.port if (conn and conn.port) else default_ports.get(canonical_protocol, 22)
+
+    session_id = str(uuid.uuid4())
+    if canonical_protocol == 'winbox':
+        token = f"winbox-{secrets.token_hex(16)}"
+    elif canonical_protocol == 'rdp':
+        token = f"rdp-{secrets.token_hex(16)}"
+    elif canonical_protocol == 'vnc':
+        token = f"vnc-{secrets.token_hex(16)}"
+    elif canonical_protocol == 'telnet':
+        token = f"telnet-{secrets.token_hex(16)}"
+    else:
+        token = f"ssh-{secrets.token_hex(16)}"
+
+    # User credential with temporary password (WebFig parity via RADIUS)
+    try:
+        radius_enabled = bool(db_sysconfig.get_sysconfig("Radius") == "1" or db_sysconfig.get_sysconfig("force_radius"))
+    except Exception:
+        radius_enabled = False
+
+    conn_type = getattr(conn, 'connection_type', 'device') if conn else 'device'
+    use_user_cred = (canonical_protocol == 'winbox' and is_mikrotik and radius_enabled and utilpro and nt_password_hash) or (conn_type == 'user')
+
+    cred = None
+    if use_user_cred and UserPoro:
+        try:
+            up = UserPoro.get_or_none(UserPoro.id == user.id)
+            if up:
+                temp_pass = utilpro.generate_password(12)
+                nthashhex = ''.join(list("{:02x}".format(ord(c)) for c in nt_password_hash(temp_pass)))
+                up.temp_hash = nthashhex
+                up.user_proxy_ip = get_ip()
+                up.save()
+                if r:
+                    r.setex(f"proxy_temp_hash:{nthashhex}", 600, session_id)
+                cred = {
+                    'method': 'credential',
+                    'username': up.username,
+                    'password': temp_pass,
+                    'auth_method': 'password'
+                }
+                log.info(f"Generated WebBox temporary password for user {user.username} on device {device_id}")
+        except Exception as e:
+            log.warning(f"Failed to generate temporary password for WebBox: {e}")
+
+    if not cred:
+        cred = CredentialService.get_credential_for_connection(device_id, protocol, user.id)
+        if (not cred or cred.get('method') != 'credential') and parent_dev:
+            cred = CredentialService.get_credential_for_connection(parent_dev.id, protocol, user.id)
+            if not cred or cred.get('method') != 'credential':
+                for fb in ('rdp', 'ssh'):
+                    cred = CredentialService.get_credential_for_connection(parent_dev.id, fb, user.id)
+                    if cred and cred.get('method') == 'credential':
+                        break
+        if (not cred or cred.get('method') != 'credential') and canonical_protocol == 'winbox' and is_mikrotik:
+            cred = CredentialService.get_credential_for_connection(device_id, 'webfig', user.id)
+            if not cred or cred.get('method') != 'credential':
+                cred = CredentialService.get_credential_for_connection(device_id, 'ssh', user.id)
+
+    # Self-healing auto-sync: if no credential found in the new table, migrate from old devices table
+    if (not cred or cred.get('method') != 'credential') and dev.password:
+        try:
+            dec_pass = util.decrypt_data(dev.password)
+            if dec_pass:
+
+                
+                dec_user = util.decrypt_data(dev.user_name) if dev.user_name else "admin"
+
+                # Find all device-scoped credentials for this device
+                creds = list(Credentials.select().where(
+                    Credentials.device_id == dev.id,
+                    Credentials.scope == 'device'
+                ))
+
+                kek = kek_provider.get_kek()
+                enc_bundle = envelope_crypto.full_encrypt(dec_pass, kek)
+
+                if creds:
+                    # Update all existing device credentials
+                    for cred in creds:
+                        cred.username = dec_user
+                        cred.encrypted_password = enc_bundle['encrypted_payload']
+                        cred.dek_encrypted = enc_bundle['dek_encrypted']
+                        cred.modified = datetime.datetime.now(datetime.timezone.utc)
+                        cred.save()
+                else:
+                    # Create default connection credentials
+                    is_mikrotik = getattr(dev, 'device_type', 'mikrotik') == 'mikrotik'
+                    types_to_create = ["webfig", "ssh"] if is_mikrotik else ["ssh", "telnet"]
+                    for t in types_to_create:
+                        Credentials.create(
+                            name=f"Device {dev.id} Auto-Sync {t.upper()} Credential",
+                            credential_type=t,
+                            username=dec_user,
+                            encrypted_password=enc_bundle['encrypted_payload'],
+                            dek_encrypted=enc_bundle['dek_encrypted'],
+                            auth_method="password",
+                            scope="device",
+                            device_id=dev.id,
+                            owner_id=dev.owner,
+                            created=datetime.datetime.now(datetime.timezone.utc),
+                            modified=datetime.datetime.now(datetime.timezone.utc)
+                        )
+                
+                log.info(f"Self-healed: successfully synced credential for device {device_id} on-the-fly.")
+                # Re-resolve
+                cred = CredentialService.get_credential_for_connection(device_id, protocol, user.id)
+        except Exception as sync_err:
+            log.error(f"On-the-fly credential sync failed: {sync_err}")
+
+    if not cred or cred.get('method') != 'credential':
+        return buildResponse({"status": "failed", "error": "No credential found for this device"}, 404)
+
+    # Build payload
+    session_payload = {
+        "token": token,
+        "device_ip": effective_ip or dev.ip,
+        "device_port": int(port),
+        "username": cred.get('username'),
+        "password": util.crypt_data(cred['password']) if cred.get('password') else "",
+        "protocol": canonical_protocol,
+        "session_id": session_id,
+        "user_id": str(user.id),
+        "device_id": device_id,
+        "device_brand": dev.device_type,
+        "participant_role": "owner",
+        "auth_method": cred.get('auth_method', 'password'),
+        "resolution": input_data.get('resolution', 'auto')
+    }
+
+    # SSH key auth
+    if cred.get('ssh_key'):
+        session_payload['ssh_key'] = util.crypt_data(cred['ssh_key'])
+        if cred.get('ssh_key_passphrase'):
+            session_payload['ssh_key_passphrase'] = util.crypt_data(cred['ssh_key_passphrase'])
+
+    # Privilege escalation (enable_password)
+    if conn and conn.privileged_credential_id:
+        try:
+            kek = kek_provider.get_kek()
+            enable_secret = envelope_crypto.full_decrypt(
+                conn.privileged_credential_id.encrypted_password,
+                conn.privileged_credential_id.dek_encrypted,
+                kek
+            )
+            session_payload['enable_password'] = util.crypt_data(enable_secret)
+        except Exception as e:
+            log.error(f"Failed to decrypt enable credential for device {device_id}: {e}")
+
+    # Template-driven escalation metadata for the terminal gateway. The gateway
+    # uses this instead of a hardcoded "enable", and only sends the escalation
+    # password after the device prompts for it (password_prompt). Normalize the
+    # canonical schema (command/password_prompt/success_pattern) with fallbacks
+    # for legacy templates that only store {command, prompt}.
+    try:
+        template = TemplateService.get_template_for_device(device_id) or {}
+    except Exception as e:
+        log.error(f"Failed to load template for device {device_id}: {e}")
+        template = {}
+    priv = template.get("privilege_escalation") or {}
+    if isinstance(priv, dict) and priv.get("command"):
+        prompt_cfg = template.get("prompt") or {}
+        if not isinstance(prompt_cfg, dict):
+            prompt_cfg = {}
+        session_payload["privilege_escalation"] = {
+            "command": priv.get("command"),
+            "password_prompt": priv.get("password_prompt")
+                               or prompt_cfg.get("password_pattern")
+                               or r"[Pp]assword:?",
+            "success_pattern": priv.get("success_pattern") or priv.get("prompt") or "",
+        }
+
+    # Enforce policy grant: device must belong to a group AND user must have
+    # DevUserGroupPermRel access to that group, AND a TerminalGrantPolicyPro
+    # mapping for that group, otherwise reject the session.
+    rel = DevGroupRel.get_or_none(DevGroupRel.device_id == device_id)
+    if not rel and parent_dev:
+        rel = DevGroupRel.get_or_none(DevGroupRel.device_id == parent_dev.id)
+
+    user_group_perms = list(DevUserGroupPermRel.select().where(DevUserGroupPermRel.user_id == user.id))
+    has_default_access = any(perm.group_id.id == 1 for perm in user_group_perms)
+
+    if rel:
+        group_id = rel.group_id
+        group_id_int = group_id.id if hasattr(group_id, "id") else group_id
+        if not (has_default_access or any(perm.group_id.id == group_id_int for perm in user_group_perms)):
+            return buildResponse(
+                {"status": "failed", "error": "You do not have access to this device's group."},
+                200
+            )
+    else:
+        # No explicit group → the device lives in the virtual default group (id=1,
+        # "all devices"). Enforce via the default group only when the user has
+        # default-group access (a group-1 policy is still required below).
+        if not has_default_access:
+            return buildResponse(
+                {"status": "failed", "error": "Device is not assigned to any group. No terminal policy can be enforced."},
+                200
+            )
+        group_id = 1
+        group_id_int = 1
+
+    device_brand = dev.device_type or ''
+
+    try:
+        grant = TerminalGrantPolicyPro.get(
+            TerminalGrantPolicyPro.user_id == user.id,
+            TerminalGrantPolicyPro.group_id == group_id
+        )
+    except TerminalGrantPolicyPro.DoesNotExist:
+        # If the user has default group access, also try the default group's policy.
+        grant = None
+        if has_default_access and group_id_int != 1:
+            try:
+                grant = TerminalGrantPolicyPro.get(
+                    TerminalGrantPolicyPro.user_id == user.id,
+                    TerminalGrantPolicyPro.group_id == 1
+                )
+            except TerminalGrantPolicyPro.DoesNotExist:
+                pass
+        if not grant:
+            return buildResponse(
+                {"status": "failed", "error": "No terminal policy is set for this device group. Please ask your administrator to configure a terminal policy."},
+                200
+            )
+
+    # Resolve policy: check brand_map first, fall back to default policy_id
+    policy = None
+    if grant.brand_map and device_brand in grant.brand_map:
+        try:
+            brand_policy_id = grant.brand_map[device_brand]
+            policy = TerminalPolicyPro.get(id=brand_policy_id)
+        except TerminalPolicyPro.DoesNotExist:
+            pass
+    if not policy:
+        policy = grant.policy_id
+    policy_obj = {
+        "id": str(policy.id),
+        "defense": {
+            "level": policy.defense_level or "standard",
+            "blocked_binaries": policy.blocked_binaries or [],
+        },
+        "agent_modes": policy.agent_modes,
+    }
+    if policy.policy_type == "auto_exec":
+        policy_obj["type"] = "auto_exec"
+        policy_obj["commands"] = [r["rule"] for r in (policy.rules or []) if r.get("rule")]
+    elif policy.policy_type == "blacklist":
+        policy_obj["type"] = "allow_all"
+        policy_obj["matching"] = policy.matching
+        policy_obj["rules"] = policy.rules
+        session_payload["default_action"] = "allow"
+    else:  # whitelist
+        policy_obj["type"] = "whitelist"
+        policy_obj["matching"] = policy.matching
+        policy_obj["rules"] = policy.rules
+        session_payload["default_action"] = "deny"
+    session_payload['policies'] = [policy_obj]
+
+    # Phase C agent: top-level flag + per-device override
+    session_payload['agent_modes'] = policy.agent_modes
+    if conn and conn.agent_modes is not None:
+        session_payload['device_agent_modes'] = conn.agent_modes
+
+    # -------------------------------------------------------------------------
+    # 4-Tier Cascading Hierarchy for RDP / VNC Guacamole Options & Session DLP
+    # -------------------------------------------------------------------------
+    guac_options = {}
+
+    # Tier 1: Connection Template (Display, Performance, Layout)
+    eff_tpl_id = getattr(dev, 'template_id', None) or (getattr(host_dev, 'template_id', None) if parent_dev else None)
+    tpl_data = None
+    if eff_tpl_id:
+        tpl_data = TemplateService.get_template_by_id(eff_tpl_id)
+    if not tpl_data:
+        tpl_data = TemplateService.get_template_for_device(dev.id) or (TemplateService.get_template_for_device(host_dev.id) if parent_dev else None)
+
+    if tpl_data and tpl_data.get('connection'):
+        for k, v in tpl_data['connection'].items():
+            if k not in ('protocol', 'protocols', 'port'):
+                guac_options[k] = v
+
+    # Tier 2: Parent Device (Host) Overrides & Domain
+    host_pcfg = getattr(host_dev, 'protocol_config', None) or {}
+    if isinstance(host_pcfg, dict):
+        if host_pcfg.get('domain'):
+            session_payload['domain'] = host_pcfg['domain']
+        if isinstance(host_pcfg.get('overrides'), dict):
+            for k, v in host_pcfg['overrides'].items():
+                guac_options[k] = v
+
+    # Tier 3: Child Application Definition & Overrides
+    if parent_dev:
+        child_pcfg = getattr(dev, 'protocol_config', None) or {}
+        if isinstance(child_pcfg, dict):
+            app_mode = child_pcfg.get('app_mode', 'remote_app')
+            if app_mode == 'initial_program':
+                if child_pcfg.get('initial_program'):
+                    guac_options['initial-program'] = child_pcfg['initial_program']
+            else:
+                if child_pcfg.get('remote_app'):
+                    guac_options['remote-app'] = child_pcfg['remote_app']
+                if child_pcfg.get('remote_app_dir'):
+                    guac_options['remote-app-dir'] = child_pcfg['remote_app_dir']
+                if child_pcfg.get('remote_app_args'):
+                    guac_options['remote-app-args'] = child_pcfg['remote_app_args']
+
+            if isinstance(child_pcfg.get('overrides'), dict):
+                for k, v in child_pcfg['overrides'].items():
+                    guac_options[k] = v
+
+    # Tier 4: Session DLP Policy (Supreme Security Authority)
+    session_dlp = getattr(policy, 'session_dlp', None)
+    if not isinstance(session_dlp, dict):
+        session_dlp = {
+            "clipboard": "bidirectional",
+            "file_transfer": "enabled",
+            "watermark": {"enabled": False, "text": "{user} ({ip}) - {date}", "opacity": 0.15},
+            "recording": {"video_enabled": True, "keystrokes_enabled": True},
+            "printing": False,
+            "audio_input": False
+        }
+
+    # DLP - Clipboard
+    clip_setting = session_dlp.get('clipboard', 'bidirectional')
+    if clip_setting == 'blocked':
+        guac_options['disable-copy'] = 'true'
+        guac_options['disable-paste'] = 'true'
+    elif clip_setting == 'read_only':
+        guac_options['disable-copy'] = 'false'
+        guac_options['disable-paste'] = 'true'
+    elif clip_setting == 'write_only':
+        guac_options['disable-copy'] = 'true'
+        guac_options['disable-paste'] = 'false'
+    else:  # bidirectional
+        guac_options['disable-copy'] = 'false'
+        guac_options['disable-paste'] = 'false'
+
+    # DLP - File Transfer (Web Drive)
+    ft_setting = session_dlp.get('file_transfer', 'enabled')
+    if ft_setting == 'blocked':
+        guac_options['enable-drive'] = 'false'
+        guac_options.pop('drive-name', None)
+        guac_options.pop('drive-path', None)
+    else:
+        guac_options['enable-drive'] = 'true'
+        if not guac_options.get('drive-name'):
+            guac_options['drive-name'] = 'MikroWizard Shared Drive'
+
+    # DLP - Printing & Audio Input
+    guac_options['enable-printing'] = 'true' if session_dlp.get('printing') else 'false'
+    guac_options['enable-audio-input'] = 'true' if session_dlp.get('audio_input') else 'false'
+
+    # DLP - Video Recording
+    rec_cfg = session_dlp.get('recording') or {}
+    session_payload['video_recording_enabled'] = rec_cfg.get('video_enabled', True)
+
+    session_payload['options'] = guac_options
+    session_payload['session_dlp'] = session_dlp
+    session_payload['remote_app'] = guac_options.get('remote-app') or guac_options.get('initial-program') or ''
+
+    # Store payload in Redis with 120 second TTL (gives browser time to open WebSocket)
+   
+    if os.getenv("DEV_MODE") == "true":
+        log.info(f"[DEV_MODE] Storing credential: user={cred.get('username')}, pass={cred.get('password')}, key={cred.get('ssh_key') is not None}")
+    log.info(f"Writing to Redis: key=terminal_session:{token}")
+    r.setex(f"terminal_session:{token}", 120, json.dumps(session_payload))
+    log.info(f"Successfully stored token {token} in Redis. Payload sample: device_ip={session_payload.get('device_ip')}")
+
+    # Store session record in DB
+    TerminalSessionPro.create(
+        id=session_id,
+        device_id=device_id,
+        user_id=user.id,
+        client_ip=get_ip(),
+        token=token,
+        started=datetime.datetime.now(),
+        device_brand=dev.device_type
+    )
+
+    # MikroTik devices emit syslog login/logout events for the gateway's device
+    # account, which would otherwise appear as confusing "local user" rows in the
+    # auth table. Attribute the session to the real customer and track it so the
+    # syslog handler can suppress the router's own duplicate events.
+    if getattr(dev, 'device_type', 'mikrotik') == 'mikrotik':
+        cred_username = (cred.get('username') or '').strip()
+        if AuthPro is not None:
+            try:
+                AuthPro.attach_terminal_log(
+                    devid=device_id,
+                    username=user.username,
+                    ip=get_ip(),
+                    sessionid=session_id,
+                    cred_username=cred_username,
+                    protocol=protocol
+                )
+            except Exception as e:
+                log.error(f"Failed to attach terminal auth log for device {device_id}: {e}")
+        if cred_username:
+            try:
+                r.sadd(f"terminal_gw_active:{device_id}:{cred_username}", session_id)
+                r.setex(
+                    f"terminal_gw_meta:{session_id}", 172800,
+                    json.dumps({"device_id": device_id, "cred_username": cred_username})
+                )
+            except Exception as e:
+                log.error(f"Failed to track terminal gateway session in Redis: {e}")
+
+    if canonical_protocol == 'winbox':
+        web_url = f"/terminal-ws/winbox.html?token={token}"
+    elif canonical_protocol in ('rdp', 'vnc'):
+        web_url = f"/terminal-ws/desktop.html?token={token}"
+    else:
+        web_url = f"/terminal-ws/?token={token}"
+    return buildResponse({"status": "success", "token": token, "session_id": session_id, "protocol": canonical_protocol, "web_url": web_url})
+
+
+@terminal_pro_api.route('/api/terminal/session/join', methods=['POST'])
+@login_required()
+def join_session():
+    blocked = _license_blocked()
+    if blocked:
+        return blocked
+    user = get_myself()
+    session_id = request.json.get('session_id')
+    role = request.json.get('role', 'observer')  # or 'collaborator'
+
+    if not session_id:
+        return buildResponse({"status": "failed", "error": "session_id required"}, 400)
+
+    try:
+        session = TerminalSessionPro.get(id=session_id)
+        if session.status != 'active':
+            return buildResponse({"status": "failed", "error": "Session is not active"}, 400)
+
+        # Check if user has permission to join this device
+        if user.role == 'customer':
+            
+            dev = DevUserGroupPermRel.get_user_devices(user.id).where(
+                db_device.Devices.id == session.device_id
+            ).get_or_none()
+        else:
+            dev = db_device.Devices.get_or_none(db_device.Devices.id == session.device_id)
+        if not dev:
+            return buildResponse({"status": "failed", "error": "Access denied to this device"}, 403)
+
+        token = str(uuid.uuid4())
+
+        is_winbox = bool(session.token and ('winbox' in session.token))
+        is_telnet = bool(session.token and ('telnet' in session.token))
+        join_protocol = 'winbox' if is_winbox else ('telnet' if is_telnet else 'ssh')
+        user_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username
+
+        join_payload = {
+            "session_id": session_id,
+            "participant_role": role,
+            "participant_name": user_name,
+            "protocol": join_protocol,
+            "user_id": str(user.id)
+        }
+
+        r.setex(f"terminal_session:{token}", 120, json.dumps(join_payload))
+
+        # Record participant
+        SessionParticipantPro.create(
+            session_id=session_id,
+            user_id=user.id,
+            token=token,
+            role=role,
+            participant_name=user_name,
+            joined_at=datetime.datetime.now(),
+            client_ip=get_ip()
+        )
+
+        return buildResponse({"status": "success", "token": token})
+    except TerminalSessionPro.DoesNotExist:
+        return buildResponse({"status": "failed", "error": "Session not found"}, 404)
+
+
+@terminal_pro_api.route('/api/terminal/logs/search', methods=['POST'])
+@login_required(role="admin", perm={"pam_session": "read"})
+def search_terminal_logs():
+    """Paginated search for command logs."""
+    user = get_myself()
+    if user.role != 'admin':
+        return buildResponse({"status": "failed", "error": "Admin required"}, 403)
+    blocked = _license_blocked()
+    if blocked:
+        return blocked
+
+    limit = int(request.json.get('limit', 50))
+    offset = int(request.json.get('offset', 0))
+    device_id = request.json.get('device_id')
+    session_id = request.json.get('session_id')
+    user_id = request.json.get('user_id')
+    is_blocked = request.json.get('is_blocked')
+    date_from = request.json.get('date_from')
+    date_to = request.json.get('date_to')
+
+    query = TerminalCommandPro.select()
+    if device_id:
+        query = query.where(TerminalCommandPro.device_id == device_id)
+    if user_id:
+        query = query.where(TerminalCommandPro.user_id == user_id)
+    if session_id:
+        query = query.where(TerminalCommandPro.session_id == session_id)
+    if is_blocked is not None:
+        query = query.where(TerminalCommandPro.is_blocked == is_blocked)
+    if date_from:
+        query = query.where(TerminalCommandPro.timestamp >= date_from)
+    if date_to:
+        query = query.where(TerminalCommandPro.timestamp <= date_to)
+
+    query = query.order_by(TerminalCommandPro.timestamp.desc()).limit(limit).offset(offset)
+
+    logs = list(query.dicts())
+    for log in logs:
+        u = User.get_or_none(id=log['user_id']) if 'user_id' in log and log['user_id'] else None
+        log['user_name'] = f"{u.first_name} {u.last_name}" if u else log.get('user_id', 'Unknown')
+        
+        d = db_device.Devices.get_or_none(id=log['device_id']) if 'device_id' in log and log['device_id'] else None
+        log['device_name'] = d.name if d else str(log.get('device_id', 'Unknown'))
+        log['device_ip'] = d.ip if d else "Unknown IP"
+        
+        # Ensure timestamp is formatted if it's a datetime object
+        if hasattr(log.get('timestamp'), 'strftime'):
+            log['timestamp_fmt'] = log['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
+
+    return buildResponse({"status": "success", "data": logs})
+
+
+@terminal_pro_api.route('/api/terminal/settings', methods=['GET', 'POST'])
+@login_required()
+def terminal_settings():
+    blocked = _license_blocked()
+    if blocked:
+        return blocked
+    user = get_myself()
+
+    if request.method == 'GET':
+        try:
+            settings = TerminalUserSettingPro.get(user_id=user.id)
+            return buildResponse({"status": "success", "data": settings.__data__})
+        except TerminalUserSettingPro.DoesNotExist:
+            return buildResponse({"status": "success", "data": {}})
+
+    elif request.method == 'POST':
+        data = request.json
+        data['updated_at'] = datetime.datetime.now()
+
+        try:
+            settings = TerminalUserSettingPro.get(user_id=user.id)
+            for k, v in data.items():
+                if hasattr(settings, k):
+                    setattr(settings, k, v)
+            settings.save()
+        except TerminalUserSettingPro.DoesNotExist:
+            data['user_id'] = user.id
+            TerminalUserSettingPro.create(**data)
+
+        return buildResponse({"status": "success"})
+
+
+
+def _detect_session_protocol(s):
+    """Accurately determine connection protocol (rdp, vnc, winbox, telnet, ssh)."""
+    tok = (s.get('token') if isinstance(s, dict) else getattr(s, 'token', '')) or ''
+    rec = (s.get('recording_path') if isinstance(s, dict) else getattr(s, 'recording_path', '')) or ''
+
+    if tok.startswith('winbox-') or 'winbox' in tok:
+        return 'winbox'
+    if tok.startswith('rdp-') or 'rdp' in tok:
+        return 'rdp'
+    if tok.startswith('vnc-') or 'vnc' in tok:
+        return 'vnc'
+    if tok.startswith('telnet-') or 'telnet' in tok:
+        return 'telnet'
+    if tok.startswith('ssh-'):
+        return 'ssh'
+
+    # Check active session cached in Redis
+    if tok:
+        try:
+            raw_s = r.get(f"terminal_session:{tok}")
+            if raw_s:
+                p = json.loads(raw_s).get('protocol')
+                if p:
+                    return p.lower()
+        except Exception:
+            pass
+
+    # Check recording path extension
+    if rec.endswith('.guac'):
+        return 'rdp'
+    if rec.endswith('.mp4'):
+        return 'winbox'
+    if rec.endswith('.cast'):
+        return 'ssh'
+
+    # Legacy desktop token
+    if tok.startswith('desktop-'):
+        return 'rdp'
+
+    # Fallback to DeviceConnections if device_id is available
+    device_id = s.get('device_id') if isinstance(s, dict) else getattr(s, 'device_id', None)
+    if device_id:
+        try:
+            conns = list(DeviceConnections.select().where(DeviceConnections.device_id == device_id))
+            if conns:
+                for c in conns:
+                    if c.protocol in ('rdp', 'vnc', 'winbox', 'telnet'):
+                        return c.protocol.lower()
+        except Exception:
+            pass
+
+    return 'ssh'
+
+# ==================================================
+# Session Management — Admin Endpoints (Phase 4)
+# ==================================================
+
+@terminal_pro_api.route('/api/terminal/sessions/list', methods=['POST'])
+@login_required(role="admin", perm={"pam_session": "read"})
+def admin_list_sessions():
+    """List all active sessions with user/device info, paginated. Admin-only."""
+    user = get_myself()
+    log.info(f"[WebFig Debug admin_list_sessions ENTRY] user={user.id if user else None}, json={request.json}")
+    if user.role not in ('admin', 'superuser'):
+        return buildResponse({"status": "failed", "error": "Admin required"}, 403)
+    blocked = _license_blocked()
+    if blocked:
+        return blocked
+    page = int(request.json.get('page', 1))
+    limit = int(request.json.get('limit', 50))
+    status_filter = request.json.get('status')
+    device_id = request.json.get('device_id')
+    user_id = request.json.get('user_id')
+    
+    q = TerminalSessionPro.select()
+    if status_filter:
+        q = q.where(TerminalSessionPro.status == status_filter)
+    if device_id:
+        q = q.where(TerminalSessionPro.device_id == device_id)
+    if user_id:
+        q = q.where(TerminalSessionPro.user_id == user_id)
+        
+    total = q.count()
+    sessions = list(q.order_by(TerminalSessionPro.started.desc()).paginate(page, limit).dicts())
+    log.info(f"[WebFig Debug admin_list_sessions] DB TerminalSessionPro count={total}, fetched={len(sessions)}")
+    for s in sessions:
+        u = User.get_or_none(id=s['user_id'])
+        s['user_name'] = f"{u.first_name} {u.last_name}" if u else s['user_id']
+        s['username'] = u.username if u else ''
+        
+        d = db_device.Devices.get_or_none(id=s['device_id'])
+        s['device_name'] = d.name if d else str(s['device_id'])
+        s['device_ip'] = d.ip if d else "Unknown IP"
+        
+        s['protocol'] = _detect_session_protocol(s)
+        
+        participants_query = SessionParticipantPro.select().where(SessionParticipantPro.session_id == str(s['id']))
+        if s['status'] == 'active':
+            participants_query = participants_query.where(SessionParticipantPro.is_connected == True)
+        
+        active_participants = list(participants_query)
+        
+        participant_details = []
+        for p in active_participants:
+            username = ''
+            name = (p.participant_name or '').strip()
+            if p.user_id:
+                try:
+                    pu = User.get_or_none(id=p.user_id)
+                    if pu:
+                        full_name = f"{pu.first_name or ''} {pu.last_name or ''}".strip()
+                        name = full_name or pu.username or name
+                        username = pu.username or ''
+                except Exception:
+                    pass
+            elif p.role != 'owner':
+                if name and name.lower() != 'guest':
+                    name = name if name.lower().endswith('(guest)') else f"{name} (Guest)"
+                else:
+                    name = "Guest"
+            if not name:
+                name = "Owner" if p.role == 'owner' else "Guest"
+
+            participant_details.append({
+                "name": name,
+                "username": username,
+                "role": p.role,
+                "ip": p.client_ip or "Unknown IP",
+                "agent": p.user_agent or "Unknown Agent",
+                "joined_at": p.joined_at.isoformat() if getattr(p, 'joined_at', None) else None,
+                "disconnected_at": p.disconnected_at.isoformat() if getattr(p, 'disconnected_at', None) else None,
+                "is_connected": getattr(p, 'is_connected', False)
+            })
+
+        s['participants'] = participant_details
+        s['participant_count'] = len(participant_details)
+        
+    # Include active WebFig proxy sessions from Redis
+    if not status_filter or status_filter == 'active':
+        try:
+            r_client = _get_redis()
+            if not r_client:
+                log.warning("[WebFig Debug admin_list_sessions] r_client is NONE!")
+            else:
+                keys = r_client.keys("proxy_session:*")
+                log.info(f"[WebFig Debug admin_list_sessions] Found {len(keys)} proxy_session keys in Redis: {keys}")
+                for k in keys:
+                    raw = r_client.get(k)
+                    log.info(f"[WebFig Debug admin_list_sessions] Redis key={k}, raw_type={type(raw)}, raw_val={raw}")
+                    if not raw:
+                        continue
+                    sdata = json.loads(raw) if isinstance(raw, str) else json.loads(raw.decode('utf-8'))
+                    session_id = k.replace('proxy_session:', '') if isinstance(k, str) else k.decode('utf-8').replace('proxy_session:', '')
+
+                    # Only include sessions with an active heartbeat (active browser tab)
+                    has_hb = r_client.exists(f"proxy_heartbeat:{session_id}")
+                    log.info(f"[WebFig Debug admin_list_sessions] session_id={session_id}, has_hb={has_hb}")
+                    if not has_hb:
+                        log.info(f"[WebFig Debug admin_list_sessions] Skipping session_id={session_id} because proxy_heartbeat is missing/expired")
+                        continue
+
+                    devid = sdata.get('devid')
+                    if device_id and str(devid) != str(device_id):
+                        log.info(f"[WebFig Debug admin_list_sessions] Skipping session_id={session_id} due to device_id mismatch: {devid} vs {device_id}")
+                        continue
+                    userid = sdata.get('userid')
+                    if user_id and str(userid) != str(user_id):
+                        log.info(f"[WebFig Debug admin_list_sessions] Skipping session_id={session_id} due to user_id mismatch: {userid} vs {user_id}")
+                        continue
+                    log.info(f"[WebFig Debug admin_list_sessions] Appending WebFig active session_id={session_id} to results!")
+                    
+                    started_ts = sdata.get('started_at', int(time.time()))
+                    started_dt = datetime.datetime.fromtimestamp(started_ts)
+                    
+                    dev = db_device.Devices.get_or_none(id=devid) if devid else None
+                    user_obj = User.get_or_none(id=userid) if userid else None
+                    
+                    u_fullname = f"{user_obj.first_name} {user_obj.last_name}".strip() if (user_obj and (user_obj.first_name or user_obj.last_name)) else (user_obj.username if user_obj else "WebFig User")
+                    dev_name = dev.name if dev else f"CHR-Tower01"
+                    dev_ip = dev.ip if dev else sdata.get('ip', 'Unknown IP')
+
+                    sessions.append({
+                        'id': session_id,
+                        'session_id': session_id,
+                        'stype': 'webfig',
+                        'user_id': str(userid) if userid else None,
+                        'user_name': u_fullname,
+                        'username': user_obj.username if user_obj else '',
+                        'device_id': str(devid) if devid else None,
+                        'device_name': dev_name,
+                        'device_ip': dev_ip,
+                        'protocol': 'webfig',
+                        'status': 'active',
+                        'started': started_dt.isoformat(),
+                        'ended': None,
+                        'participant_count': 1,
+                        'participants': [{
+                            'name': u_fullname,
+                            'username': user_obj.username if user_obj else '',
+                            'role': 'host',
+                            'ip': sdata.get('ip', 'Unknown IP'),
+                            'agent': 'WebBrowser'
+                        }]
+                    })
+        except Exception as e:
+            log.warning(f"Failed to fetch active webfig sessions: {e}")
+
+    return buildResponse({"status": "success", "data": sessions, "total": len(sessions)})
+
+
+@terminal_pro_api.route('/api/terminal/sessions/kill', methods=['POST'])
+@login_required(role="admin", perm={"pam_session": "full"})
+def admin_kill_session():
+    """Force-kill a session by ID. Admin-only."""
+    blocked = _license_blocked()
+    if blocked:
+        return blocked
+    user = get_myself()
+    if user.role not in ('admin', 'superuser'):
+        return buildResponse({"status": "failed", "error": "Admin required"}, 403)
+    session_id = request.json.get('session_id')
+    if not session_id:
+        return buildResponse({"status": "failed", "error": "session_id required"}, 400)
+    try:
+        session = TerminalSessionPro.get(id=session_id)
+        session.status = 'terminated'
+        session.ended = datetime.datetime.now()
+        session.save()
+        # Close the Terminal-Gateway auth row and release syslog suppression
+        try:
+            if AuthPro is not None:
+                AuthPro.close_terminal_log(session_id, ended_timestamp=int(time.time()))
+            meta = r.get(f"terminal_gw_meta:{session_id}")
+            if meta:
+                m = json.loads(meta)
+                r.srem(f"terminal_gw_active:{m.get('device_id')}:{m.get('cred_username')}", session_id)
+                r.delete(f"terminal_gw_meta:{session_id}")
+        except Exception as e:
+            log.error(f"Failed to close terminal auth log: {e}")
+        # Remove Redis token(s) to force-disconnect
+        for participant in SessionParticipantPro.select().where(SessionParticipantPro.session_id == session_id):
+            r.delete(f"terminal_session:{participant.token}")
+        
+        # Publish kill event to gateway
+        r.publish("terminal:session:kill", str(session_id))
+        
+        return buildResponse({"status": "success"})
+    except TerminalSessionPro.DoesNotExist:
+        return buildResponse({"status": "failed", "error": "Session not found"}, 404)
+
+
+@terminal_pro_api.route('/api/terminal/sessions/by-device', methods=['POST'])
+@login_required(role="admin", perm={"pam_session": "read"})
+def admin_sessions_by_device():
+    """List sessions for a specific device."""
+    user = get_myself()
+    if user.role not in ('admin', 'superuser'):
+        return buildResponse({"status": "failed", "error": "Admin required"}, 403)
+    blocked = _license_blocked()
+    if blocked:
+        return blocked
+    device_id = request.json.get('device_id')
+    if not device_id:
+        return buildResponse({"status": "failed", "error": "device_id required"}, 400)
+    sessions = list(TerminalSessionPro.select()
+                    .where(TerminalSessionPro.device_id == device_id)
+                    .order_by(TerminalSessionPro.started.desc()).dicts())
+    for s in sessions:
+        s['protocol'] = _detect_session_protocol(s)
+    return buildResponse({"status": "success", "data": sessions})
+
+
+@terminal_pro_api.route('/api/terminal/sessions/by-user', methods=['POST'])
+@login_required(role="admin", perm={"pam_session": "read"})
+def admin_sessions_by_user():
+    """List sessions initiated by a specific user (admin feature, or own sessions for regular users)."""
+    user = get_myself()
+    target_user_id = request.json.get('user_id')
+    if not target_user_id:
+        target_user_id = user.id
+    elif user.role not in ('admin', 'superuser') and target_user_id != user.id:
+        return buildResponse({"status": "failed", "error": "Access denied"}, 403)
+    blocked = _license_blocked()
+    if blocked:
+        return blocked
+    sessions = list(TerminalSessionPro.select()
+                    .where(TerminalSessionPro.user_id == target_user_id)
+                    .order_by(TerminalSessionPro.started.desc())
+                    .dicts())
+    for s in sessions:
+        s['protocol'] = _detect_session_protocol(s)
+    return buildResponse({"status": "success", "data": sessions})
+
+
+@terminal_pro_api.route('/api/terminal/sessions/participants', methods=['POST'])
+@login_required(role="admin", perm={"pam_session": "read"})
+def admin_session_participants():
+    """List participants in a session."""
+    blocked = _license_blocked()
+    if blocked:
+        return blocked
+    session_id = request.json.get('session_id')
+    if not session_id:
+        return buildResponse({"status": "failed", "error": "session_id required"}, 400)
+    participants = list(SessionParticipantPro.select()
+                       .where(SessionParticipantPro.session_id == str(session_id))
+                       .order_by(SessionParticipantPro.joined_at.desc())
+                       .dicts())
+    for p in participants:
+        u = None
+        if p.get('user_id'):
+            try:
+                u = User.get_or_none(id=p['user_id'])
+            except Exception:
+                pass
+        p_name = p.get('participant_name') or ''
+        if u:
+            full_name = f"{u.first_name or ''} {u.last_name or ''}".strip()
+            p['user_name'] = full_name or u.username or p_name or 'Guest'
+            p['name'] = p['user_name']
+            p['username'] = u.username or ''
+        else:
+            p['user_name'] = p_name or 'Guest'
+            p['name'] = p['user_name']
+            p['username'] = ''
+    return buildResponse({"status": "success", "data": participants})
+
+
+@terminal_pro_api.route('/api/terminal/session/share', methods=['POST'])
+@login_required(role="admin", perm={"pam_session": "write"})
+def share_session():
+    """Generate a unique sharing token+URL for a session."""
+    blocked = _license_blocked()
+    if blocked:
+        return blocked
+    user = get_myself()
+    session_id = request.json.get('session_id')
+    role = request.json.get('role', 'observer')
+    name = request.json.get('name', '')
+    share_type = request.json.get('share_type', 'guest')
+    target_user_id = request.json.get('target_user_id')
+    guest_password = request.json.get('password')
+    one_time = request.json.get('one_time', False)
+    host_approval = request.json.get('host_approval', False)
+
+    if not session_id:
+        return buildResponse({"status": "failed", "error": "session_id required"}, 400)
+    session = TerminalSessionPro.get_or_none(id=session_id)
+    if not session:
+        return buildResponse({"status": "failed", "error": "Session not found"}, 404)
+    token = str(uuid.uuid4())
+    proto = _detect_session_protocol(session)
+    is_admin_user = bool(user.role in ('admin', 'superuser'))
+    if share_type == 'admin' or (is_admin_user and not request.json.get('host_approval')):
+        host_approval = False
+
+    is_winbox = (proto == 'winbox')
+    is_desktop = (proto in ('rdp', 'vnc'))
+    is_telnet = (proto == 'telnet')
+
+    if is_desktop:
+        share_url = f"/terminal-ws/desktop.html?token={token}"
+        share_protocol = proto
+    elif is_winbox:
+        share_url = f"/terminal-ws/winbox.html?token={token}"
+        share_protocol = 'winbox'
+    elif is_telnet:
+        share_url = f"/terminal-ws/?token={token}"
+        share_protocol = 'telnet'
+    else:
+        share_url = f"/terminal-ws/?token={token}"
+        share_protocol = 'ssh'
+
+    target_user = None
+    send_notifications = False
+    raw_name = (request.json.get('name') or '').strip()
+
+    if share_type == 'admin':
+        target_user = user
+        name = f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username
+        host_approval = False
+    elif share_type == 'user':
+        if not target_user_id or str(target_user_id) == str(user.id):
+            target_user = user
+            host_approval = False
+        else:
+            target_user = User.get_or_none(id=target_user_id)
+            if not target_user:
+                return buildResponse({"status": "failed", "error": "Target user not found"}, 404)
+            # Automatically enforce host approval for internal user links to prevent unauthorized token reuse
+            host_approval = True
+            send_notifications = True
+        name = f"{target_user.first_name or ''} {target_user.last_name or ''}".strip() or target_user.username
+    else:
+        if raw_name and raw_name.lower() != 'guest':
+            name = raw_name if raw_name.lower().endswith('(guest)') else f"{raw_name} (Guest)"
+        else:
+            name = "Guest"
+
+    if share_type != 'admin' and not (target_user and str(target_user.id) == str(user.id)):
+        if not guest_password and not host_approval:
+            return buildResponse({"status": "failed", "error": "Security Policy: You must either set a Guest Password or require Host Approval to share a session."}, 400)
+
+    join_payload = {
+        "session_id": session_id,
+        "token": token,
+        "protocol": share_protocol,
+        "participant_role": role,
+        "participant_name": name,
+        "user_id": str(target_user.id) if target_user else None,
+        "guest_password": guest_password,
+        "one_time": one_time,
+        "host_approval": host_approval,
+        "shared_by": str(user.id),
+        "is_admin": is_admin_user,
+        "share_type": share_type
+    }
+    r.setex(f"terminal_session:{token}", 300, json.dumps(join_payload))
+    
+    if target_user and send_notifications:
+        # Send Email
+        domain_url = db_sysconfig.get_sysconfig('domain_url')
+        if not domain_url:
+            domain_url = request.host_url
+        link = f"{domain_url.rstrip('/')}/terminal-ws/winbox.html?token={token}" if is_winbox else f"{domain_url.rstrip('/')}/#/terminal-share?token={token}"
+        invite_title = "WebBox Session Invite" if is_winbox else "Terminal Session Invite"
+        invite_desc = f"You have been invited to join a {'WebBox' if is_winbox else 'terminal'} session as a {role}."
+        msg = f"Hello {name},<br><br>{invite_desc}<br>Click <a href='{link}'>here</a> to join.<br><br>MikroWizard"
+        send_email(target_user.email, invite_title, msg)
+        
+        # Send Alert
+        if send_user_apprise:
+            send_user_apprise(target_user, invite_title, f"{invite_desc} Link: {link}", source="terminal_share")
+        
+    return buildResponse({"status": "success", "share_url": share_url, "token": token, "protocol": share_protocol})
+
+
+# ==================================================
+# Session Recording — Admin Endpoints (Phase 4)
+# ==================================================
+
+@terminal_pro_api.route('/api/terminal/recording/list', methods=['POST'])
+@login_required(role="admin", perm={"pam_session": "read"})
+def admin_list_recordings():
+    """List recordings with optional filters (device, user, date range)."""
+    user = get_myself()
+    if user.role not in ('admin', 'superuser'):
+        return buildResponse({"status": "failed", "error": "Admin required"}, 403)
+    blocked = _license_blocked()
+    if blocked:
+        return blocked
+    device_id = request.json.get('device_id')
+    user_id = request.json.get('user_id')
+    date_from = request.json.get('date_from')
+    date_to = request.json.get('date_to')
+    page = int(request.json.get('page', 1))
+    limit = int(request.json.get('limit', 50))
+    q = TerminalSessionPro.select().where(
+        TerminalSessionPro.recording_path.is_null(False),
+        TerminalSessionPro.recording_path != ''
+    )
+    if device_id:
+        q = q.where(TerminalSessionPro.device_id == device_id)
+    if user_id:
+        q = q.where(TerminalSessionPro.user_id == user_id)
+    if date_from:
+        q = q.where(TerminalSessionPro.started >= date_from)
+    if date_to:
+        q = q.where(TerminalSessionPro.started <= date_to)
+    total = q.count()
+    sessions = list(q.order_by(TerminalSessionPro.started.desc()).paginate(page, limit).dicts())
+    
+    for s in sessions:
+        u = User.get_or_none(id=s['user_id'])
+        s['user_name'] = f"{u.first_name} {u.last_name}" if u else s['user_id']
+        
+        d = db_device.Devices.get_or_none(id=s['device_id'])
+        s['device_name'] = d.name if d else str(s['device_id'])
+        s['device_ip'] = d.ip if d else "Unknown IP"
+        
+        s['protocol'] = _detect_session_protocol(s)
+        
+        if s.get('started') and hasattr(s['started'], 'strftime'):
+            s['started_fmt'] = s['started'].strftime('%Y-%m-%d %H:%M:%S')
+
+    return buildResponse({"status": "success", "data": sessions, "total": total})
+
+
+@terminal_pro_api.route('/api/terminal/device/agent-config', methods=['POST'])
+@login_required(role="admin", perm={"pam_session": "write"})
+def device_agent_config():
+    blocked = _license_blocked()
+    if blocked:
+        return blocked
+    user = get_myself()
+    if user.role not in ('admin', 'superuser'):
+        return buildResponse({"status": "failed", "error": "Admin required"}, 403)
+
+    device_id = request.json.get('device_id')
+    agent_modes = request.json.get('agent_modes')
+
+    if not device_id:
+        return buildResponse({"status": "failed", "error": "device_id required"}, 400)
+
+    # GET mode (no agent_modes in payload): just return current value
+    if agent_modes is None and 'agent_modes' not in request.json:
+        try:
+            conn = DeviceConnections.get(
+                DeviceConnections.device_id == device_id,
+                DeviceConnections.protocol == 'ssh'
+            )
+            return buildResponse({"status": "success", "data": {"agent_modes": conn.agent_modes}})
+        except DeviceConnections.DoesNotExist:
+            return buildResponse({"status": "success", "data": {"agent_modes": None}})
+
+    try:
+        dev = db_device.Devices.get_by_id(device_id)
+    except db_device.Devices.DoesNotExist:
+        return buildResponse({"status": "failed", "error": "Device not found"}, 404)
+
+    # Validate agent_modes before persisting (fail-closed per gateway contract)
+    if isinstance(agent_modes, dict):
+        valid, err = validate_agent_modes(agent_modes)
+        if not valid:
+            return buildResponse({"status": "failed", "error": err}, 400)
+
+    try:
+        conn = DeviceConnections.get(
+            DeviceConnections.device_id == device_id,
+            DeviceConnections.protocol == 'ssh'
+        )
+        conn.agent_modes = agent_modes if agent_modes is not None else None
+        conn.modified = datetime.datetime.now()
+        conn.save()
+    except DeviceConnections.DoesNotExist:
+        DeviceConnections.create(
+            device_id=device_id,
+            protocol='ssh',
+            agent_modes=agent_modes if agent_modes is not None else None,
+            created=datetime.datetime.now(),
+            modified=datetime.datetime.now(),
+        )
+
+    return buildResponse({"status": "success", "data": {"agent_modes": agent_modes}})
+
+
+def _resolve_recording_path(session_id):
+    """Resolve recording filepath for a session, with Docker path fallback."""
+    try:
+        session = TerminalSessionPro.get_or_none(id=session_id)
+        if not session or not session.recording_path:
+            return None
+    except Exception:
+        return None
+    recording_dir = config.srvconf.get('PYSRV_TERMINAL_RECORDINGS_DIR', '/opt/mikrowizard/terminal_recordings')
+    if not os.path.exists(recording_dir) and recording_dir.startswith('/opt/mikrowizard/'):
+        docker_dir = recording_dir.replace('/opt/mikrowizard/', '/conf/', 1)
+        if os.path.exists(docker_dir):
+            recording_dir = docker_dir
+    filepath = os.path.join(recording_dir, session.recording_path)
+    if not os.path.exists(filepath) and filepath.startswith('/opt/mikrowizard/'):
+        docker_filepath = filepath.replace('/opt/mikrowizard/', '/conf/', 1)
+        if os.path.exists(docker_filepath):
+            filepath = docker_filepath
+    return filepath if os.path.isfile(filepath) else None
+
+
+@terminal_pro_api.route('/api/terminal/recording/cast/<session_id>', methods=['GET'])
+def serve_cast_file(session_id):
+    """Serve raw NDJSON asciicast file — player handles parsing natively."""
+    blocked = _license_blocked()
+    if blocked:
+        return blocked
+    try:
+        filepath = _resolve_recording_path(session_id)
+        if not filepath:
+            return buildResponse({"status": "failed", "error": "Recording file not found"}, 404)
+        with open(filepath, 'rb') as f:
+            cast_data = f.read()
+        return Response(cast_data, mimetype='application/octet-stream')
+    except TerminalSessionPro.DoesNotExist:
+        return buildResponse({"status": "failed", "error": "Session not found"}, 404)
+
+
+def _render_guac_player(session_id):
+    """Render Guacamole Session Recording player HTML page."""
+    html = f'''<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Remote Desktop Session Recording</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{
+      background: #0b0e14;
+      color: #c9d1d9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }}
+    #player-header {{
+      height: 44px;
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }}
+    .header-title {{
+      font-size: 13px;
+      font-weight: 600;
+      color: #58a6ff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }}
+    .header-badge {{
+      background: #238636;
+      color: #fff;
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }}
+    #display-container {{
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #000;
+      overflow: hidden;
+      position: relative;
+    }}
+    #display-target {{
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 100%;
+    }}
+    #display-target > div {{
+      box-shadow: 0 4px 24px rgba(0,0,0,0.8);
+    }}
+    #loading-overlay {{
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(11, 14, 20, 0.95);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+      gap: 12px;
+    }}
+    .spinner {{
+      width: 36px;
+      height: 36px;
+      border: 3px solid #30363d;
+      border-top-color: #58a6ff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }}
+    @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+    #controls-bar {{
+      height: 50px;
+      background: #161b22;
+      border-top: 1px solid #30363d;
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      gap: 10px;
+      flex-shrink: 0;
+    }}
+    .ctrl-btn {{
+      background: transparent;
+      border: 1px solid #30363d;
+      color: #c9d1d9;
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 12px;
+      transition: all 0.15s ease;
+    }}
+    .ctrl-btn:hover {{
+      background: #21262d;
+      border-color: #58a6ff;
+      color: #58a6ff;
+    }}
+    #progress-container {{
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }}
+    #seekbar {{
+      flex: 1;
+      height: 6px;
+      border-radius: 3px;
+      background: #30363d;
+      outline: none;
+      cursor: pointer;
+      -webkit-appearance: none;
+      accent-color: #58a6ff;
+    }}
+    #time-display {{
+      font-size: 11px;
+      font-family: monospace;
+      color: #8b949e;
+      min-width: 95px;
+      text-align: right;
+    }}
+  </style>
+</head>
+<body>
+  <div id="player-header">
+    <div class="header-title">
+      <i class="fab fa-windows"></i>
+      <span>Remote Desktop Session Recording</span>
+      <span class="header-badge">RECORDING</span>
+    </div>
+    <div style="font-size: 11px; color: #8b949e;">Session: {session_id}</div>
+  </div>
+  <div id="display-container">
+    <div id="loading-overlay">
+      <div class="spinner"></div>
+      <div id="loading-text" style="font-size: 13px; color: #8b949e;">Loading session recording...</div>
+    </div>
+    <div id="display-target"></div>
+  </div>
+  <div id="controls-bar">
+    <button class="ctrl-btn" id="btn-play" title="Play / Pause">
+      <i class="fas fa-play" id="icon-play"></i>
+    </button>
+    <button class="ctrl-btn" id="btn-rw" title="Rewind 10s">
+      <i class="fas fa-backward"></i>
+    </button>
+    <button class="ctrl-btn" id="btn-ff" title="Forward 10s">
+      <i class="fas fa-forward"></i>
+    </button>
+    <div id="progress-container">
+      <input type="range" id="seekbar" min="0" max="1000" value="0">
+      <span id="time-display">00:00 / 00:00</span>
+    </div>
+    <button class="ctrl-btn" id="btn-fs" title="Fullscreen">
+      <i class="fas fa-expand"></i>
+    </button>
+  </div>
+
+  <script>
+    var module = module || {{ exports: {{}} }};
+  </script>
+  <script src="/assets/libs/guacamole/guacamole-common.min.js"></script>
+  <script>
+    if (typeof Guacamole === 'undefined' && typeof module !== 'undefined' && module.exports && module.exports.SessionRecording) {{
+      window.Guacamole = module.exports;
+    }}
+  </script>
+  <script>
+    let recording = null;
+    let duration = 0;
+    let isSeeking = false;
+
+    function formatTime(ms) {{
+      const totalSec = Math.floor(ms / 1000);
+      const min = Math.floor(totalSec / 60);
+      const sec = totalSec % 60;
+      return String(min).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
+    }}
+
+    function updateTimeDisplay(pos, dur) {{
+      document.getElementById('time-display').textContent = formatTime(pos) + ' / ' + formatTime(dur);
+    }}
+
+    function scaleDisplay() {{
+      if (!recording) return;
+      const display = recording.getDisplay();
+      if (!display) return;
+      const container = document.getElementById('display-container');
+      const cw = container.clientWidth;
+      const ch = container.clientHeight;
+      const dw = display.getWidth();
+      const dh = display.getHeight();
+      if (dw > 0 && dh > 0 && cw > 0 && ch > 0) {{
+        const scale = Math.min(cw / dw, ch / dh);
+        display.scale(scale);
+      }}
+    }}
+
+    window.addEventListener('resize', scaleDisplay);
+
+    fetch('/api/terminal/recording/guac/{session_id}')
+      .then(resp => {{
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        return resp.blob();
+      }})
+      .then(blob => {{
+        document.getElementById('loading-text').textContent = 'Parsing session data...';
+        recording = new Guacamole.SessionRecording(blob);
+        const display = recording.getDisplay();
+        const target = document.getElementById('display-target');
+        target.innerHTML = '';
+        target.appendChild(display.getElement());
+
+        display.onresize = function(width, height) {{
+          scaleDisplay();
+        }};
+
+        recording.onload = function() {{
+          duration = recording.getDuration();
+          document.getElementById('loading-overlay').style.display = 'none';
+          updateTimeDisplay(0, duration);
+          scaleDisplay();
+          recording.play();
+          updatePlayIcon(true);
+        }};
+
+        recording.onplay = function() {{
+          updatePlayIcon(true);
+        }};
+
+        recording.onpause = function() {{
+          updatePlayIcon(false);
+        }};
+
+        recording.onseek = function(position) {{
+          if (!isSeeking && duration > 0) {{
+            document.getElementById('seekbar').value = Math.floor((position / duration) * 1000);
+            updateTimeDisplay(position, duration);
+          }}
+        }};
+
+        recording.onerror = function(err) {{
+          document.getElementById('loading-text').textContent = 'Playback error: ' + err;
+        }};
+
+        setInterval(() => {{
+          if (recording && !isSeeking && duration > 0) {{
+            const pos = recording.getPosition();
+            document.getElementById('seekbar').value = Math.floor((pos / duration) * 1000);
+            updateTimeDisplay(pos, duration);
+            if (!recording.isPlaying() && pos >= duration - 500) {{
+              updatePlayIcon(false);
+            }}
+          }}
+        }}, 250);
+      }})
+      .catch(err => {{
+        document.getElementById('loading-text').textContent = 'Failed to load recording: ' + err.message;
+      }});
+
+    const btnPlay = document.getElementById('btn-play');
+    const iconPlay = document.getElementById('icon-play');
+    function updatePlayIcon(playing) {{
+      if (playing) {{
+        iconPlay.className = 'fas fa-pause';
+      }} else {{
+        iconPlay.className = 'fas fa-play';
+      }}
+    }}
+
+    btnPlay.addEventListener('click', () => {{
+      if (!recording) return;
+      if (recording.isPlaying()) {{
+        recording.pause();
+      }} else {{
+        if (recording.getPosition() >= duration - 200) {{
+          recording.seek(0, () => recording.play());
+        }} else {{
+          recording.play();
+        }}
+      }}
+    }});
+
+    const seekbar = document.getElementById('seekbar');
+    seekbar.addEventListener('mousedown', () => {{ isSeeking = true; }});
+    seekbar.addEventListener('touchstart', () => {{ isSeeking = true; }});
+    seekbar.addEventListener('input', (e) => {{
+      if (duration > 0) {{
+        const targetMs = (parseInt(e.target.value, 10) / 1000) * duration;
+        updateTimeDisplay(targetMs, duration);
+      }}
+    }});
+    function commitSeek(e) {{
+      if (!recording || duration <= 0) return;
+      isSeeking = false;
+      const targetMs = (parseInt(e.target.value, 10) / 1000) * duration;
+      recording.seek(Math.floor(targetMs), () => {{
+        scaleDisplay();
+      }});
+    }}
+    seekbar.addEventListener('mouseup', commitSeek);
+    seekbar.addEventListener('touchend', commitSeek);
+
+    document.getElementById('btn-rw').addEventListener('click', () => {{
+      if (!recording || duration <= 0) return;
+      const cur = recording.getPosition();
+      recording.seek(Math.max(0, cur - 10000), () => {{ scaleDisplay(); }});
+    }});
+
+    document.getElementById('btn-ff').addEventListener('click', () => {{
+      if (!recording || duration <= 0) return;
+      const cur = recording.getPosition();
+      recording.seek(Math.min(duration, cur + 10000), () => {{ scaleDisplay(); }});
+    }});
+
+    document.getElementById('btn-fs').addEventListener('click', () => {{
+      const container = document.getElementById('display-container');
+      if (!document.fullscreenElement) {{
+        container.requestFullscreen().then(scaleDisplay).catch(() => {{}});
+      }} else {{
+        document.exitFullscreen().then(scaleDisplay).catch(() => {{}});
+      }}
+    }});
+  </script>
+</body>
+</html>'''
+    return html
+
+
+@terminal_pro_api.route('/api/terminal/recording/guac/<session_id>', methods=['GET'])
+@login_required(role="admin", perm={"pam_session": "read"})
+def serve_guac_file(session_id):
+    """Serve raw Guacamole recording (.guac) file."""
+    blocked = _license_blocked()
+    if blocked:
+        return blocked
+    user = get_myself()
+    if user.role not in ('admin', 'superuser'):
+        return buildResponse({"status": "failed", "error": "Admin required"}, 403)
+    try:
+        filepath = _resolve_recording_path(session_id)
+        if not filepath:
+            return buildResponse({"status": "failed", "error": "Recording file not found"}, 404)
+        with open(filepath, 'rb') as f:
+            data = f.read()
+        return Response(data, mimetype='application/octet-stream')
+    except Exception as e:
+        return buildResponse({"status": "failed", "error": str(e)}, 500)
+
+
+def _render_asciinema(filepath):
+    """Render asciinema player HTML with inline cast data (reads file on server, avoids auth/CORS issues)."""
+    try:
+        with open(filepath, 'rb') as f:
+            cast_bytes = f.read()
+    except Exception as e:
+        return f'<html><body><h3>Error reading recording: {e}</h3></body></html>'
+   
+    cast_b64 = base64.b64encode(cast_bytes).decode('ascii')
+    html = f'''<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>MikroWizard - Session Recording</title>
+  <link rel="stylesheet" href="/assets/libs/asciinema/asciinema-player.min.css">
+
+</head>
+<body>
+  <div id="player"></div>
+  <script src="/assets/libs/asciinema/asciinema-player.min.js"></script>
+  <script>
+    AsciinemaPlayer.create('data:application/octet-stream;base64,{cast_b64}', document.getElementById('player'));
+  </script>
+</body>
+</html>'''
+    return html
+
+
+@terminal_pro_api.route('/api/terminal/recording/stream/<session_id>', methods=['GET'])
+@login_required(role="admin", perm={"pam_session": "read"})
+def stream_recording(session_id):
+    """Serve asciinema player HTML page or HTML5 video player for a session recording."""
+    blocked = _license_blocked()
+    if blocked:
+        return blocked
+    user = get_myself()
+    if user.role not in ('admin', 'superuser'):
+        return buildResponse({"status": "failed", "error": "Admin required"}, 403)
+    try:
+        filepath = _resolve_recording_path(session_id)
+        if not filepath:
+            return buildResponse({"status": "failed", "error": "Recording file not found"}, 404)
+        if filepath.endswith('.mp4'):
+            html = f'''<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>WinBox Session Recording</title>
+  <style>
+    body {{ margin: 0; padding: 0; background: #0b0e14; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: sans-serif; }}
+    .video-container {{ width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }}
+    video {{ max-width: 100%; max-height: 100%; outline: none; border-radius: 4px; box-shadow: 0 4px 20px rgba(0,0,0,0.6); }}
+  </style>
+</head>
+<body>
+  <div class="video-container">
+    <video controls autoplay playsinline>
+      <source src="/api/terminal/recording/video/{session_id}" type="video/mp4">
+      Your browser does not support the video tag.
+    </video>
+  </div>
+</body>
+</html>'''
+            resp = make_response(html)
+            resp.headers['Content-Type'] = 'text/html; charset=utf-8'
+            return resp
+        elif filepath.endswith('.guac'):
+            resp = make_response(_render_guac_player(session_id))
+            resp.headers['Content-Type'] = 'text/html; charset=utf-8'
+            return resp
+        resp = make_response(_render_asciinema(filepath))
+        resp.headers['Content-Type'] = 'text/html; charset=utf-8'
+        return resp
+    except TerminalSessionPro.DoesNotExist:
+        return buildResponse({"status": "failed", "error": "Session not found"}, 404)
+
+
+@terminal_pro_api.route('/api/terminal/recording/video/<session_id>', methods=['GET'])
+@login_required(role="admin", perm={"pam_session": "read"})
+def stream_video_file(session_id):
+    """Stream MP4 recording file with HTTP Range support for scrubbing."""
+    blocked = _license_blocked()
+    if blocked:
+        return blocked
+    user = get_myself()
+    if user.role not in ('admin', 'superuser'):
+        return buildResponse({"status": "failed", "error": "Admin required"}, 403)
+    try:
+        filepath = _resolve_recording_path(session_id)
+        if not filepath or not os.path.exists(filepath) or os.path.getsize(filepath) == 0:
+            return buildResponse({"status": "failed", "error": "Recording file not found or empty"}, 404)
+
+        file_size = os.path.getsize(filepath)
+        range_header = request.headers.get('Range', None)
+        if range_header:
+            byte1, byte2 = 0, None
+            m = re.search(r'bytes=(\d+)-(\d*)', range_header)
+            if m:
+                g = m.groups()
+                byte1 = int(g[0])
+                if g[1]:
+                    byte2 = int(g[1])
+            if byte1 >= file_size:
+                resp = Response("Requested Range Not Satisfiable", 416)
+                resp.headers['Content-Range'] = f'bytes */{file_size}'
+                return resp
+            if byte2 is None or byte2 >= file_size:
+                byte2 = file_size - 1
+            length = byte2 - byte1 + 1
+
+            with open(filepath, 'rb') as f:
+                f.seek(byte1)
+                data = f.read(length)
+
+            rv = Response(data, 206, mimetype='video/mp4', direct_passthrough=True)
+            rv.headers['Content-Range'] = f'bytes {byte1}-{byte2}/{file_size}'
+            rv.headers['Accept-Ranges'] = 'bytes'
+            rv.headers['Content-Length'] = str(length)
+            return rv
+        else:
+            with open(filepath, 'rb') as f:
+                data = f.read()
+            rv = Response(data, 200, mimetype='video/mp4')
+            rv.headers['Accept-Ranges'] = 'bytes'
+            rv.headers['Content-Length'] = str(file_size)
+            return rv
+    except Exception as e:
+        log.error(f"Error streaming video for session {session_id}: {e}")
+        return buildResponse({"status": "failed", "error": str(e)}, 500)
+
+@terminal_pro_api.route('/api/terminal/gateway/status', methods=['GET'])
+@login_required()
+def gateway_status():
+    """Check terminal gateway installation and capability status."""
+    blocked = _license_blocked()
+    if blocked:
+        return blocked
+    installed = terminal_gateway.is_terminal_gateway_installed()
+    webbox_supported, reason = terminal_gateway.is_webbox_supported()
+    return buildResponse({
+        "status": "success",
+        "data": {
+            "installed": installed,
+            "webbox_supported": webbox_supported,
+            "reason": reason,
+            "install_doc_url": "https://mikrowizard.com/docs/installing-terminal-gatway-addon/",
+            "update_doc_url": "https://mikrowizard.com/docs/updating-terminal-gateway-addon/"
+        }
+    })
+
+
+@terminal_pro_api.route('/api/terminal/favorites', methods=['GET'])
+@login_required()
+def get_terminal_favorites():
+    user = get_myself()
+    if not user:
+        return buildResponse({"error": "Unauthorized"}, 401)
+    blocked = _license_blocked()
+    if blocked:
+        return blocked
+    
+    favs = list(TerminalFavoritePro.select().where(TerminalFavoritePro.user_id == user.id).order_by(TerminalFavoritePro.order_index).dicts())
+    return buildResponse({"status": "success", "favorites": favs}, 200)
+
+@terminal_pro_api.route('/api/terminal/favorites', methods=['POST'])
+@login_required()
+def save_terminal_favorites():
+    blocked = _license_blocked()
+    if blocked:
+        return blocked
+    user = get_myself()
+    if not user:
+        return buildResponse({"error": "Unauthorized"}, 401)
+    
+    try:
+        
+        
+        data = request.json
+        device_ids = data.get("favorites", [])  # list of device IDs in order
+        
+        with database.atomic():
+            # Delete old favorites
+            TerminalFavoritePro.delete().where(TerminalFavoritePro.user_id == user.id).execute()
+            
+            # Insert new favorites
+            to_insert = []
+            for i, dev_id in enumerate(device_ids):
+                to_insert.append({
+                    "user_id": user.id,
+                    "device_id": int(dev_id),
+                    "order_index": i
+                })
+            
+            if to_insert:
+                TerminalFavoritePro.insert_many(to_insert).execute()
+                
+        return buildResponse({"status": "success"}, 200)
+    except Exception as e:
+        log.error(f"Error saving terminal favorites: {e}")
+        return buildResponse({"error": str(e)}, 500)
+
+
+@app.route('/api/non-mikrotik/apps/publish', methods=['POST'])
+@login_required(role="admin", perm={"device": "full"})
+def publish_application():
+    """Publish a child application under a parent host server in seconds (PRO feature)."""
+    blocked = _license_blocked()
+    if blocked:
+        return blocked
+    user = get_myself()
+    data = request.json or {}
+    parent_id = data.get('parent_id')
+    name = (data.get('name') or '').strip()
+    if not parent_id:
+        return buildResponse({"status": "failed", "error": "parent_id is required"}, 400)
+    if not name:
+        return buildResponse({"status": "failed", "error": "Application name is required"}, 400)
+
+    parent_dev = db_device.Devices.get_or_none(db_device.Devices.id == parent_id)
+    if not parent_dev:
+        return buildResponse({"status": "failed", "error": "Parent host device not found"}, 404)
+
+    app_mode = data.get('app_mode', 'remote_app')
+    remote_app = (data.get('remote_app') or '').strip()
+    remote_app_dir = (data.get('remote_app_dir') or '').strip()
+    remote_app_args = (data.get('remote_app_args') or '').strip()
+    initial_program = (data.get('initial_program') or '').strip()
+    template_id = data.get('template_id') or parent_dev.template_id
+
+    protocol_config = {
+        'app_mode': app_mode,
+        'remote_app': remote_app,
+        'remote_app_dir': remote_app_dir,
+        'remote_app_args': remote_app_args,
+        'initial_program': initial_program,
+    }
+    if 'overrides' in data and isinstance(data['overrides'], dict):
+        protocol_config['overrides'] = data['overrides']
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+    try:
+        new_app = db_device.Devices.create(
+            name=name, ip=None, mac="", details="{}", uptime="", license="", interface="",
+            user_name="", password="", port="",
+            update_availble=False, current_firmware="", arch="", sensors="",
+            router_type="", wifi_config="", upgrade_avail=False,
+            owner=user, created=now, modified=now, peer_ip="", failed_attempt=0,
+            status="active", firmware_to_install="", syslog_configured=False, upgrade_device=False,
+            device_type=parent_dev.device_type or "windows",
+            device_model=parent_dev.device_model or "",
+            template_id=template_id,
+            parent_id=parent_dev.id,
+            protocol_config=protocol_config
+        )
+
+        parent_conn = DeviceConnections.get_or_none(
+            DeviceConnections.device_id == parent_dev.id,
+            DeviceConnections.is_default == True
+        ) or DeviceConnections.get_or_none(DeviceConnections.device_id == parent_dev.id)
+        
+        protocol = parent_conn.protocol if parent_conn else (data.get('protocol') or 'rdp')
+        port = parent_conn.port if parent_conn else (3389 if protocol == 'rdp' else 5900)
+
+        DeviceConnections.create(
+            device_id=new_app.id,
+            protocol=protocol,
+            port=port,
+            auth_mode='credential',
+            is_default=True,
+            created=now,
+            modified=now,
+            credential_id=parent_conn.credential_id if parent_conn else None
+        )
+
+        parent_groups = list(DevGroupRel.select().where(DevGroupRel.device_id == parent_dev.id))
+        for pg in parent_groups:
+            try:
+                DevGroupRel.create(group_id=pg.group_id, device_id=new_app.id)
+            except Exception:
+                pass
+
+        db_syslog.add_syslog_event(user, "Application", "Publish", get_ip(), get_agent(), json.dumps({
+            "parent_id": parent_id, "app_name": name, "app_id": new_app.id
+        }))
+        return buildResponse({"status": "success", "id": new_app.id})
+    except Exception as e:
+        log.error(f"publish_application error: {e}")
+        return buildResponse({"status": "failed", "error": str(e)}, 500)
+
+app.register_blueprint(terminal_pro_api)

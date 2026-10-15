@@ -16,7 +16,7 @@
 
 import time
 import concurrent.futures
-from libs import util, firm_lib, fw_state, job_control, retention
+from libs import util, firm_lib, fw_state, job_control, retention, logsetup
 from libs.db import db_tasks, db_device
 from libs.db.db import database, tune_process_db_pool
 import config
@@ -30,6 +30,8 @@ try:
     ISPRO = True
 except ImportError:
     ISPRO = False
+
+logsetup.init_logging()   # same log output in the free tier (Pro gets it via libs.webutil)
 
 TICK_SECONDS = 15
 VERIFY_WORKERS = 8

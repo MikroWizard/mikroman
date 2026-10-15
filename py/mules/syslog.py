@@ -24,7 +24,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from libs.db import db_device, db_AA, db_events, db_sysconfig, db_budget
 from libs.db.db import database, release_db_connection, tune_process_db_pool, TRANSIENT_DB_ERRORS
-from libs import util
+from libs import util, logsetup
 try:
     import uwsgi
 except ImportError:
@@ -36,6 +36,7 @@ except ImportError:
     ISPRO=False
     pass
 
+logsetup.init_logging()   # same log output in the free tier (Pro gets it via libs.webutil)
 log = logging.getLogger("SYSLOG")
 
 # Every syslog message is kept: nothing is dropped when busy, it waits in the backlog.

@@ -10,7 +10,7 @@ import time
 import os
 import signal
 from concurrent.futures import ThreadPoolExecutor, as_completed, wait
-from libs import util, fw_state, device_state
+from libs import util, fw_state, device_state, logsetup
 import config
 from libs.db import db_device, db_sysconfig, db_events
 from libs.db.db import database, tune_process_db_pool, get_db_stats, reset_db_stats
@@ -25,6 +25,7 @@ try:
 except ImportError:
     uwsgi = None
 
+logsetup.init_logging()   # same log output in the free tier (Pro gets it via libs.webutil)
 log = logging.getLogger("Data_grabber")
 # poll results that mean the router did not answer (shown "Offline" in the devices list)
 OFFLINE_DETAILS = ("Unreachable", "API Connection")
