@@ -1,5 +1,129 @@
 # Release Notes  
 
+## Version 2.1.0 Free / 2.1.0 Pro
+
+> **Upgrade note:** This release includes database migrations **058 – 064**. Migration `064_log_tables_scale.py` widens the `account` table to `BIGINT` and builds new indexes on `auth`, `account` and `events`. On large installations this can take several minutes, so do not interrupt the upgrade while migrations run.
+
+### Major New Features
+
+#### 1. RDP, VNC & WebBox Remote Access (Pro)
+- **RDP and VNC desktop sessions:** Open Windows RDP and VNC consoles directly in the Connection Manager, alongside SSH, Telnet and WebFig.
+- **WebBox (WinBox in the browser):** Launch WinBox sessions from the Connection Manager, device list, device tree and Network Map, with gateway availability checks.
+- **RemoteApp publishing:** Publish individual applications from an RDP host as child entries. They appear nested under their parent server and inherit its IP.
+- **Separate CLI, RDP and VNC templates:** Templates now carry their own protocol, with display and acceleration settings for graphical sessions. Session options resolve in four tiers: template, host, published app, then DLP policy.
+- **Session DLP policies:** Control clipboard, file transfer, watermarking and forensic recording per policy.
+- **Recording playback for every protocol:** Graphical sessions are recorded and can be replayed in the browser (Guacamole player for RDP/VNC, MP4 video with seeking for WebBox). Ended WebFig proxy sessions now also appear in session history.
+- **Sharing & collaboration:** RDP, VNC and WebBox sessions can be watched or shared like terminal sessions, with protocol badges in the Session Manager. Join and guest links are bound to the authenticated user to block spoofing.
+
+#### 2. Network Map v2 (Pro)
+- Rebuilt topology engine with **radial and hierarchical tree layouts**, path finding, and node positions saved per user.
+- **Root cause analysis:** A Problems drawer separates the device that actually went down from the devices that are only unreachable because of it.
+- Fast SVG icon set with live state rings, link traffic rates, and full theme support.
+- **NOC full-screen mode**, search across the map, PNG export and CSV export of the device inventory.
+- Device inspection drawer and admin-assigned aliases for neighbours.
+- Recognises unmanaged peers through router identity (all interface MACs and IPs), classifies APs and CPEs, and supports bridge ports and RouterOS 7 link-local neighbours.
+- The map only shows devices each user is allowed to see.
+
+#### 3. Firmware Upgrade Engine Rewrite
+- **Multi-step upgrade planner:** Upgrades older routers along a safe path (latest v6 → 7.12.1 → 7.13+), checks package names by architecture, and confirms the result after the reboot.
+- **Restart-safe state machine:** Upgrade progress is stored per device in Redis with leases, so a service restart does not lose track of upgrades and a router is never left halfway through one.
+- **Integrity & delivery checks:** Packages are checked against MikroTik's official SHA256 hashes, the router's free storage is checked before upload, and RouterBOOT is upgraded after the OS upgrade.
+- **Update modes & strategies:** Full (OS + RouterBOOT), OS only, packages only, or bootloader only. Version can come from the server repository, MikroTik's servers directly (native), a specific chosen version, or Auto-Pilot latest.
+- **Latest Cloud channel (Pro):** Upgrade to the newest release on the *stable*, *long-term*, *testing* or *development* channel, from single devices, device groups and scheduled tasks.
+- **PtP safe ordering (Pro):** On point-to-point wireless links, stations are upgraded before their access points so remote ends do not lose their link.
+- **Pro safety rules:** Automatic v6 → v7 upgrades are refused when packages that do not migrate are installed (e.g. multicast, user-manager), and the right wireless driver packages (`wifi-qcom`, `wifi-qcom-ac`) are installed across the 7.13 package split.
+- **Live status in the UI:** Updating, rebooting, updated and failed badges; inline *Retry* / *Clear* on failed devices; a *Failed* quick filter; faster polling while updates run.
+- Device group firmware updates now have the same options as single-device updates.
+- New settings: firmware architecture filter for repository downloads, and **Maximum Update Retries** (1–5, default 2) to prevent reboot loops.
+- Upload concurrency scales with fleet size (8–35 parallel transfers) to avoid saturating the WAN link.
+
+#### 4. Workspace Modes
+- A global **workspace mode switcher** (MikroTik, PAM, or All) tailors navigation, device tabs and actions to the work you are doing. The current mode is shown as a pill in the header.
+
+#### 5. NATed & Multi-Endpoint Devices
+- Several devices can now share one public IP on different ports (e.g. several RDP hosts behind one NAT). Devices are now unique by IP **and** port instead of IP alone.
+- Add/Edit dialogs accept the IP and port directly, and protocol badges show the real port (e.g. `RDP:3390`).
+
+---
+
+### Scale & Performance (large fleets)
+
+This release focuses on running reliably with **Many Devices**:
+
+- **Automatic database connection budgeting:** Each process sizes its connection pool from PostgreSQL's real `max_connections` and the running uWSGI layout (web workers, spoolers, poller, firmware and syslog mules, cron). When PostgreSQL is out of connections, processes back off and retry instead of failing. This removes `FATAL: sorry, too many clients already`.
+- **Poller scaling:** The worker count adapts to the fleet (15 to 120 workers), work can be split across multiple poller mules (`DATAGRABBER_MULES`), and each cycle has a hard deadline (`DATAGRABBER_CYCLE_DEADLINE`). Large fleets are polled in roughly 30–45 seconds.
+- **Lighter router polling:** Interface rates are now calculated from 64-bit counters instead of `monitor-traffic`, rarely-changing information (routerboard, identity, wireless) is cached, and only changed columns are written to the database.
+- **RouterOS API transport:** A 64 KB buffered socket read removes the heavy CPU use caused by thousands of tiny `recv()` calls, and broken connections now fail cleanly.
+- **Syslog pipeline:** A separate UDP reader process feeds an asyncio pipeline that does not drop messages, can be split across mules (`PYSRV_SYSLOG_MULES`), and retries automatically when the database has a temporary error.
+- **Fast SSH exec channel:** Single commands on MikroTik run over SSH in about 0.1 s (`PYSRV_MIKROTIK_EXEC`). SSH connect, auth and command timeouts prevent hung workers.
+- **Pooled Redis connections**, and charts are aligned to a regular time grid so outages show as zero instead of misleading jumps.
+- **Pro:** Neighbour discovery skips database writes when the topology has not changed, radio telemetry writes are throttled, cloner and vault tasks use bounded thread pools, and alert workers only start when alert rules exist.
+
+---
+
+### Background Tasks & Job Control
+
+- **Stopping tasks safely:** *Stop* now asks running tasks to finish their current device and skip the rest. Critical tasks (firmware, scan, download, vault) cannot be force-killed, and other tasks get a 120 s grace period before a force kill.
+- **Cluster-safe job locks:** Redis job leases and per-device locks prevent two operations from running against the same router at once. Tasks left marked as running after a crash are reset automatically.
+- **No more lost requests:** Firmware, RouterBOOT, backup and snippet requests are queued when a similar job is already running, instead of being dropped.
+- **Large payloads:** Bulk add and scan results are kept in Redis, which avoids the 64 KB uWSGI spooler file limit.
+- **Backups:** Identical configurations are stored once (volatile export header timestamps are ignored), and each backup is linked to the execution log entry that created it.
+
+---
+
+### Monitoring, Logs & Retention
+
+- **Live device state:** The device list shows *Offline* (in red) for unreachable routers and a live-updating uptime for online ones. Update badges are hidden for offline devices.
+- **Reboot detection:** Unexpected reboots are detected and the cause is read from RouterOS logs. Unreachable alerts are suppressed while a device is expected to be offline (updating or rebooting).
+- **RADIUS accounting:** `Accounting-On/Off` closes stale login sessions when a router restarts. Interim updates are handled quietly, and identical usernames on different routers no longer conflict.
+- **Terminal Gateway logins:** The router's own syslog copies of gateway logins are no longer shown as separate logins. Session durations are calculated correctly, and recordings can be played for every gateway protocol from the auth logs.
+- **Log improvements (UI):** Device filter badges can be cleared with one click, and Authentication and Accounting logs can be opened directly from the Connection Manager context menu.
+- **Configurable data retention** (runs daily): Resolved events, login history, configuration change history, execution logs, task results, sequence history, config versions and backups are pruned in batches. Unused config blobs are cleaned up afterwards. Unresolved events and logins that have recordings are always kept. New settings: `RETENTION_EVENTS_DAYS`, `RETENTION_AUTH_DAYS`, `RETENTION_ACCOUNT_DAYS` (default 365 days) and related `RETENTION_*` keys.
+
+---
+
+### Multi-Brand & Templates
+
+- Built-in **diff exclusion rules for 10+ vendors**, so volatile lines (timestamps, counters) do not show up as configuration changes.
+- Template Manager: regex diff exclusions grouped by section, with a **live regex testing sandbox** that shows which lines are kept or removed. Also adds brand management and JSON editors for pre-connect and post-disconnect hooks.
+- Trailing CLI prompts are stripped and CRLF line endings normalised in command output. MikroTik license and terminal prompts are answered automatically.
+
+---
+
+### Connection Manager & UI
+
+- **Custom categories** for the device tree, synced to the server, with JSON import/export. Tree grouping by custom category, admin group, device type, or a flat list, plus search and a favorites filter.
+- Context menus stay inside the window and scroll on small screens.
+- Device tables no longer jump or lose focus while auto-refreshing.
+- Sensor widgets handle missing data without errors.
+- Customer and operator device selections are kept separate, and cached customer data is cleared on logout.
+- Pro-only protocols and features show a lock badge with an explanation in the Free edition.
+
+---
+
+### Deployment
+
+- New `scripts/hotfix_update.sh` to patch code inside a running container, with rollback instructions (also works when Docker needs `sudo`).
+- Nginx gzip level lowered from 9 to 5 to reduce CPU use under load.
+- Container entrypoint creates the `/conf` folders and fallback SSL configuration, and the SSL agent recovers more reliably.
+
+---
+
+### Bug Fixes
+
+- Fixed fresh installations failing at migration 046 (it selected columns that are only added by later migrations) and invalid PL/pgSQL syntax in migration 058.
+- Fixed event status updates that did not target the correct row.
+- Fixed RADIUS session ID collisions that broke unique constraints, and logout matching in auth sessions.
+- Fixed the firmware download endpoint returning an error page that RouterOS `/tool/fetch` saved as a package (missing files now return 404).
+- RouterOS 7.18+ packages marked *available* are no longer shown as installed.
+- Fixed connection pool starvation during long router calls, spooler deadlocks, N+1 queries in task device lookups, and leaked API/SSH sockets (issue #12).
+- Fixed `KeyError: 'status'` in task results, and version parsing with `(stable)` / `(testing)` suffixes.
+- Passwords are no longer written to syslog audit events for bulk adds or to dev-mode terminal logs.
+- WebFig proxy browser tokens are now per session, which fixes conflicts when several tabs are open.
+- (Pro) Fixed a `NameError` in vault password rotation tasks, cloner syncing a device twice when it belongs to several groups, and duplicate backup rows from the config runner.
+
+---
+
 ## Version 2.0.0 Free / 2.0.0 Pro
 
 ### Major New Features
