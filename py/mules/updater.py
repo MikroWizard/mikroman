@@ -21,12 +21,15 @@ import signal
 import uwsgi
 log = logging.getLogger("Updater_mule")
 import pip
+from libs import logsetup
 try:
     from libs import utilpro
     ISPRO=True
 except ImportError:
     ISPRO=False
     pass
+logsetup.init_logging()   # same log output in the free tier (Pro gets it via libs.webutil)
+
 def import_or_install(package):
     try:
         __import__(package)

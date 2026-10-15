@@ -17,6 +17,8 @@ import config
 import datetime
 
 import logging
+from libs import logsetup
+from libs.logsetup import ColorFormatter  # noqa: F401  (kept importable from here)
 log = logging.getLogger("webutil")
 
 
@@ -186,17 +188,6 @@ def page_not_found(error):
 # --------------------------------------------------------------------------
 # logging (is in this module because binds to session)
 
-class ColorFormatter(logging.Formatter):
-    """Colorize warnings and errors"""
-
-    def format(self, rec):
-        if rec.levelno == logging.WARNING:
-            rec.msg = "\033[93m{}\033[0m".format(rec.msg)
-        elif rec.levelno in (logging.ERROR, logging.CRITICAL):
-            rec.msg = "\033[91m{}\033[0m".format(rec.msg)
-        return logging.Formatter.format(self, rec)
-
-
 class MyLogContextFilter(logging.Filter):
     """Injects contextual info, ip+userid, into the log."""
 
@@ -216,23 +207,8 @@ class MyLogContextFilter(logging.Filter):
 
 
 def init_logging():
-    """Initialize logging system."""
-
-    prefix = "PROD " if config.IS_PRODUCTION else ""
-    format = prefix+"%(levelname)3.3s %(uid)s@%(ip)s %(asctime)s %(filename)s %(message)s"
-    dfmt = "%d%m%y-%H:%M:%S"
-    logging.basicConfig(level=logging.INFO, format=format, datefmt=dfmt)
-
-    formatter = ColorFormatter(format, datefmt=dfmt)
-
-    # custom log data: userid + ip addr
-    f = MyLogContextFilter()
-    for handler in logging.root.handlers:
-        handler.addFilter(f)
-        handler.setFormatter(formatter) # remove if coloring not wanted
-
-    if config.PYSRV_LOG_SQL:
-        logging.getLogger('peewee').setLevel(logging.DEBUG)
+    """Initialize logging system (libs/logsetup.py) with the web request filter (user + ip)."""
+    logsetup.init_logging(MyLogContextFilter())
 
 
 # --------------------------------------------------------------------------

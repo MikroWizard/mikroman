@@ -163,6 +163,11 @@ flask_config = dict(
 
 # dump sql statements in log file?
 PYSRV_LOG_SQL = srvconf.get("PYSRV_LOG_SQL")
+# Log level of every process (web workers, spoolers, mules): WARNING writes only warnings and
+# errors; INFO adds the activity lines (poll cycles, syslog, firmware progress, DB pool sizes),
+# DEBUG everything. Unset: INFO with DEV_MODE=true (dev environment), WARNING otherwise.
+# Applied at process start (restart to change).
+LOG_LEVEL = str(srvconf.get("PYSRV_LOG_LEVEL", "") or "").strip().upper()
 
 # allow API access to this domain
 CORS_ALLOW_ORIGIN = srvconf.get("PYSRV_CORS_ALLOW_ORIGIN", "*")

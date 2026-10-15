@@ -21,6 +21,7 @@ from libs.mschap3 import mschap,mppe
 from libs.db import db,db_user_group_perm,db_device,db_groups,db_device,db_AA,db_sysconfig
 from libs.db.db import release_db_connection
 from libs.util import FourcePermToRouter
+from libs import logsetup
 import config
 
 try:
@@ -35,6 +36,7 @@ except ImportError:
     ISPRO=False
     pass
 
+logsetup.init_logging()   # same log output in the free tier (Pro gets it via libs.webutil)
 log = logging.getLogger("Radius")
 
 logging.basicConfig(filename="pyrad.log", level="DEBUG",
