@@ -4,7 +4,7 @@
 import datetime
 import logging
 from flask import request
-from libs.webutil import app, buildResponse, login_required
+from libs.webutil import app, buildResponse, login_required, get_myself
 from libs.db.db_pam import DeviceBrands, DeviceTemplates, Credentials, DeviceConnections
 try:
     from libs.db.db_pam_pro import ConnectionSessions, create_session
@@ -226,7 +226,7 @@ def create_credential():
             scope=data['scope'],
             device_id=data.get('device_id'),
             group_id=data.get('group_id'),
-            owner_id=request.user.id,
+            owner_id=get_myself().id,
             auth_method=data.get('auth_method', 'password'),
             is_shared=data.get('is_shared', False),
             credential_group_id=data.get('credential_group_id')
@@ -257,7 +257,7 @@ def update_credential():
 def rotate_credential():
     data = request.json or {}
     try:
-        if CredentialService.rotate_credential(data['id'], data['new_password'], request.user.id):
+        if CredentialService.rotate_credential(data['id'], data['new_password'], get_myself().id):
             return buildResponse({'status': 'success'}, 200)
         return buildResponse({'status': 'failed', 'err': 'Credential not found'}, 200)
     except Exception as e:
@@ -282,7 +282,7 @@ def list_device_connections():
     if blocked:
         return blocked
     dev_id = (request.json or {}).get('device_id')
-    if not _user_can_access_device(request.user, dev_id):
+    if not _user_can_access_device(get_myself(), dev_id):
         return buildResponse({"status": "failed", "error": "Access denied"}, 403)
     conns = list(DeviceConnections.select().where(DeviceConnections.device_id == dev_id).dicts())
     return buildResponse(conns, 200)
@@ -326,7 +326,6 @@ def update_device_connection():
     except Exception as e:
         return buildResponse({'status': 'failed', 'err': str(e)}, 200)
 
-@login_required(role="admin", perm={"pam_config": "full"})
 @app.route("/api/pam/credential-mapping/set", methods=["POST"])
 @login_required(role="admin", perm={"pam_config": "full"})
 def set_credential_mapping():
@@ -335,7 +334,7 @@ def set_credential_mapping():
     protocol = data.get('protocol')
     connection_type = data.get('connection_type', 'device')
     credential_id = data.get('credential_id')
-    if not _user_can_access_device(request.user, device_id):
+    if not _user_can_access_device(get_myself(), device_id):
         return buildResponse({"status": "failed", "error": "Access denied"}, 403)
     if not device_id or not protocol:
         return buildResponse({'status': 'failed', 'err': 'device_id and protocol required'}, 200)
@@ -386,9 +385,9 @@ def list_sessions():
     data = request.json or {}
     page = data.get('page', 1)
     limit = 50
-    if request.user.role not in ('admin', 'superuser'):
+    if get_myself().role not in ('admin', 'superuser'):
         from libs.db.db_user_group_perm import DevUserGroupPermRel
-        allowed = list(DevUserGroupPermRel.get_user_devices(request.user.id).dicts())
+        allowed = list(DevUserGroupPermRel.get_user_devices(get_myself().id).dicts())
         dev_ids = [d['id'] for d in allowed]
         sessions = list(ConnectionSessions.select()
                        .where(ConnectionSessions.device_id.in_(dev_ids))
@@ -404,7 +403,7 @@ def initiate_session():
     device_id = data.get('device_id')
     protocol = data.get('protocol')
     
-    if not _user_can_access_device(request.user, device_id):
+    if not _user_can_access_device(get_myself(), device_id):
         return buildResponse({"status": "failed", "error": "Access denied"}, 403)
     
     try:
