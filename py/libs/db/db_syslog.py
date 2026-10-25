@@ -8,6 +8,7 @@
 from peewee import *
 
 from libs.db.db import User,BaseModel
+from libs.audit_redact import redact_audit_data
 
 import logging
 log = logging.getLogger("db_syslog")
@@ -34,6 +35,12 @@ class SysLog(BaseModel):
 
 
 def add_syslog_event(user_id,section,action,ip,agent,data):
+    # Mask secret values (passwords, keys, tokens) before storing. Fail-open: on any
+    # problem the original data is stored exactly as before.
+    try:
+        data = redact_audit_data(data)
+    except Exception:
+        pass
     event=SysLog(user_id=user_id, section=section, action=action,ip=ip,agent=agent, data=data)
     event.save()
 

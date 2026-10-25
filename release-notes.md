@@ -1,5 +1,19 @@
 # Release Notes  
 
+## Version 2.1.1 Free / 2.1.1 Pro
+
+> **Upgrade note:** Pro includes database migration `065_pro_schema_backfill_pro.py`. It is safe to run on every Pro install and only adds what is missing.
+
+### Security
+- **No secrets in the System Log:** Passwords and other secrets (user passwords, old/new passwords on password change, non-MikroTik device passwords, enable passwords and SSH keys, the RADIUS secret, alert channel tokens) are now replaced with `***` before an event is written. Everything else in the event is stored as before.
+- **Cleanup of older entries:** After the update, entries written by 2.1.0 and earlier are cleaned in the background in small batches, without affecting normal operation.
+- **Recommendation:** If you entered passwords in user management, non-MikroTik device forms, the RADIUS secret or alert channels on 2.1.0 or earlier, consider changing them.
+
+### Fixes
+- **PAM API:** Creating and rotating credentials, listing device connections, setting a credential mapping, and listing or starting PAM sessions failed with a server error. Fixed.
+- **Terminal policies after switching from Free to Pro (Pro):** Installs that started on Free and were later switched to Pro could show an error on the terminal policy page (missing Session DLP settings). Migration 065 repairs this and adds a missing history index.
+- **MikroTik browser terminal (Pro):** SSH and WebBox to MikroTik log in with your MikroWizard user and a one-time RADIUS password. When the router is not set to use RADIUS, MikroWizard now shows a clear message instead of failing later with "authentication failed".
+
 ## Version 2.1.0 Free / 2.1.0 Pro
 
 > **Upgrade note:** This release includes database migrations **058 – 064**. Migration `064_log_tables_scale.py` widens the `account` table to `BIGINT` and builds new indexes on `auth`, `account` and `events`. On large installations this can take several minutes, so do not interrupt the upgrade while migrations run.
@@ -24,10 +38,11 @@
 - Recognises unmanaged peers through router identity (all interface MACs and IPs), classifies APs and CPEs, and supports bridge ports and RouterOS 7 link-local neighbours.
 - The map only shows devices each user is allowed to see.
 
-#### 3. Firmware Upgrade Engine Rewrite
-- **Multi-step upgrade planner:** Upgrades older routers along a safe path (latest v6 → 7.12.1 → 7.13+), checks package names by architecture, and confirms the result after the reboot.
+#### 3. Firmware Upgrade Engine Rewrite (Free + Pro; Pro-only items are marked)
+- **Multi-step upgrade planner (Pro):** Upgrades older routers along a safe path (latest v6 → 7.12.1 → 7.13+). In the Free edition, routers are upgraded directly to the selected version.
+- **Package checks:** Package names are checked by architecture, and the result is confirmed after the reboot.
 - **Restart-safe state machine:** Upgrade progress is stored per device in Redis with leases, so a service restart does not lose track of upgrades and a router is never left halfway through one.
-- **Integrity & delivery checks:** Packages are checked against MikroTik's official SHA256 hashes, the router's free storage is checked before upload, and RouterBOOT is upgraded after the OS upgrade.
+- **Integrity & delivery checks:** Packages are checked against MikroTik's official SHA256 hashes, the router's free storage is checked before upload, a configuration backup is taken before the update (configurable), and RouterBOOT is upgraded after the OS upgrade.
 - **Update modes & strategies:** Full (OS + RouterBOOT), OS only, packages only, or bootloader only. Version can come from the server repository, MikroTik's servers directly (native), a specific chosen version, or Auto-Pilot latest.
 - **Latest Cloud channel (Pro):** Upgrade to the newest release on the *stable*, *long-term*, *testing* or *development* channel, from single devices, device groups and scheduled tasks.
 - **PtP safe ordering (Pro):** On point-to-point wireless links, stations are upgraded before their access points so remote ends do not lose their link.
@@ -138,7 +153,7 @@ This release focuses on running reliably with **Many Devices**:
 - **Zero-Trust Credential Architecture:** Completely decoupled credential storage from device records into a centralized, dedicated `credentials` repository with granular per-device, per-group, and per-user scoping.
 - **Two-Tier Envelope Encryption (DEK / KEK):** 
   - Upgraded database secret storage from legacy single-key encryption to enterprise-grade **Envelope Encryption**.
-  - Every individual credential (passwords, passphrases, private keys) is encrypted using its own unique, dynamically generated **Data Encryption Key (DEK)** (AES-256-GCM / Fernet).
+  - Every individual credential (passwords, passphrases, private keys) is encrypted using its own unique, dynamically generated **Data Encryption Key (DEK)** with Fernet (AES-128-CBC and HMAC-SHA256).
   - The DEK itself is encrypted using a Master **Key Encryption Key (KEK)** managed by the KEK provider and persisted securely in `server-conf.json` (`PYSRV_KEK`).
   - Decoupled keys ensure that KEK rotation does not require re-encrypting payload data, and compromise of an individual credential never exposes other credentials.
 - **Automated Transparent Data Migration:** Automated migration scripts (`045_devices_alter.py` and `046_password_encryption_migration.py`) automatically decrypt legacy stored device credentials and re-encrypt them into the new envelope-encrypted `credentials` schema upon upgrade with zero manual intervention.

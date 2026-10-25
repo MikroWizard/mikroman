@@ -16,7 +16,7 @@
 
 import time
 import concurrent.futures
-from libs import util, firm_lib, fw_state, job_control, retention, logsetup
+from libs import util, firm_lib, fw_state, job_control, retention, logsetup, audit_redact_backfill
 from libs.db import db_tasks, db_device
 from libs.db.db import database, tune_process_db_pool
 import config
@@ -296,6 +296,8 @@ def main():
             scheduler.tick()
             # daily history / file cleanup, in its own thread (never delays the scheduler)
             retention.maybe_start()
+            # one-time cleanup of secrets in old System Log rows (own thread, never raises)
+            audit_redact_backfill.maybe_start()
         except KeyboardInterrupt:
             log.info("Firmware updater interrupted by user")
             break

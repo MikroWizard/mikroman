@@ -158,6 +158,32 @@ def get_mikrotik_service(dev, service_name, timeout=5):
     finally:
         close_router(router)
 
+def get_mikrotik_use_radius(dev, timeout=3):
+    """Read /user/aaa use-radius over the API (read-only).
+
+    Returns True/False, or None when the device API is unreachable or the value
+    cannot be read. Callers must treat None as "unknown" and carry on as before.
+    """
+    router = None
+    try:
+        if not check_port(dev.ip, get_device_port(dev)):
+            return None
+        options = build_api_options(dev)
+        options['timeout'] = timeout
+        router = RouterOSCheckResource(options)
+        aaa = tuple(router.api.path("/user/aaa"))
+        if not aaa or 'use-radius' not in aaa[0]:
+            return None
+        val = aaa[0]['use-radius']
+        if isinstance(val, str):
+            return val.strip().lower() in ('true', 'yes')
+        return bool(val)
+    except Exception as e:
+        log.warning(f"Failed to read /user/aaa on device {dev.id}: {e}")
+        return None
+    finally:
+        close_router(router)
+
 def _detect_source_ip(target_ip):
     """Local source IP the server uses to reach target_ip (UDP route lookup).
 
