@@ -9,6 +9,7 @@
 import datetime
 from libs.check_routeros.routeros_check.helper import logger, RouterOSVersion
 import paramiko
+from libs import device_trust
 import re
 import logging
 
@@ -91,6 +92,7 @@ class SSH_Helper(object):
                 banner_timeout=SSH_CONNECT_TIMEOUT,
                 auth_timeout=SSH_CONNECT_TIMEOUT,
             )
+            device_trust.check_ssh_transport(self.dev_id, self.ssh.get_transport())
             _x, stdouts, _y = self.ssh.exec_command(" ".join(command), timeout=SSH_COMMAND_TIMEOUT)
             config = stdouts.read().decode().strip()
             # remove date/time in 1st line
@@ -114,6 +116,7 @@ class SSH_Helper(object):
                 banner_timeout=SSH_CONNECT_TIMEOUT,
                 auth_timeout=SSH_CONNECT_TIMEOUT,
             )
+            device_trust.check_ssh_transport(self.dev_id, self.ssh.get_transport())
             _x, stdouts, _y = self.ssh.exec_command(command, timeout=SSH_COMMAND_TIMEOUT)
             return stdouts.read().decode().strip()
         finally:

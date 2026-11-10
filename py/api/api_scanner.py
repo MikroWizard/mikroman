@@ -10,7 +10,7 @@ from flask import request
 from libs.db import db_tasks,db_syslog
 from libs.webutil import app, login_required,buildResponse,get_myself,get_ip,get_agent
 import bgtasks
-from libs import job_control
+from libs import device_edit, job_control
 import json
 import logging
 log = logging.getLogger("api.scanner")
@@ -28,12 +28,14 @@ def scan_network():
         port=8729 if ssl else 8728
     password=input.get('password',False)
     username=input.get('user',False)
+    group_ids=device_edit.parse_group_ids(input.get('group_ids'))
     status=db_tasks.scanner_job_status().status
 
     if not status:
         if start and end and port:
             db_syslog.add_syslog_event(get_myself(), "Scanner","start", get_ip(),get_agent(),json.dumps(input))
-            bgtasks.scan_with_ip(start=start,end=end,port=port,password=password,username=username,ssl=ssl,user=get_myself())
+            bgtasks.scan_with_ip(start=start,end=end,port=port,password=password,username=username,ssl=ssl,user=get_myself(),
+                                 group_ids=group_ids)
             return buildResponse({'status': True},200)
         else:
             return buildResponse({'status': status},200)

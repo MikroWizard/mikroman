@@ -174,6 +174,8 @@ def update_template():
     data = request.json or {}
     tid = data.get('id')
     try:
+        me = get_myself()
+        data['_changed_by'] = getattr(me, 'username', None) or 'admin'
         if TemplateService.update_template(tid, data):
             return buildResponse({'status': 'success'}, 200)
         return buildResponse({'status': 'failed', 'err': 'Template not found'}, 200)

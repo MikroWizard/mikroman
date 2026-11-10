@@ -21,6 +21,15 @@ import bgtasks
 log = logging.getLogger("api.executions")
 
 
+def _allowed_device_ids():
+    """Device ids the caller may see, or None when the user has all devices (group 1)."""
+    user = get_myself()
+    rel = db_user_group_perm.DevUserGroupPermRel
+    if rel.has_all_devices(user.id):
+        return None
+    return set(d.id for d in rel.get_user_devices(user.id))
+
+
 @app.route("/api/executions/list", methods=["POST"])
 @login_required(role="admin", perm={"task": "read"})
 def executions_list():
@@ -31,11 +40,17 @@ def executions_list():
     page = int(input_data.get("page", 1) or 1)
     per_page = int(input_data.get("per_page", 50) or 50)
 
+    # same device-group scope as executions/run (users with all devices: no filter)
+    allowed_ids = _allowed_device_ids()
+    if device_id and allowed_ids is not None and int(device_id) not in allowed_ids:
+        return buildResponse({"status": "success", "data": [], "total": 0, "page": page, "per_page": per_page}, 200)
+
     executions, total = list_executions(
         device_id=int(device_id) if device_id else None,
         execution_run_id=execution_run_id,
         user_task_id=int(user_task_id) if user_task_id else None,
         page=page, per_page=per_page,
+        device_ids=allowed_ids,
     )
     data = []
     for e in executions:
@@ -114,14 +129,18 @@ def executions_status():
     if not execution_run_id:
         return buildResponse({"status": "failed", "error": "execution_run_id required"}, 400)
 
-    status_info = {"finished": False, "device_count": 0, "ok_count": 0, "error_count": 0, "version_count": 0}
+    status_info = {"finished": False, "device_count": 0, "ok_count": 0, "error_count": 0, "warning_count": 0,
+                   "version_count": 0}
     try:
-        logs = list(CommandExecutionLog.select().where(
-            CommandExecutionLog.execution_run_id == execution_run_id
-        ))
+        q = CommandExecutionLog.select().where(CommandExecutionLog.execution_run_id == execution_run_id)
+        allowed_ids = _allowed_device_ids()
+        if allowed_ids is not None:
+            q = q.where(CommandExecutionLog.device_id << list(allowed_ids))
+        logs = list(q)
         status_info["device_count"] = len(logs)
         status_info["ok_count"] = sum(1 for l in logs if l.status == "ok")
         status_info["error_count"] = sum(1 for l in logs if l.status in ("error", "timeout", "auth_error"))
+        status_info["warning_count"] = sum(1 for l in logs if l.status == "warning")
         status_info["version_count"] = sum(1 for l in logs if l.is_versioned)
     except Exception:
         pass
@@ -150,9 +169,11 @@ def executions_export():
     from libs.db.db_config_versions import CommandExecutionLog
     from libs.db.db_device import Devices
 
-    logs = list(CommandExecutionLog.select().where(
-        CommandExecutionLog.execution_run_id == execution_run_id
-    ).order_by(CommandExecutionLog.device_id))
+    q = CommandExecutionLog.select().where(CommandExecutionLog.execution_run_id == execution_run_id)
+    allowed_ids = _allowed_device_ids()
+    if allowed_ids is not None:
+        q = q.where(CommandExecutionLog.device_id << list(allowed_ids))
+    logs = list(q.order_by(CommandExecutionLog.device_id))
 
     output = io.StringIO()
     writer = csv.writer(output)

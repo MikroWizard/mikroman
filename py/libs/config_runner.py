@@ -270,6 +270,7 @@ def run_device_job(config):
         "error": None, "device_name": "", "device_ip": "",
         "session_conn": None, "session_template": None,
         "session_prompt_re": None, "session_legacy_creds": None,
+        "command_errors": [],
     }
     if capture_output:
         result["output_raw"] = None
@@ -400,6 +401,9 @@ def run_device_job(config):
 
         raw_output = exec_result["output"]
         raw_size = len(raw_output) if raw_output else 0
+        # error lines of user commands (snippets, executions); a backup is judged by its content
+        if config.get("command_key") != "show_config":
+            result["command_errors"] = list(exec_result.get("command_errors") or [])
 
         if capture_output:
             result["output_raw"] = raw_output
@@ -434,6 +438,9 @@ def run_device_job(config):
         kept = exec_result.get("session_conn") if (keep_session and not session_conn) else None
         if not session_conn and kept is None:
             run_hooks(post_hooks, "post_disconnect", device, t_dict, hook_context)
+
+        if result["command_errors"] and exec_log_id:
+            _mark_execution_warning(exec_log_id, result["command_errors"])
 
         result.update({
             "status": "ok", "is_changed": is_versioned, "version_num": version_num,
@@ -514,6 +521,18 @@ def _legacy_creds(device):
         user = user or default_user
         password = password or default_pass
     return (user or "", password or "")
+
+
+def _mark_execution_warning(exec_log_id, command_errors):
+    """The command ran, but the device reported errors: execution log status 'warning' with
+    the error lines (the run itself stays 'ok' for its caller)."""
+    text = "{} error line(s): {}".format(len(command_errors), " | ".join(command_errors))
+    try:
+        with database.connection_context():
+            CommandExecutionLog.update(status="warning", error_message=text[:2000]).where(
+                CommandExecutionLog.id == exec_log_id).execute()
+    except Exception as e:
+        log.warning("execution log %s: warning status not saved: %s", exec_log_id, e)
 
 
 def _log_execution(user_task_id, execution_run_id, device_id, template_id,

@@ -23,6 +23,7 @@ import logging
 from libs.red import RedisDB
 from libs import traffic_math
 from libs.ssh_helper import SSH_Helper
+from libs import device_trust
 import os
 import netifaces
 import librouteros
@@ -158,31 +159,51 @@ def get_mikrotik_service(dev, service_name, timeout=5):
     finally:
         close_router(router)
 
+def get_mikrotik_radius_login_state(dev, username=None, timeout=3):
+    """Read-only check before a RADIUS login (one API connection):
+      use_radius: /user/aaa use-radius (True/False)
+      local_user: a local /user with this name exists (RouterOS checks local users first,
+                  so the one-time RADIUS password of a same-named panel user is rejected)
+    Each value is None when it cannot be read; callers treat None as "unknown" and carry on.
+    """
+    state = {'use_radius': None, 'local_user': None}
+    router = None
+    try:
+        if not check_port(dev.ip, get_device_port(dev)):
+            return state
+        options = build_api_options(dev)
+        options['timeout'] = timeout
+        router = RouterOSCheckResource(options)
+        try:
+            aaa = tuple(router.api.path("/user/aaa"))
+            if aaa and 'use-radius' in aaa[0]:
+                val = aaa[0]['use-radius']
+                if isinstance(val, str):
+                    state['use_radius'] = val.strip().lower() in ('true', 'yes')
+                else:
+                    state['use_radius'] = bool(val)
+        except Exception as e:
+            log.warning(f"Failed to read /user/aaa on device {dev.id}: {e}")
+        if username:
+            try:
+                names = [u.get('name') for u in tuple(router.api.path("/user"))]
+                state['local_user'] = username in names
+            except Exception as e:
+                log.warning(f"Failed to read /user on device {dev.id}: {e}")
+        return state
+    except Exception as e:
+        log.warning(f"Failed to read RADIUS login state on device {dev.id}: {e}")
+        return state
+    finally:
+        close_router(router)
+
 def get_mikrotik_use_radius(dev, timeout=3):
     """Read /user/aaa use-radius over the API (read-only).
 
     Returns True/False, or None when the device API is unreachable or the value
     cannot be read. Callers must treat None as "unknown" and carry on as before.
     """
-    router = None
-    try:
-        if not check_port(dev.ip, get_device_port(dev)):
-            return None
-        options = build_api_options(dev)
-        options['timeout'] = timeout
-        router = RouterOSCheckResource(options)
-        aaa = tuple(router.api.path("/user/aaa"))
-        if not aaa or 'use-radius' not in aaa[0]:
-            return None
-        val = aaa[0]['use-radius']
-        if isinstance(val, str):
-            return val.strip().lower() in ('true', 'yes')
-        return bool(val)
-    except Exception as e:
-        log.warning(f"Failed to read /user/aaa on device {dev.id}: {e}")
-        return None
-    finally:
-        close_router(router)
+    return get_mikrotik_radius_login_state(dev, None, timeout)['use_radius']
 
 def _detect_source_ip(target_ip):
     """Local source IP the server uses to reach target_ip (UDP route lookup).
@@ -260,7 +281,16 @@ def build_api_options(dev):
        'ssl_force_no_certificate': False,
        'ssl_verify': False,
        'ssl_verify_hostname': False,
+       'dev_id': dev.id,
     }
+    # optional router identity verification (Settings - default off = as before)
+    if ssl:
+        mode = device_trust.tls_mode()
+        if mode == 'ca':
+            options['ssl_verify'] = True
+            options['ssl_cafile'] = device_trust.tls_cafile()
+        elif mode == 'pin':
+            options['tls_check'] = device_trust.tls_checker(dev.id)
 
     return options
 
@@ -734,7 +764,8 @@ def grab_device_data(dev, q, sysconfig_flags=None, events_map=None):
                 try:
                     peer_ip = resolve_peer_ip(dev)
                     secret = rad_secret
-                    res = configure_radius(router, peer_ip, secret)
+                    enforce_ma = sysconfig_flags.get('radius_enforce_router_message_auth') if sysconfig_flags else None
+                    res = configure_radius(router, peer_ip, secret, enforce_ma)
                     with database.connection_context():
                         check_or_fix_event(events, "config", "radius configuration")
                 except:
@@ -1011,7 +1042,16 @@ def apply_perm(router,name,perms):
        log.error(e)
        return False
 
-def configure_radius(router,ip,secret):
+def configure_radius(router,ip,secret,enforce_ma=None):
+    """Make sure the router uses MikroWizard as RADIUS server (login service).
+    enforce_ma (sysconfig radius_enforce_router_message_auth, default off): when on, the
+    managed entry gets require-message-auth=yes-for-request-resp. When off, the router's
+    setting is left as it is (backward compatible); MikroWizard's replies are valid either way."""
+    if enforce_ma is None:
+        try:
+            enforce_ma = db_sysconfig.get_sysconfig('radius_enforce_router_message_auth') == "True"
+        except Exception:
+            enforce_ma = False
     try:
         #check if radius client is configured and ip ,port,secret is correct
         call = router.api.path(
@@ -1089,7 +1129,10 @@ def configure_radius(router,ip,secret):
             # Re-fetch the entry data from our local tuple to see what needs updating
             p_entry = next((r for r in radius if r.get('.id') == primary_id), None)
             if p_entry:
-                if p_entry.get('address') == ip and p_entry.get('secret') == secret and p_entry.get('comment') == target_comment:
+                # only when enforcing and the router has the option (RouterOS 7.15+)
+                want_ma = bool(enforce_ma) and 'require-message-auth' in p_entry \
+                    and p_entry.get('require-message-auth') != 'yes-for-request-resp'
+                if p_entry.get('address') == ip and p_entry.get('secret') == secret and p_entry.get('comment') == target_comment and not want_ma:
                     # Already perfect
                     return True
                 else:
@@ -1101,6 +1144,8 @@ def configure_radius(router,ip,secret):
                         'comment': target_comment,
                         'service': 'login'
                     }
+                    if want_ma:
+                        params['require-message-auth'] = 'yes-for-request-resp'
                     try:
                         call.update(**params)
                         return True
@@ -1114,7 +1159,7 @@ def configure_radius(router,ip,secret):
             'address': ip, 
             'secret': secret,
             'service': 'login',
-            'require-message-auth': 'no',
+            'require-message-auth': 'yes-for-request-resp' if enforce_ma else 'no',
             'comment': target_comment
         }
         try:

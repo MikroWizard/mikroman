@@ -70,4 +70,8 @@ def init_logging(context_filter=None):
 
     if config.PYSRV_LOG_SQL:
         logging.getLogger('peewee').setLevel(logging.DEBUG)
+    # librouteros logs every API word at DEBUG, including /login =password= and /radius
+    # =secret=. Never below INFO, whatever PYSRV_LOG_LEVEL is (no effect at the default
+    # WARNING level: max() keeps the stricter level).
+    logging.getLogger('librouteros').setLevel(max(root.getEffectiveLevel(), logging.INFO))
     setattr(root, _DONE_ATTR, True)

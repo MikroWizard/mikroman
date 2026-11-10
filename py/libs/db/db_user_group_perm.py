@@ -42,6 +42,19 @@ class DevUserGroupPermRel(BaseModel):
             return Devices.select().join(DevGroupRel).join(DevUserGroupPermRel,on=(DevUserGroupPermRel.group_id == DevGroupRel.group_id)).where(DevUserGroupPermRel.user_id == uid, DevGroupRel.group_id == group_id).distinct()
         return Devices.select().join(DevGroupRel).join(DevUserGroupPermRel,on=(DevUserGroupPermRel.group_id == DevGroupRel.group_id)).where(DevUserGroupPermRel.user_id == uid).distinct()
 
+    def has_all_devices(uid):
+        """True when the user is related to group 1 (all devices), like get_user_devices."""
+        return DevUserGroupPermRel.select().where(DevUserGroupPermRel.user_id == uid,
+                                                  DevUserGroupPermRel.group_id == 1).exists()
+
+    def can_access_device(uid, devid):
+        """Same device scope as get_user_devices_by_ids (used by the list routes)."""
+        try:
+            devid = int(devid)
+        except (TypeError, ValueError):
+            return False
+        return DevUserGroupPermRel.get_user_devices_by_ids(uid, [devid]).exists()
+
     def get_user_devices_by_ids(uid,ids):
         perms=list(DevUserGroupPermRel.select().where(DevUserGroupPermRel.user_id == uid))
         for perm in perms:

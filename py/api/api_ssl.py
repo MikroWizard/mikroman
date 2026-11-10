@@ -56,6 +56,20 @@ def _get_token(reload_disk=False):
     return token
 
 
+# Warnings about an unreachable ssl-agent at most once a minute: the settings page polls the
+# status every 30 s, every poll logged a warning per URL and attempt.
+WARN_INTERVAL = 60
+_last_warn = {}
+_good_url = {"index": None}       # index of the URL that answered last time: tried first
+
+
+def _warn_limited(key, msg, *args):
+    now = time.time()
+    if now - _last_warn.get(key, 0) >= WARN_INTERVAL:
+        _last_warn[key] = now
+        log.warning(msg, *args)
+
+
 def _proxy_request(endpoint, body=None, method="POST", timeout=5):
     token = _get_token()
     headers = {"X-SSL-Agent-Token": token, "Content-Type": "application/json"}
@@ -66,9 +80,15 @@ def _proxy_request(endpoint, body=None, method="POST", timeout=5):
         ("http://localhost/ssl-internal/%s" % endpoint.lstrip("/"), timeout),
         ("%s/%s" % (SSL_AGENT_URL, endpoint.lstrip("/")), timeout),
     ]
+    order = list(range(len(urls)))
+    if _good_url["index"] is not None:
+        order.remove(_good_url["index"])
+        order.insert(0, _good_url["index"])
 
     for attempt in range(3):
-        for url, connect_timeout in urls:
+        upstream_down = None
+        for i in order:
+            url, connect_timeout = urls[i]
             try:
                 if method == "GET":
                     resp = requests.get(url, headers=headers, timeout=connect_timeout)
@@ -82,21 +102,34 @@ def _proxy_request(endpoint, body=None, method="POST", timeout=5):
                     continue
 
                 try:
-                    return resp.json(), resp.status_code
+                    data = resp.json()
                 except Exception:
-                    log.warning("ssl-agent response from %s was not valid JSON (status %s): %s",
-                                url, resp.status_code, resp.text[:200])
+                    if resp.status_code in (502, 503, 504):
+                        # the frontend's nginx answered, its ssl-agent (port 8199) did not
+                        upstream_down = resp.status_code
+                    else:
+                        _warn_limited("json:" + url, "ssl-agent response from %s was not valid JSON (status %s): %s",
+                                      url, resp.status_code, resp.text[:200])
                     continue
+                _good_url["index"] = i
+                return data, resp.status_code
 
             except requests.exceptions.ConnectionError:
                 continue
             except requests.exceptions.Timeout:
                 continue
             except Exception as e:
-                log.warning("ssl-agent proxy request to %s error: %s", url, e)
+                _warn_limited("err:" + url, "ssl-agent proxy request to %s error: %s", url, e)
                 continue
+        if upstream_down:
+            # nginx is there, the agent is not: retrying within this request does not help
+            break
         time.sleep(1)
 
+    _good_url["index"] = None
+    _warn_limited("down", "ssl-agent (frontend container, port 8199) is not reachable%s - SSL management "
+                  "is unavailable until it runs (not needed when a reverse proxy terminates TLS)",
+                  " (nginx answered %s)" % upstream_down if upstream_down else "")
     return {"error": "ssl_agent_unreachable", "detail": "SSL agent is not running. Start ssl-agent first."}, 503
 
 

@@ -294,6 +294,7 @@ def grab_device_data(timer=2):
             sysconfig_flags = {
                 'force_syslog': db_sysconfig.get_sysconfig('force_syslog') == "True",
                 'force_radius': db_sysconfig.get_sysconfig('force_radius') == "True",
+                'radius_enforce_router_message_auth': db_sysconfig.get_sysconfig('radius_enforce_router_message_auth') == "True",
                 'rad_secret': db_sysconfig.get_sysconfig('rad_secret') or "",
                 'old_firmware_action': db_sysconfig.get_sysconfig('old_firmware_action') or "keep",
                 'old_version': db_sysconfig.get_sysconfig('old_version'),

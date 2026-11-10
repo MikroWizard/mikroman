@@ -149,7 +149,16 @@ class RouterOSCheckResource(nagiosplugin.Resource):
             server_hostname: Optional[str] = self._cmd_options["hostname"]
             if server_hostname is None:
                 server_hostname = self._cmd_options["host"]
-            return ssl_ctx.wrap_socket(socket, server_hostname=server_hostname)
+            ssl_sock = ssl_ctx.wrap_socket(socket, server_hostname=server_hostname)
+            # optional certificate pinning (libs/device_trust): raises on a changed certificate
+            tls_check = self._cmd_options.get("tls_check")
+            if tls_check:
+                try:
+                    tls_check(ssl_sock)
+                except Exception:
+                    ssl_sock.close()
+                    raise
+            return ssl_sock
 
         # logger.info("Connecting to device ...")
         port = self._cmd_options["port"]

@@ -109,6 +109,9 @@ def list_non_mikrotik():
 @login_required(role="admin", perm={"device": "read"})
 def get_non_mikrotik():
     devid = (request.json or {}).get('device_id')
+    # same device-group scope as the device list
+    if devid and not DevUserGroupPermRel.can_access_device(get_myself().id, devid):
+        return buildResponse({"status": "failed", "error": "Access denied"}, 200)
     if not devid:
         return buildResponse({"status": "failed", "error": "device_id required"}, 400)
     dev = db_device.get_device(devid)

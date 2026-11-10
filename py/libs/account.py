@@ -6,6 +6,8 @@
 # Author: Tomi.Mickelsson@iki.fi modified by sepehr.ha@gmail.com
 
 import re
+import hashlib
+import secrets
 from flask import session
 from passlib.context import CryptContext
 import json
@@ -27,7 +29,9 @@ def build_session(user_obj, is_permanent=True):
     # make sure session is empty
     session.clear()
     session['userid'] = user_obj.id
-    session['role'] = user_obj.role # if you update user.role, update this too
+    session['role'] = user_obj.role # kept in sync with the DB by webutil.before_request
+    # password fingerprint: a password change ends the user's other sessions
+    session['pwfp'] = password_fingerprint(user_obj.password)
     try:
         session['perms'] = json.loads(user_obj.adminperms)
     except Exception as e:
@@ -39,6 +43,16 @@ def build_session(user_obj, is_permanent=True):
     # could also store ip + browser-agent to verify freshness
     # of the session: only allow most critical operations with a fresh
     # session
+
+
+def password_fingerprint(password_hash):
+    """Short fingerprint of the stored password hash (never the password itself)."""
+    return hashlib.sha256(str(password_hash or "").encode()).hexdigest()[:16]
+
+
+# Hash of a random string (made once per process): login spends the same time on unknown
+# usernames as on real ones.
+DUMMY_HASH = pwd_context.hash(secrets.token_hex(16))
 
 
 def hash_password(password):

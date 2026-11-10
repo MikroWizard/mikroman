@@ -108,9 +108,13 @@ def list_versions(device_id, command_key=None, page=1, per_page=50):
     return rows, total
 
 
-def list_executions(device_id=None, execution_run_id=None, user_task_id=None, page=1, per_page=50):
-    """List execution log entries with optional filters. Returns (rows, total)."""
+def list_executions(device_id=None, execution_run_id=None, user_task_id=None, page=1, per_page=50,
+                    device_ids=None):
+    """List execution log entries with optional filters. Returns (rows, total).
+    device_ids: optional allowed devices (None = no restriction)."""
     q = CommandExecutionLog.select()
+    if device_ids is not None:
+        q = q.where(CommandExecutionLog.device_id << list(device_ids))
     if device_id:
         q = q.where(CommandExecutionLog.device_id == device_id)
     if execution_run_id:

@@ -1,0 +1,7020 @@
+{
+ "brands": [
+  {
+   "brand": "adtran",
+   "display_name": "Adtran"
+  },
+  {
+   "brand": "adva",
+   "display_name": "ADVA Optical"
+  },
+  {
+   "brand": "allied_telesis",
+   "display_name": "Allied Telesis"
+  },
+  {
+   "brand": "aruba",
+   "display_name": "Aruba"
+  },
+  {
+   "brand": "audiocodes",
+   "display_name": "AudioCodes"
+  },
+  {
+   "brand": "avaya",
+   "display_name": "Avaya"
+  },
+  {
+   "brand": "brocade",
+   "display_name": "Brocade"
+  },
+  {
+   "brand": "calix",
+   "display_name": "Calix"
+  },
+  {
+   "brand": "checkpoint",
+   "display_name": "Check Point"
+  },
+  {
+   "brand": "ciena",
+   "display_name": "Ciena"
+  },
+  {
+   "brand": "cisco",
+   "display_name": "Cisco"
+  },
+  {
+   "brand": "darwin",
+   "display_name": "macOS"
+  },
+  {
+   "brand": "dell",
+   "display_name": "Dell"
+  },
+  {
+   "brand": "digi",
+   "display_name": "Digi"
+  },
+  {
+   "brand": "edge_core",
+   "display_name": "Edge-Core"
+  },
+  {
+   "brand": "extreme",
+   "display_name": "Extreme Networks"
+  },
+  {
+   "brand": "fortinet",
+   "display_name": "Fortinet"
+  },
+  {
+   "brand": "freebsd",
+   "display_name": "FreeBSD"
+  },
+  {
+   "brand": "generic",
+   "display_name": "Generic"
+  },
+  {
+   "brand": "hp",
+   "display_name": "HP"
+  },
+  {
+   "brand": "huawei",
+   "display_name": "Huawei"
+  },
+  {
+   "brand": "juniper",
+   "display_name": "Juniper"
+  },
+  {
+   "brand": "linux",
+   "display_name": "Linux"
+  },
+  {
+   "brand": "mellanox",
+   "display_name": "Mellanox"
+  },
+  {
+   "brand": "mikrotik",
+   "display_name": "MikroTik"
+  },
+  {
+   "brand": "nvidia",
+   "display_name": "NVIDIA Networking"
+  },
+  {
+   "brand": "paloalto",
+   "display_name": "Palo Alto Networks"
+  },
+  {
+   "brand": "pfsense",
+   "display_name": "pfSense"
+  },
+  {
+   "brand": "rad",
+   "display_name": "RAD"
+  },
+  {
+   "brand": "ruckus",
+   "display_name": "Ruckus"
+  },
+  {
+   "brand": "siemens",
+   "display_name": "Siemens"
+  },
+  {
+   "brand": "sonicwall",
+   "display_name": "SonicWall"
+  },
+  {
+   "brand": "ubiquiti",
+   "display_name": "Ubiquiti"
+  },
+  {
+   "brand": "vyos",
+   "display_name": "VyOS"
+  },
+  {
+   "brand": "windows",
+   "display_name": "Windows"
+  },
+  {
+   "brand": "zte",
+   "display_name": "ZTE"
+  }
+ ],
+ "catalog_version": 1,
+ "created": "2026-11-06T14:34:42Z",
+ "format": 1,
+ "templates": [
+  {
+   "brand_display_name": "Adtran",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "adtran",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "telnet"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {},
+    "display_name": "Adtran 900 - Telnet",
+    "error_patterns": {
+     "patterns": [
+      "Error",
+      "Invalid",
+      "Unrecognized"
+     ]
+    },
+    "os_type": "telnet",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "terminal length 0"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": {
+     "command": "enable",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "\\S+#"
+    },
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "telnet"
+   },
+   "edition": "free",
+   "key": "adtran/telnet",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "b29c39164b92b990a5feefeea1239ec7876ae9240563b19b046685a3855450a3"
+    ],
+    "config_mode": [
+     "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    ],
+    "connection": [
+     "42c307f7cd9975adea03c6107a1d30c91116f9fe3106cd7d194fce36d6e14840"
+    ],
+    "diff_exclusions": [
+     "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    ],
+    "error_patterns": [
+     "2b40f8bfb09ac2e23915b13cb31b163ad4a7155ce0e768d14b73a89e8acace7d"
+    ],
+    "pagination": [
+     "4ebb2d95b6a7e32a3d978483949cd6d9e550253b986a909c2268e6273031a058"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "496cf96c4a5ab9c866957fb3d63ad10886f0ca5b4c1d90fac5253256eca513a4"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "ac6a7531fc41d6436331f8399292704e78f9a4349374b65b1a04cf1d2e0bbf11"
+    ],
+    "privilege_escalation": [
+     "0795d5e2eb9cb9e3ac0c866b2c438efff92837cd5ee798399c9bb23a38f41205"
+    ],
+    "prompt": [
+     "df7cde2036ddf178fe32d0cbb891bf54f36ae6b4e1ec0a49f35918862d9b9d65"
+    ],
+    "protocol": [
+     "05497b0c1fa09d5433e6bc592c6192a7273da3f7cf1770471ccd662a2e2e0d8d"
+    ]
+   },
+   "previous_hashes": [
+    "e951f0500c27a9a85dddfcb4f5907726c3d1caae7e88596e47c87f385098a08c"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "ADVA Optical",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "adva",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {},
+    "display_name": "ADVA - SSH - No Enable",
+    "error_patterns": {
+     "patterns": [
+      "Error",
+      "Invalid",
+      "Unrecognized"
+     ]
+    },
+    "os_type": "ssh",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "terminal length 0"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "adva/ssh",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Allied Telesis",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "allied_telesis",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {},
+    "display_name": "Allied Telesis - SSH - Enable",
+    "error_patterns": {
+     "patterns": [
+      "Error",
+      "Invalid",
+      "Unrecognized"
+     ]
+    },
+    "os_type": "ssh",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "terminal length 0"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": {
+     "command": "enable",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "\\S+#"
+    },
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "allied_telesis/ssh",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "b29c39164b92b990a5feefeea1239ec7876ae9240563b19b046685a3855450a3"
+    ],
+    "config_mode": [
+     "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    ],
+    "connection": [
+     "cd3beded5040a841c9e9e1a5e0091c17fe5d0be89e71f23e6bcfbb1b46f8abb2"
+    ],
+    "diff_exclusions": [
+     "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    ],
+    "error_patterns": [
+     "2b40f8bfb09ac2e23915b13cb31b163ad4a7155ce0e768d14b73a89e8acace7d"
+    ],
+    "pagination": [
+     "4ebb2d95b6a7e32a3d978483949cd6d9e550253b986a909c2268e6273031a058"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "496cf96c4a5ab9c866957fb3d63ad10886f0ca5b4c1d90fac5253256eca513a4"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "ac6a7531fc41d6436331f8399292704e78f9a4349374b65b1a04cf1d2e0bbf11"
+    ],
+    "privilege_escalation": [
+     "0795d5e2eb9cb9e3ac0c866b2c438efff92837cd5ee798399c9bb23a38f41205"
+    ],
+    "prompt": [
+     "df7cde2036ddf178fe32d0cbb891bf54f36ae6b4e1ec0a49f35918862d9b9d65"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "2fb50a44a82ab6da20158ec372cfdb7f90202b00f1917d25233c7a9508f9b4b2"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Aruba",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "aruba",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 5
+    },
+    "diff_exclusions": {},
+    "display_name": "Aruba 2930F - SSH - No Enable",
+    "error_patterns": {
+     "patterns": [
+      "Invalid input",
+      "Error",
+      "Unrecognized"
+     ]
+    },
+    "os_type": "2930f-ssh",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "Press any key to continue",
+     "nno page"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "aruba/2930f-ssh",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Aruba",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "aruba",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 5
+    },
+    "diff_exclusions": {},
+    "display_name": "Aruba S3500 - SSH - Enable",
+    "error_patterns": {
+     "patterns": [
+      "Invalid input",
+      "Error",
+      "Unrecognized"
+     ]
+    },
+    "os_type": "s3500-ssh",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "no paging"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": {
+     "command": "enable",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "\\S+#"
+    },
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "aruba/s3500-ssh",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "b29c39164b92b990a5feefeea1239ec7876ae9240563b19b046685a3855450a3"
+    ],
+    "config_mode": [
+     "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    ],
+    "connection": [
+     "d3095ae8670229cc84e6e62c7743be7d13806562cb4ac77bacdab7a475776823"
+    ],
+    "diff_exclusions": [
+     "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    ],
+    "error_patterns": [
+     "d5b57a57b2c3eb99ab80975d965988def61ad5c6fb38971c6abc459b943449b6"
+    ],
+    "pagination": [
+     "4ebb2d95b6a7e32a3d978483949cd6d9e550253b986a909c2268e6273031a058"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "baf9b9858a949a26cdfa23dec17d81c3e65ff840652100565d5eb92f0e954dbf"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "ac6a7531fc41d6436331f8399292704e78f9a4349374b65b1a04cf1d2e0bbf11"
+    ],
+    "privilege_escalation": [
+     "0795d5e2eb9cb9e3ac0c866b2c438efff92837cd5ee798399c9bb23a38f41205"
+    ],
+    "prompt": [
+     "df7cde2036ddf178fe32d0cbb891bf54f36ae6b4e1ec0a49f35918862d9b9d65"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "42acd31441f2830093854e24ebca05ae6e71046022268adf8d38c9aa02d379bc"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "AudioCodes",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "audiocodes",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {},
+    "display_name": "AudioCodes - SSH",
+    "error_patterns": {
+     "patterns": [
+      "Error",
+      "Invalid",
+      "Unrecognized"
+     ]
+    },
+    "os_type": "ssh",
+    "pagination": {
+     "enabled": false
+    },
+    "post_disconnect": [],
+    "post_login_commands": [],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": {
+     "command": "enable",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "\\S+#"
+    },
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "audiocodes/ssh",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "b29c39164b92b990a5feefeea1239ec7876ae9240563b19b046685a3855450a3"
+    ],
+    "config_mode": [
+     "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    ],
+    "connection": [
+     "cd3beded5040a841c9e9e1a5e0091c17fe5d0be89e71f23e6bcfbb1b46f8abb2"
+    ],
+    "diff_exclusions": [
+     "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    ],
+    "error_patterns": [
+     "2b40f8bfb09ac2e23915b13cb31b163ad4a7155ce0e768d14b73a89e8acace7d"
+    ],
+    "pagination": [
+     "5acf3ff77b4420677b5923071f303facaba7a9273a346284a667a275df325146"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "ac6a7531fc41d6436331f8399292704e78f9a4349374b65b1a04cf1d2e0bbf11"
+    ],
+    "privilege_escalation": [
+     "0795d5e2eb9cb9e3ac0c866b2c438efff92837cd5ee798399c9bb23a38f41205"
+    ],
+    "prompt": [
+     "df7cde2036ddf178fe32d0cbb891bf54f36ae6b4e1ec0a49f35918862d9b9d65"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "b4807284854ed44a52c97eb0d3732f06021ca1bc1660703bdc0fe87f89b00c3c"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Avaya",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "avaya",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "telnet"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {},
+    "display_name": "Avaya 4526GTX - Telnet - No Enable",
+    "error_patterns": {
+     "patterns": [
+      "Invalid",
+      "Error"
+     ]
+    },
+    "os_type": "4526-telnet",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "terminal length 0"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "telnet"
+   },
+   "edition": "free",
+   "key": "avaya/4526-telnet",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Avaya",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "avaya",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {},
+    "display_name": "Avaya ERS - SSH",
+    "error_patterns": {
+     "patterns": [
+      "Invalid",
+      "Error"
+     ]
+    },
+    "os_type": "ers-ssh",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "terminal length 0"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": {
+     "command": "enable",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "\\S+#"
+    },
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "avaya/ers-ssh",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "b29c39164b92b990a5feefeea1239ec7876ae9240563b19b046685a3855450a3"
+    ],
+    "config_mode": [
+     "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    ],
+    "connection": [
+     "cd3beded5040a841c9e9e1a5e0091c17fe5d0be89e71f23e6bcfbb1b46f8abb2"
+    ],
+    "diff_exclusions": [
+     "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    ],
+    "error_patterns": [
+     "7f24b28be63175cac3917754b40aa215d6f69eed4233b8aa01590ea03a893716"
+    ],
+    "pagination": [
+     "4ebb2d95b6a7e32a3d978483949cd6d9e550253b986a909c2268e6273031a058"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "496cf96c4a5ab9c866957fb3d63ad10886f0ca5b4c1d90fac5253256eca513a4"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "744f3a466d8f8ec11ba15fd717e9ce576413824666796b232c1f599e5cae0755"
+    ],
+    "privilege_escalation": [
+     "0795d5e2eb9cb9e3ac0c866b2c438efff92837cd5ee798399c9bb23a38f41205"
+    ],
+    "prompt": [
+     "df7cde2036ddf178fe32d0cbb891bf54f36ae6b4e1ec0a49f35918862d9b9d65"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "dcc9cfcd3ca9792af045aff1b58304e4ec23787e0ac1127d9d4c7b1d8a162f21"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Brocade",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "brocade",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh",
+      "telnet"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {},
+    "display_name": "Brocade - SSH",
+    "error_patterns": {
+     "patterns": [
+      "Invalid",
+      "Error",
+      "Unrecognized command"
+     ]
+    },
+    "os_type": "ssh",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "skip-page-display"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "brocade/ssh",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Calix",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "calix",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {},
+    "display_name": "Calix AXOS - SSH",
+    "error_patterns": {
+     "patterns": [
+      "Error",
+      "Invalid",
+      "Unrecognized"
+     ]
+    },
+    "os_type": "axos-ssh",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "terminal length 0"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "calix/axos-ssh",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Check Point",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "checkpoint",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show configuration",
+     "show_interfaces": "show interfaces",
+     "show_log": "show log",
+     "show_routing": "show route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {},
+    "display_name": "Check Point Gaia OS - SSH",
+    "error_patterns": {
+     "patterns": [
+      "Error",
+      "Invalid"
+     ]
+    },
+    "os_type": "gaia-ssh",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "set clienv rows 0"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": {
+     "command": "enable",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "\\S+#"
+    },
+    "prompt": {
+     "login_pattern": "login:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "checkpoint/gaia-ssh",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "91cdbfb27fb10932e541d83aefb06d49de7c5dafa0fbfe48f815a444f98d6a83"
+    ],
+    "config_mode": [
+     "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    ],
+    "connection": [
+     "cd3beded5040a841c9e9e1a5e0091c17fe5d0be89e71f23e6bcfbb1b46f8abb2"
+    ],
+    "diff_exclusions": [
+     "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    ],
+    "error_patterns": [
+     "ffd919e852cbb98b500f662b6c704db6dc284c4897c7639de931d5c585c8a017"
+    ],
+    "pagination": [
+     "4ebb2d95b6a7e32a3d978483949cd6d9e550253b986a909c2268e6273031a058"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "ec35c8aeccb52c8d4f5b889dc425e9887ec78a7ec0baca8cb89774935eea6979"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "ac6a7531fc41d6436331f8399292704e78f9a4349374b65b1a04cf1d2e0bbf11"
+    ],
+    "privilege_escalation": [
+     "0795d5e2eb9cb9e3ac0c866b2c438efff92837cd5ee798399c9bb23a38f41205"
+    ],
+    "prompt": [
+     "cc7cdb593de8c82fc5f26c22222b85fac2fca12cc17ade4992aed6f38fb08342"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "5146fb2152e1a939d8032e3680d394401671d245a69e71ef0ea73f88cc1d30bc"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Ciena",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "ciena",
+    "commands": {
+     "show_config": "RTRV-CONFIG",
+     "show_interfaces": "RTRV-EQPT",
+     "show_routing": "RTRV-RTE",
+     "show_version": "RTRV-INV"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {},
+    "display_name": "Ciena 6500 - TL1",
+    "error_patterns": {
+     "patterns": [
+      "DENY"
+     ]
+    },
+    "os_type": "6500-tl1",
+    "pagination": {
+     "enabled": false
+    },
+    "post_disconnect": [],
+    "post_login_commands": [],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "ciena/6500-tl1",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Ciena",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "ciena",
+    "commands": {
+     "show_config": "RTRV-CONFIG",
+     "show_interfaces": "RTRV-EQPT",
+     "show_routing": "RTRV-RTE",
+     "show_version": "RTRV-INV"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "telnet"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {},
+    "display_name": "Ciena 6500 - TL1 - Telnet",
+    "error_patterns": {
+     "patterns": [
+      "DENY"
+     ]
+    },
+    "os_type": "6500-tl1-telnet",
+    "pagination": {
+     "enabled": false
+    },
+    "post_disconnect": [],
+    "post_login_commands": [],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "telnet"
+   },
+   "edition": "free",
+   "key": "ciena/6500-tl1-telnet",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Cisco",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "cisco",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interface ip brief",
+     "show_log": "show logging",
+     "show_routing": "show route",
+     "show_version": "show version"
+    },
+    "config_mode": {
+     "enter": "configure terminal",
+     "exit": "end",
+     "save": null
+    },
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh",
+      "telnet"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {
+     "global": [
+      {
+       "flags": "",
+       "pattern": "^!\\s*Last configuration change at.*$"
+      },
+      {
+       "flags": "",
+       "pattern": "^!\\s*NVRAM config last updated at.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*No configuration change since.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*Configuration last modified by.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^.*uptime is.*$"
+      }
+     ],
+     "show_config": [
+      {
+       "flags": "",
+       "pattern": "^!\\s*Time:.*$"
+      },
+      {
+       "flags": "",
+       "pattern": "^Current configuration : \\d+ bytes$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^Building configuration\\.\\.\\.$"
+      }
+     ]
+    },
+    "display_name": "Cisco ASA",
+    "error_patterns": {
+     "patterns": [
+      "% Invalid",
+      "% Ambiguous",
+      "Error"
+     ]
+    },
+    "os_type": "asa",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "<--- More --->"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "terminal pager 0"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": {
+     "command": "enable",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "\\S+#"
+    },
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "cisco/asa",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "7c6512ff1630389a122c2fb31a30f0992519f400f1fb8fe443879b19f7b277bf"
+    ],
+    "config_mode": [
+     "66c42020c6f9eac2ae88add59752c6f725f239240d87822fd88c687ee3e53633"
+    ],
+    "connection": [
+     "b2dfc86f5bc794c04c78d3286f34c84c4bd38ae941d9fa2b0c640bc19a3d9406"
+    ],
+    "diff_exclusions": [
+     "a025db80e328252453e8244cabe7f12e333233cd10353db519c8fa322c1711dc"
+    ],
+    "error_patterns": [
+     "cb36e4602c4630534fd7dc54d27b6f43124c32713d0c632307003e6b1f37c099"
+    ],
+    "pagination": [
+     "78a663831418848b4037f47419c82a8c4b89b71942cf8bc42c17da53998a4c27"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "4c46b62c585e1d97c2b23a68b7db8c29d223402af82eaf950b095c2e1e09d99c"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "ac6a7531fc41d6436331f8399292704e78f9a4349374b65b1a04cf1d2e0bbf11"
+    ],
+    "privilege_escalation": [
+     "0795d5e2eb9cb9e3ac0c866b2c438efff92837cd5ee798399c9bb23a38f41205"
+    ],
+    "prompt": [
+     "8c7903fe41b00da27e77ebcf75f03344bca65c0365ec2723d52ee35940665fce"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "ea834113a4d5d6a45cdde14996c85099d59c028c8f23ae7e9108f2226d1fe079"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Cisco",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "cisco",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": {
+     "enter": "configure terminal",
+     "exit": "end",
+     "save": null
+    },
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh",
+      "telnet"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {
+     "global": [
+      {
+       "flags": "",
+       "pattern": "^!\\s*Last configuration change at.*$"
+      },
+      {
+       "flags": "",
+       "pattern": "^!\\s*NVRAM config last updated at.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*No configuration change since.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*Configuration last modified by.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^.*uptime is.*$"
+      }
+     ],
+     "show_config": [
+      {
+       "flags": "",
+       "pattern": "^!\\s*Time:.*$"
+      },
+      {
+       "flags": "",
+       "pattern": "^Current configuration : \\d+ bytes$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^Building configuration\\.\\.\\.$"
+      }
+     ]
+    },
+    "display_name": "Cisco ASA - SSH - Enable",
+    "error_patterns": {
+     "patterns": [
+      "% Invalid",
+      "% Ambiguous",
+      "Error"
+     ]
+    },
+    "os_type": "asa-ssh-enable",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "<--- More --->"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "terminal pager 0"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": {
+     "command": "enable",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "\\S+#"
+    },
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "cisco/asa-ssh-enable",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "b29c39164b92b990a5feefeea1239ec7876ae9240563b19b046685a3855450a3"
+    ],
+    "config_mode": [
+     "66c42020c6f9eac2ae88add59752c6f725f239240d87822fd88c687ee3e53633"
+    ],
+    "connection": [
+     "b2dfc86f5bc794c04c78d3286f34c84c4bd38ae941d9fa2b0c640bc19a3d9406"
+    ],
+    "diff_exclusions": [
+     "a025db80e328252453e8244cabe7f12e333233cd10353db519c8fa322c1711dc"
+    ],
+    "error_patterns": [
+     "cb36e4602c4630534fd7dc54d27b6f43124c32713d0c632307003e6b1f37c099"
+    ],
+    "pagination": [
+     "78a663831418848b4037f47419c82a8c4b89b71942cf8bc42c17da53998a4c27"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "4c46b62c585e1d97c2b23a68b7db8c29d223402af82eaf950b095c2e1e09d99c"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "744f3a466d8f8ec11ba15fd717e9ce576413824666796b232c1f599e5cae0755"
+    ],
+    "privilege_escalation": [
+     "0795d5e2eb9cb9e3ac0c866b2c438efff92837cd5ee798399c9bb23a38f41205"
+    ],
+    "prompt": [
+     "df7cde2036ddf178fe32d0cbb891bf54f36ae6b4e1ec0a49f35918862d9b9d65"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "512dd7b96a26bd2ad77874b4febad6800304b287b195a0965fd195ba841beea1"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Cisco",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "cisco",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces brief",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": {
+     "enter": "configure terminal",
+     "exit": "end",
+     "save": null
+    },
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh",
+      "telnet"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {
+     "global": [
+      {
+       "flags": "",
+       "pattern": "^!\\s*Last configuration change at.*$"
+      },
+      {
+       "flags": "",
+       "pattern": "^!\\s*NVRAM config last updated at.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*No configuration change since.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*Configuration last modified by.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^.*uptime is.*$"
+      }
+     ],
+     "show_config": [
+      {
+       "flags": "",
+       "pattern": "^!\\s*Time:.*$"
+      },
+      {
+       "flags": "",
+       "pattern": "^Current configuration : \\d+ bytes$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^Building configuration\\.\\.\\.$"
+      }
+     ]
+    },
+    "display_name": "Cisco IOS",
+    "error_patterns": {
+     "patterns": [
+      "% Invalid",
+      "% Ambiguous",
+      "Error"
+     ]
+    },
+    "os_type": "ios",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "terminal length 0"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": {
+     "command": "enable",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "\\S+#"
+    },
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "cisco/ios",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "a228b7fd16352ec153a87853f9ef429589adbc1390ca6c24ce9457e0bda4e773"
+    ],
+    "config_mode": [
+     "66c42020c6f9eac2ae88add59752c6f725f239240d87822fd88c687ee3e53633"
+    ],
+    "connection": [
+     "b2dfc86f5bc794c04c78d3286f34c84c4bd38ae941d9fa2b0c640bc19a3d9406"
+    ],
+    "diff_exclusions": [
+     "a025db80e328252453e8244cabe7f12e333233cd10353db519c8fa322c1711dc"
+    ],
+    "error_patterns": [
+     "cb36e4602c4630534fd7dc54d27b6f43124c32713d0c632307003e6b1f37c099"
+    ],
+    "pagination": [
+     "4ebb2d95b6a7e32a3d978483949cd6d9e550253b986a909c2268e6273031a058"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "496cf96c4a5ab9c866957fb3d63ad10886f0ca5b4c1d90fac5253256eca513a4"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "ac6a7531fc41d6436331f8399292704e78f9a4349374b65b1a04cf1d2e0bbf11"
+    ],
+    "privilege_escalation": [
+     "0795d5e2eb9cb9e3ac0c866b2c438efff92837cd5ee798399c9bb23a38f41205"
+    ],
+    "prompt": [
+     "8c7903fe41b00da27e77ebcf75f03344bca65c0365ec2723d52ee35940665fce"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "0865bef7abf62c064a4727bb9c9be38f04bed896a276c0f342b05d45eb34caee"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Cisco",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "cisco",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": {
+     "enter": "configure terminal",
+     "exit": "end",
+     "save": null
+    },
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh",
+      "telnet"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {
+     "global": [
+      {
+       "flags": "",
+       "pattern": "^!\\s*Last configuration change at.*$"
+      },
+      {
+       "flags": "",
+       "pattern": "^!\\s*NVRAM config last updated at.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*No configuration change since.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*Configuration last modified by.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^.*uptime is.*$"
+      }
+     ],
+     "show_config": [
+      {
+       "flags": "",
+       "pattern": "^!\\s*Time:.*$"
+      },
+      {
+       "flags": "",
+       "pattern": "^Current configuration : \\d+ bytes$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^Building configuration\\.\\.\\.$"
+      }
+     ]
+    },
+    "display_name": "Cisco IOS - SSH - Enable",
+    "error_patterns": {
+     "patterns": [
+      "% Invalid",
+      "% Ambiguous",
+      "Error"
+     ]
+    },
+    "os_type": "ios-ssh-enable",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "terminal length 0"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": {
+     "command": "enable",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "\\S+#"
+    },
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "cisco/ios-ssh-enable",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "b29c39164b92b990a5feefeea1239ec7876ae9240563b19b046685a3855450a3"
+    ],
+    "config_mode": [
+     "66c42020c6f9eac2ae88add59752c6f725f239240d87822fd88c687ee3e53633"
+    ],
+    "connection": [
+     "b2dfc86f5bc794c04c78d3286f34c84c4bd38ae941d9fa2b0c640bc19a3d9406"
+    ],
+    "diff_exclusions": [
+     "a025db80e328252453e8244cabe7f12e333233cd10353db519c8fa322c1711dc"
+    ],
+    "error_patterns": [
+     "cb36e4602c4630534fd7dc54d27b6f43124c32713d0c632307003e6b1f37c099"
+    ],
+    "pagination": [
+     "4ebb2d95b6a7e32a3d978483949cd6d9e550253b986a909c2268e6273031a058"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "496cf96c4a5ab9c866957fb3d63ad10886f0ca5b4c1d90fac5253256eca513a4"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "744f3a466d8f8ec11ba15fd717e9ce576413824666796b232c1f599e5cae0755"
+    ],
+    "privilege_escalation": [
+     "0795d5e2eb9cb9e3ac0c866b2c438efff92837cd5ee798399c9bb23a38f41205"
+    ],
+    "prompt": [
+     "df7cde2036ddf178fe32d0cbb891bf54f36ae6b4e1ec0a49f35918862d9b9d65"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "aaafcd55537c4948bb159bc1694459a03b3a58324a8523f800430653dde67d6c"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Cisco",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "cisco",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": {
+     "enter": "configure terminal",
+     "exit": "end",
+     "save": null
+    },
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh",
+      "telnet"
+     ],
+     "timeout": 60
+    },
+    "diff_exclusions": {
+     "global": [
+      {
+       "flags": "",
+       "pattern": "^!\\s*Last configuration change at.*$"
+      },
+      {
+       "flags": "",
+       "pattern": "^!\\s*NVRAM config last updated at.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*No configuration change since.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*Configuration last modified by.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^.*uptime is.*$"
+      }
+     ],
+     "show_config": [
+      {
+       "flags": "",
+       "pattern": "^!\\s*Time:.*$"
+      },
+      {
+       "flags": "",
+       "pattern": "^Current configuration : \\d+ bytes$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^Building configuration\\.\\.\\.$"
+      }
+     ]
+    },
+    "display_name": "Cisco IOS - SSH - No Enable",
+    "error_patterns": {
+     "patterns": [
+      "% Invalid",
+      "% Ambiguous",
+      "Error"
+     ]
+    },
+    "os_type": "ios-ssh-noenable",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "terminal length 0"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "cisco/ios-ssh-noenable",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Cisco",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "cisco",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": {
+     "enter": "configure terminal",
+     "exit": "end",
+     "save": null
+    },
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "telnet"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {
+     "global": [
+      {
+       "flags": "",
+       "pattern": "^!\\s*Last configuration change at.*$"
+      },
+      {
+       "flags": "",
+       "pattern": "^!\\s*NVRAM config last updated at.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*No configuration change since.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*Configuration last modified by.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^.*uptime is.*$"
+      }
+     ],
+     "show_config": [
+      {
+       "flags": "",
+       "pattern": "^!\\s*Time:.*$"
+      },
+      {
+       "flags": "",
+       "pattern": "^Current configuration : \\d+ bytes$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^Building configuration\\.\\.\\.$"
+      }
+     ]
+    },
+    "display_name": "Cisco IOS - Telnet - Enable",
+    "error_patterns": {
+     "patterns": [
+      "% Invalid",
+      "% Ambiguous",
+      "Error"
+     ]
+    },
+    "os_type": "ios-telnet-enable",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "terminal length 0"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": {
+     "command": "enable",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "\\S+#"
+    },
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "telnet"
+   },
+   "edition": "free",
+   "key": "cisco/ios-telnet-enable",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "b29c39164b92b990a5feefeea1239ec7876ae9240563b19b046685a3855450a3"
+    ],
+    "config_mode": [
+     "66c42020c6f9eac2ae88add59752c6f725f239240d87822fd88c687ee3e53633"
+    ],
+    "connection": [
+     "42c307f7cd9975adea03c6107a1d30c91116f9fe3106cd7d194fce36d6e14840"
+    ],
+    "diff_exclusions": [
+     "a025db80e328252453e8244cabe7f12e333233cd10353db519c8fa322c1711dc"
+    ],
+    "error_patterns": [
+     "cb36e4602c4630534fd7dc54d27b6f43124c32713d0c632307003e6b1f37c099"
+    ],
+    "pagination": [
+     "4ebb2d95b6a7e32a3d978483949cd6d9e550253b986a909c2268e6273031a058"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "496cf96c4a5ab9c866957fb3d63ad10886f0ca5b4c1d90fac5253256eca513a4"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "744f3a466d8f8ec11ba15fd717e9ce576413824666796b232c1f599e5cae0755"
+    ],
+    "privilege_escalation": [
+     "0795d5e2eb9cb9e3ac0c866b2c438efff92837cd5ee798399c9bb23a38f41205"
+    ],
+    "prompt": [
+     "df7cde2036ddf178fe32d0cbb891bf54f36ae6b4e1ec0a49f35918862d9b9d65"
+    ],
+    "protocol": [
+     "05497b0c1fa09d5433e6bc592c6192a7273da3f7cf1770471ccd662a2e2e0d8d"
+    ]
+   },
+   "previous_hashes": [
+    "d5b7343efa98028ce63b29d58a08c61096a725f41c453491a4a12514453a5e43"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Cisco",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "cisco",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": {
+     "enter": "configure terminal",
+     "exit": "end",
+     "save": null
+    },
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "telnet"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {
+     "global": [
+      {
+       "flags": "",
+       "pattern": "^!\\s*Last configuration change at.*$"
+      },
+      {
+       "flags": "",
+       "pattern": "^!\\s*NVRAM config last updated at.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*No configuration change since.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*Configuration last modified by.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^.*uptime is.*$"
+      }
+     ],
+     "show_config": [
+      {
+       "flags": "",
+       "pattern": "^!\\s*Time:.*$"
+      },
+      {
+       "flags": "",
+       "pattern": "^Current configuration : \\d+ bytes$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^Building configuration\\.\\.\\.$"
+      }
+     ]
+    },
+    "display_name": "Cisco IOS - Telnet - Enable - No Username",
+    "error_patterns": {
+     "patterns": [
+      "% Invalid",
+      "% Ambiguous",
+      "Error"
+     ]
+    },
+    "os_type": "ios-telnet-enable-nouser",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "terminal length 0"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": {
+     "command": "enable",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "\\S+#"
+    },
+    "prompt": {
+     "login_pattern": null,
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "telnet"
+   },
+   "edition": "free",
+   "key": "cisco/ios-telnet-enable-nouser",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "b29c39164b92b990a5feefeea1239ec7876ae9240563b19b046685a3855450a3"
+    ],
+    "config_mode": [
+     "66c42020c6f9eac2ae88add59752c6f725f239240d87822fd88c687ee3e53633"
+    ],
+    "connection": [
+     "42c307f7cd9975adea03c6107a1d30c91116f9fe3106cd7d194fce36d6e14840"
+    ],
+    "diff_exclusions": [
+     "a025db80e328252453e8244cabe7f12e333233cd10353db519c8fa322c1711dc"
+    ],
+    "error_patterns": [
+     "cb36e4602c4630534fd7dc54d27b6f43124c32713d0c632307003e6b1f37c099"
+    ],
+    "pagination": [
+     "4ebb2d95b6a7e32a3d978483949cd6d9e550253b986a909c2268e6273031a058"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "496cf96c4a5ab9c866957fb3d63ad10886f0ca5b4c1d90fac5253256eca513a4"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "744f3a466d8f8ec11ba15fd717e9ce576413824666796b232c1f599e5cae0755"
+    ],
+    "privilege_escalation": [
+     "0795d5e2eb9cb9e3ac0c866b2c438efff92837cd5ee798399c9bb23a38f41205"
+    ],
+    "prompt": [
+     "b5c686570ae87a0f55ccf4bb314d36f09b74c8a40f05ebd56beac5812a4eaf6a"
+    ],
+    "protocol": [
+     "05497b0c1fa09d5433e6bc592c6192a7273da3f7cf1770471ccd662a2e2e0d8d"
+    ]
+   },
+   "previous_hashes": [
+    "fb06932e6158b2c0fc16c6aadaa997078b68c71609e37f5d09f4e1c87133d5e5"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Cisco",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "cisco",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": {
+     "enter": "configure terminal",
+     "exit": "end",
+     "save": null
+    },
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "telnet"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {
+     "global": [
+      {
+       "flags": "",
+       "pattern": "^!\\s*Last configuration change at.*$"
+      },
+      {
+       "flags": "",
+       "pattern": "^!\\s*NVRAM config last updated at.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*No configuration change since.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*Configuration last modified by.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^.*uptime is.*$"
+      }
+     ],
+     "show_config": [
+      {
+       "flags": "",
+       "pattern": "^!\\s*Time:.*$"
+      },
+      {
+       "flags": "",
+       "pattern": "^Current configuration : \\d+ bytes$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^Building configuration\\.\\.\\.$"
+      }
+     ]
+    },
+    "display_name": "Cisco IOS - Telnet - No Enable",
+    "error_patterns": {
+     "patterns": [
+      "% Invalid",
+      "% Ambiguous",
+      "Error"
+     ]
+    },
+    "os_type": "ios-telnet-noenable",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "terminal length 0"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "telnet"
+   },
+   "edition": "free",
+   "key": "cisco/ios-telnet-noenable",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Cisco",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "cisco",
+    "commands": {
+     "show_arp": "show ip arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interface brief",
+     "show_log": "show logging last 50",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": {
+     "enter": "configure terminal",
+     "exit": "end",
+     "save": null
+    },
+    "connection": {
+     "default_port_ssh": 22,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {
+     "global": [
+      {
+       "flags": "",
+       "pattern": "^!\\s*Last configuration change at.*$"
+      },
+      {
+       "flags": "",
+       "pattern": "^!\\s*NVRAM config last updated at.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*No configuration change since.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*Configuration last modified by.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^.*uptime is.*$"
+      }
+     ],
+     "show_config": [
+      {
+       "flags": "",
+       "pattern": "^!\\s*Time:.*$"
+      },
+      {
+       "flags": "",
+       "pattern": "^Current configuration : \\d+ bytes$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^Building configuration\\.\\.\\.$"
+      }
+     ]
+    },
+    "display_name": "Cisco NX-OS",
+    "error_patterns": {
+     "patterns": [
+      "% Invalid",
+      "% Ambiguous",
+      "Error"
+     ]
+    },
+    "os_type": "nxos",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "terminal length 0"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "login:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "cisco/nxos",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Cisco",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "cisco",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": {
+     "enter": "configure terminal",
+     "exit": "end",
+     "save": null
+    },
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "telnet"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {
+     "global": [
+      {
+       "flags": "",
+       "pattern": "^!\\s*Last configuration change at.*$"
+      },
+      {
+       "flags": "",
+       "pattern": "^!\\s*NVRAM config last updated at.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*No configuration change since.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*Configuration last modified by.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^.*uptime is.*$"
+      }
+     ],
+     "show_config": [
+      {
+       "flags": "",
+       "pattern": "^!\\s*Time:.*$"
+      },
+      {
+       "flags": "",
+       "pattern": "^Current configuration : \\d+ bytes$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^Building configuration\\.\\.\\.$"
+      }
+     ]
+    },
+    "display_name": "Cisco SMB - Telnet - No Enable",
+    "error_patterns": {
+     "patterns": [
+      "% Invalid",
+      "% Ambiguous",
+      "Error"
+     ]
+    },
+    "os_type": "smb-telnet",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "terminal length 0"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "User Name:",
+     "password_pattern": "Password",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "telnet"
+   },
+   "edition": "free",
+   "key": "cisco/smb-telnet",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Cisco",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "cisco",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": {
+     "enter": "configure terminal",
+     "exit": "end",
+     "save": null
+    },
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "ssh_interactive": true,
+     "timeout": 30
+    },
+    "diff_exclusions": {
+     "global": [
+      {
+       "flags": "",
+       "pattern": "^!\\s*Last configuration change at.*$"
+      },
+      {
+       "flags": "",
+       "pattern": "^!\\s*NVRAM config last updated at.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*No configuration change since.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*Configuration last modified by.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^.*uptime is.*$"
+      }
+     ],
+     "show_config": [
+      {
+       "flags": "",
+       "pattern": "^!\\s*Time:.*$"
+      },
+      {
+       "flags": "",
+       "pattern": "^Current configuration : \\d+ bytes$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^Building configuration\\.\\.\\.$"
+      }
+     ]
+    },
+    "display_name": "Cisco WLC - SSH",
+    "error_patterns": {
+     "patterns": [
+      "% Invalid",
+      "% Ambiguous",
+      "Error"
+     ]
+    },
+    "os_type": "wlc-ssh",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "config paging disable"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "logout"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "User:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "cisco/wlc-ssh",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Dell",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "dell",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "telnet"
+     ],
+     "timeout": 60
+    },
+    "diff_exclusions": {
+     "global": [],
+     "show_config": [
+      {
+       "flags": "i",
+       "pattern": "^!\\s*Time:\\s*.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*Last configuration change at.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*System Description.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*Current Configuration.*$"
+      }
+     ]
+    },
+    "display_name": "Dell 5524 - Telnet - No Enable",
+    "error_patterns": {
+     "patterns": [
+      "% Invalid",
+      "% Error"
+     ]
+    },
+    "os_type": "5524-telnet",
+    "pagination": {
+     "enabled": false
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "terminal datadump"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "User:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "telnet"
+   },
+   "edition": "free",
+   "key": "dell/5524-telnet",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Dell",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "dell",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "telnet"
+     ],
+     "timeout": 60
+    },
+    "diff_exclusions": {
+     "global": [],
+     "show_config": [
+      {
+       "flags": "i",
+       "pattern": "^!\\s*Time:\\s*.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*Last configuration change at.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*System Description.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*Current Configuration.*$"
+      }
+     ]
+    },
+    "display_name": "Dell 6248P - Telnet - Enable",
+    "error_patterns": {
+     "patterns": [
+      "% Invalid",
+      "% Error"
+     ]
+    },
+    "os_type": "6248-telnet",
+    "pagination": {
+     "enabled": false
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "terminal length 0"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": {
+     "command": "enable",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "\\S+#"
+    },
+    "prompt": {
+     "login_pattern": "User:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "telnet"
+   },
+   "edition": "free",
+   "key": "dell/6248-telnet",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "b29c39164b92b990a5feefeea1239ec7876ae9240563b19b046685a3855450a3"
+    ],
+    "config_mode": [
+     "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    ],
+    "connection": [
+     "ca88abd09297fe18f319989c4262572cda2bf076edd7836cfb5b5bc29c7950f4"
+    ],
+    "diff_exclusions": [
+     "c502acfe3636751e9bf9c4fcf8ec86e59f7dfc364d1361c784130196201baaed"
+    ],
+    "error_patterns": [
+     "dab15fbfd04c9334a69844207c43d989e455e414cfc936f785541b57bf4432a1"
+    ],
+    "pagination": [
+     "5acf3ff77b4420677b5923071f303facaba7a9273a346284a667a275df325146"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "496cf96c4a5ab9c866957fb3d63ad10886f0ca5b4c1d90fac5253256eca513a4"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "744f3a466d8f8ec11ba15fd717e9ce576413824666796b232c1f599e5cae0755"
+    ],
+    "privilege_escalation": [
+     "0795d5e2eb9cb9e3ac0c866b2c438efff92837cd5ee798399c9bb23a38f41205"
+    ],
+    "prompt": [
+     "130a7d8e9c898e054df51a1e3331df1f8be24cc142b8224f55c2951593e867cb"
+    ],
+    "protocol": [
+     "05497b0c1fa09d5433e6bc592c6192a7273da3f7cf1770471ccd662a2e2e0d8d"
+    ]
+   },
+   "previous_hashes": [
+    "dd6bd82bb9185e60a408cbd6e761f8157df845fe9cb9d3a7231e92cf57626016"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Dell",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "dell",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 60
+    },
+    "diff_exclusions": {
+     "global": [],
+     "show_config": [
+      {
+       "flags": "i",
+       "pattern": "^!\\s*Time:\\s*.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*Last configuration change at.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*System Description.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^!\\s*Current Configuration.*$"
+      }
+     ]
+    },
+    "display_name": "Dell S4048 - SSH - No Enable",
+    "error_patterns": {
+     "patterns": [
+      "% Invalid",
+      "% Error"
+     ]
+    },
+    "os_type": "s4048-ssh",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "terminal length 0"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Login:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "dell/s4048-ssh",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Digi",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "digi",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {},
+    "display_name": "DiGi IX20 - SSH",
+    "error_patterns": {
+     "patterns": [
+      "Error",
+      "Invalid",
+      "Unrecognized"
+     ]
+    },
+    "os_type": "ix20-ssh",
+    "pagination": {
+     "enabled": false
+    },
+    "post_disconnect": [],
+    "post_login_commands": [],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": {
+     "command": "enable",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "\\S+#"
+    },
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "digi/ix20-ssh",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "b29c39164b92b990a5feefeea1239ec7876ae9240563b19b046685a3855450a3"
+    ],
+    "config_mode": [
+     "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    ],
+    "connection": [
+     "cd3beded5040a841c9e9e1a5e0091c17fe5d0be89e71f23e6bcfbb1b46f8abb2"
+    ],
+    "diff_exclusions": [
+     "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    ],
+    "error_patterns": [
+     "2b40f8bfb09ac2e23915b13cb31b163ad4a7155ce0e768d14b73a89e8acace7d"
+    ],
+    "pagination": [
+     "5acf3ff77b4420677b5923071f303facaba7a9273a346284a667a275df325146"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "ac6a7531fc41d6436331f8399292704e78f9a4349374b65b1a04cf1d2e0bbf11"
+    ],
+    "privilege_escalation": [
+     "0795d5e2eb9cb9e3ac0c866b2c438efff92837cd5ee798399c9bb23a38f41205"
+    ],
+    "prompt": [
+     "df7cde2036ddf178fe32d0cbb891bf54f36ae6b4e1ec0a49f35918862d9b9d65"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "b4807284854ed44a52c97eb0d3732f06021ca1bc1660703bdc0fe87f89b00c3c"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Edge-Core",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "edge_core",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {},
+    "display_name": "Edge-Core - SSH",
+    "error_patterns": {
+     "patterns": [
+      "Error",
+      "Invalid",
+      "Unrecognized"
+     ]
+    },
+    "os_type": "ssh",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "terminal length 0"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "edge_core/ssh",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Extreme Networks",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "extreme",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {},
+    "display_name": "Extreme Summit - SSH",
+    "error_patterns": {
+     "patterns": [
+      "Error",
+      "Invalid",
+      "Unrecognized"
+     ]
+    },
+    "os_type": "summit-ssh",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "disable clipaging"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": {
+     "command": "enable",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "\\S+#"
+    },
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "extreme/summit-ssh",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "b29c39164b92b990a5feefeea1239ec7876ae9240563b19b046685a3855450a3"
+    ],
+    "config_mode": [
+     "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    ],
+    "connection": [
+     "cd3beded5040a841c9e9e1a5e0091c17fe5d0be89e71f23e6bcfbb1b46f8abb2"
+    ],
+    "diff_exclusions": [
+     "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    ],
+    "error_patterns": [
+     "2b40f8bfb09ac2e23915b13cb31b163ad4a7155ce0e768d14b73a89e8acace7d"
+    ],
+    "pagination": [
+     "4ebb2d95b6a7e32a3d978483949cd6d9e550253b986a909c2268e6273031a058"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "bb152753e122ed8ff032e632d037e763b48fdba932e9f1119599ce2f983056cd"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "ac6a7531fc41d6436331f8399292704e78f9a4349374b65b1a04cf1d2e0bbf11"
+    ],
+    "privilege_escalation": [
+     "0795d5e2eb9cb9e3ac0c866b2c438efff92837cd5ee798399c9bb23a38f41205"
+    ],
+    "prompt": [
+     "df7cde2036ddf178fe32d0cbb891bf54f36ae6b4e1ec0a49f35918862d9b9d65"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "aab0e274bed0fca69175963f4c12bbefc5513ed8e64611119f3576a7464dba0a"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Fortinet",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "fortinet",
+    "commands": {
+     "show_arp": "get system arp",
+     "show_config": "show full-configuration",
+     "show_interfaces": "get system interface",
+     "show_log": "get log event",
+     "show_routing": "get router info routing-table all",
+     "show_version": "get system status"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 60
+    },
+    "diff_exclusions": {
+     "global": [],
+     "show_config": [
+      {
+       "flags": "i",
+       "pattern": "^#\\s*(config-version|date|time|build|timestamp)\\s*[:=].*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^#\\s*building-configuration.*$"
+      }
+     ]
+    },
+    "display_name": "FortiGate - SSH - Banner Prompt",
+    "error_patterns": {
+     "patterns": [
+      "command parse error",
+      "unrecognized",
+      "Error"
+     ]
+    },
+    "os_type": "banner",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "config system console\n set output standard\n end"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit\n"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+\\s*#\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "fortinet/banner",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Fortinet",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "fortinet",
+    "commands": {
+     "show_arp": "get system arp",
+     "show_config": "show full-configuration",
+     "show_interfaces": "get system interface",
+     "show_log": "get log event",
+     "show_routing": "get router info routing-table all",
+     "show_version": "get system status"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 60
+    },
+    "diff_exclusions": {
+     "global": [],
+     "show_config": [
+      {
+       "flags": "i",
+       "pattern": "^#\\s*(config-version|date|time|build|timestamp)\\s*[:=].*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^#\\s*building-configuration.*$"
+      }
+     ]
+    },
+    "display_name": "FortiGate - SSH - Non-VDOM",
+    "error_patterns": {
+     "patterns": [
+      "command parse error",
+      "unrecognized",
+      "Error"
+     ]
+    },
+    "os_type": "non-vdom",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "config system console\n set output standard\n end"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit\n"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+\\s*#\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "fortinet/non-vdom",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Fortinet",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "fortinet",
+    "commands": {
+     "show_arp": "get system arp",
+     "show_config": "show full-configuration",
+     "show_interfaces": "get system interface",
+     "show_log": "get log event",
+     "show_routing": "get router info routing-table all",
+     "show_version": "get system status"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "is_non_interactive": true,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 60
+    },
+    "diff_exclusions": {
+     "global": [],
+     "show_config": [
+      {
+       "flags": "i",
+       "pattern": "^#\\s*(config-version|date|time|build|timestamp)\\s*[:=].*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^#\\s*building-configuration.*$"
+      }
+     ]
+    },
+    "display_name": "FortiGate - SSH - NonInteractive",
+    "error_patterns": {
+     "patterns": [
+      "command parse error",
+      "unrecognized",
+      "Error"
+     ]
+    },
+    "os_type": "noninteractive",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "config system console\n set output standard\n end"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit\n"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+\\s*#\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "fortinet/noninteractive",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Fortinet",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "fortinet",
+    "commands": {
+     "show_arp": "get system arp",
+     "show_config": "show full-configuration",
+     "show_interfaces": "get system interface",
+     "show_log": "get log event",
+     "show_routing": "get router info routing-table all",
+     "show_version": "get system status"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 60
+    },
+    "diff_exclusions": {
+     "global": [],
+     "show_config": [
+      {
+       "flags": "i",
+       "pattern": "^#\\s*(config-version|date|time|build|timestamp)\\s*[:=].*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^#\\s*building-configuration.*$"
+      }
+     ]
+    },
+    "display_name": "FortiGate - SSH - VDOM",
+    "error_patterns": {
+     "patterns": [
+      "command parse error",
+      "unrecognized",
+      "Error"
+     ]
+    },
+    "os_type": "vdom",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "config global\nconfig system console\n set output standard\n end\n end"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit\n"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+\\s*#\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "fortinet/vdom",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Generic",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "generic",
+    "commands": {},
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh",
+      "telnet"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {},
+    "display_name": "Generic Device",
+    "error_patterns": {
+     "patterns": [
+      "Error",
+      "Invalid",
+      "Unrecognized"
+     ]
+    },
+    "os_type": "generic",
+    "pagination": {
+     "enabled": false
+    },
+    "post_disconnect": [],
+    "post_login_commands": [],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "(?:login|Username).*:",
+     "password_pattern": "Password:",
+     "patterns": [
+      ">\\s*$",
+      "#\\s*$",
+      "\\$\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "generic/generic",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Generic",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "generic",
+    "commands": null,
+    "config_mode": null,
+    "connection": {
+     "color_depth": 24,
+     "port": 5900,
+     "protocol": "vnc",
+     "protocols": [
+      "vnc"
+     ],
+     "read_only": false
+    },
+    "diff_exclusions": {},
+    "display_name": "VNC Console Minimal",
+    "error_patterns": null,
+    "os_type": "vnc-console",
+    "pagination": null,
+    "post_disconnect": [],
+    "post_login_commands": null,
+    "pre_connect": [],
+    "pre_logout_commands": null,
+    "privilege_escalation": null,
+    "prompt": null,
+    "protocol": "vnc"
+   },
+   "edition": "pro",
+   "key": "generic/vnc-console",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "HP",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "hp",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 60
+    },
+    "diff_exclusions": {
+     "global": [],
+     "show_config": [
+      {
+       "flags": "i",
+       "pattern": "^;\\s*Time:\\s*.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^;\\s*Created on release.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^;\\s*Configuration Editor.*$"
+      }
+     ]
+    },
+    "display_name": "HP 1920 - SSH - No Enable",
+    "error_patterns": {
+     "patterns": [
+      "Invalid input",
+      "Error",
+      "Unrecognized"
+     ]
+    },
+    "os_type": "1920-ssh",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "Press any key to continue",
+     "screen-length disable"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": {
+     "command": "_cmdline-mode on \n y",
+     "password_prompt": "",
+     "success_pattern": "\\S+#"
+    },
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "hp/1920-ssh",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "b29c39164b92b990a5feefeea1239ec7876ae9240563b19b046685a3855450a3"
+    ],
+    "config_mode": [
+     "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    ],
+    "connection": [
+     "d35b18f91ca23016c0a0972df0bde2b73ed674d1011062893af9489d2dd4bff6"
+    ],
+    "diff_exclusions": [
+     "c6808dcd651a88d2d26f26800cbe38b33b9f7eae119dd43444e60155a79788ba"
+    ],
+    "error_patterns": [
+     "d5b57a57b2c3eb99ab80975d965988def61ad5c6fb38971c6abc459b943449b6"
+    ],
+    "pagination": [
+     "4ebb2d95b6a7e32a3d978483949cd6d9e550253b986a909c2268e6273031a058"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "d9d18a7878a5ab9910e7a1721fd432665ac7624ca3212afd26f2c95ce7267d07"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "744f3a466d8f8ec11ba15fd717e9ce576413824666796b232c1f599e5cae0755"
+    ],
+    "privilege_escalation": [
+     "04e00a88d9767560e3cda5b1b0eaa936d9b4eb6d1c265171b583f3f8683af380"
+    ],
+    "prompt": [
+     "df7cde2036ddf178fe32d0cbb891bf54f36ae6b4e1ec0a49f35918862d9b9d65"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "f1113bf39bb500648eb7114862ac44679668d7247c7714e0744f3dbab22d811b"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "HP",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "hp",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 60
+    },
+    "diff_exclusions": {
+     "global": [],
+     "show_config": [
+      {
+       "flags": "i",
+       "pattern": "^;\\s*Time:\\s*.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^;\\s*Created on release.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^;\\s*Configuration Editor.*$"
+      }
+     ]
+    },
+    "display_name": "HP A5120 - SSH - No System View",
+    "error_patterns": {
+     "patterns": [
+      "Invalid input",
+      "Error",
+      "Unrecognized"
+     ]
+    },
+    "os_type": "a5120-ssh",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "screen-length disable"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "hp/a5120-ssh",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "HP",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "hp",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 60
+    },
+    "diff_exclusions": {
+     "global": [],
+     "show_config": [
+      {
+       "flags": "i",
+       "pattern": "^;\\s*Time:\\s*.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^;\\s*Created on release.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^;\\s*Configuration Editor.*$"
+      }
+     ]
+    },
+    "display_name": "HP FlexFabric - SSH - No Enable",
+    "error_patterns": {
+     "patterns": [
+      "Invalid input",
+      "Error",
+      "Unrecognized"
+     ]
+    },
+    "os_type": "flexfabric-ssh",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "Press any key to continue",
+     "screen-length disable"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "hp/flexfabric-ssh",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "HP",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "hp",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 60
+    },
+    "diff_exclusions": {
+     "global": [],
+     "show_config": [
+      {
+       "flags": "i",
+       "pattern": "^;\\s*Time:\\s*.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^;\\s*Created on release.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^;\\s*Configuration Editor.*$"
+      }
+     ]
+    },
+    "display_name": "H3C - SSH - No Enable",
+    "error_patterns": {
+     "patterns": [
+      "Invalid input",
+      "Error",
+      "Unrecognized"
+     ]
+    },
+    "os_type": "h3c-ssh",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "screen-length disable"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "hp/h3c-ssh",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "HP",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "hp",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 60
+    },
+    "diff_exclusions": {
+     "global": [],
+     "show_config": [
+      {
+       "flags": "i",
+       "pattern": "^;\\s*Time:\\s*.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^;\\s*Created on release.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^;\\s*Configuration Editor.*$"
+      }
+     ]
+    },
+    "display_name": "HP ProCurve - SSH - No Enable",
+    "error_patterns": {
+     "patterns": [
+      "Invalid input",
+      "Error",
+      "Unrecognized"
+     ]
+    },
+    "os_type": "procurve-ssh",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "Press any key to continue",
+     "no page"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "hp/procurve-ssh",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "HP",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "hp",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 60
+    },
+    "diff_exclusions": {
+     "global": [],
+     "show_config": [
+      {
+       "flags": "i",
+       "pattern": "^;\\s*Time:\\s*.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^;\\s*Created on release.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^;\\s*Configuration Editor.*$"
+      }
+     ]
+    },
+    "display_name": "HP ProCurve - SSH - No Enable v2",
+    "error_patterns": {
+     "patterns": [
+      "Invalid input",
+      "Error",
+      "Unrecognized"
+     ]
+    },
+    "os_type": "procurve-ssh-v2",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "Press any key to continue",
+     "nno page"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "hp/procurve-ssh-v2",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "HP",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "hp",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "telnet"
+     ],
+     "timeout": 60
+    },
+    "diff_exclusions": {
+     "global": [],
+     "show_config": [
+      {
+       "flags": "i",
+       "pattern": "^;\\s*Time:\\s*.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^;\\s*Created on release.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^;\\s*Configuration Editor.*$"
+      }
+     ]
+    },
+    "display_name": "HP ProCurve - Telnet - No Enable",
+    "error_patterns": {
+     "patterns": [
+      "Invalid input",
+      "Error",
+      "Unrecognized"
+     ]
+    },
+    "os_type": "procurve-telnet",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "Press any key to continue",
+     "no page"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "telnet"
+   },
+   "edition": "free",
+   "key": "hp/procurve-telnet",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Huawei",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "huawei",
+    "commands": {
+     "show_arp": "display arp all",
+     "show_config": "display current-configuration",
+     "show_interfaces": "display interface brief",
+     "show_log": "display logbuffer",
+     "show_routing": "display ip routing-table",
+     "show_version": "display version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh",
+      "telnet"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {
+     "global": [],
+     "show_config": [
+      {
+       "flags": "i",
+       "pattern": "^#\\s*Last configuration (was )?updated at.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^#\\s*Current configuration\\s*:\\s*\\d+.*$"
+      }
+     ]
+    },
+    "display_name": "Huawei VRP",
+    "error_patterns": {
+     "patterns": [
+      "Error:",
+      "Unrecognized",
+      "Incomplete"
+     ]
+    },
+    "os_type": "vrp",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "---- More ----"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "screen-length 0 temporary"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "return",
+     "quit"
+    ],
+    "privilege_escalation": {
+     "command": "system-view",
+     "password_prompt": "",
+     "success_pattern": "\\[\\S+\\]"
+    },
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\<[\\w\\-]+\\>",
+      "\\[[\\w\\-]+\\]"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "huawei/vrp",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "c26525ff886e1f53aaf1c477fcd45b0477b8a305a0162bc940f4489bb98329a7"
+    ],
+    "config_mode": [
+     "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    ],
+    "connection": [
+     "b2dfc86f5bc794c04c78d3286f34c84c4bd38ae941d9fa2b0c640bc19a3d9406"
+    ],
+    "diff_exclusions": [
+     "508a9fb49db339be7ce7961a2cf2759e1413c908dcf0c6be38b801d904fa2ccc"
+    ],
+    "error_patterns": [
+     "42313cb17251171383e3d66988dfe7b2e76b02fb4cacafa6736ef7df1e78e0a2"
+    ],
+    "pagination": [
+     "84e2465b0977872fad48264422f7d269e6b7de8c45c0a4a2e84a9ece4c3f195a"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "c7c80ab316e09a1ffa8ede68fdde408e3036e401e2c3c3cda89a9f21ba822834"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "f1ae6b4a197fcdcd82b5effc58929ee413de43b76ebe6593efe3769ccdb3fe1f"
+    ],
+    "privilege_escalation": [
+     "78994fef3bcb56cb21a4cc0e63babeca9e3d68d0f7c3a209012b60fa67f007c7"
+    ],
+    "prompt": [
+     "b37e5014da264851c8304cff6a4c7f3488387317c007d778dea077288dd2d5a1"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "492f9e51db98e03cc8bc9ebdbfda5770e16388be622c54838279055506579eb4"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Huawei",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "huawei",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {
+     "global": [],
+     "show_config": [
+      {
+       "flags": "i",
+       "pattern": "^#\\s*Last configuration (was )?updated at.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^#\\s*Current configuration\\s*:\\s*\\d+.*$"
+      }
+     ]
+    },
+    "display_name": "Huawei VRP - SSH",
+    "error_patterns": {
+     "patterns": [
+      "Error:",
+      "Unrecognized",
+      "Incomplete"
+     ]
+    },
+    "os_type": "vrp-ssh",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "---- More ----"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "screen-length 0 temporary"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "return",
+     "quit"
+    ],
+    "privilege_escalation": {
+     "command": "system-view",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "\\[\\S+\\]"
+    },
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\<[\\w\\-]+\\>",
+      "\\[[\\w\\-]+\\]"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "huawei/vrp-ssh",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "b29c39164b92b990a5feefeea1239ec7876ae9240563b19b046685a3855450a3"
+    ],
+    "config_mode": [
+     "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    ],
+    "connection": [
+     "cd3beded5040a841c9e9e1a5e0091c17fe5d0be89e71f23e6bcfbb1b46f8abb2"
+    ],
+    "diff_exclusions": [
+     "508a9fb49db339be7ce7961a2cf2759e1413c908dcf0c6be38b801d904fa2ccc"
+    ],
+    "error_patterns": [
+     "42313cb17251171383e3d66988dfe7b2e76b02fb4cacafa6736ef7df1e78e0a2"
+    ],
+    "pagination": [
+     "84e2465b0977872fad48264422f7d269e6b7de8c45c0a4a2e84a9ece4c3f195a"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "c7c80ab316e09a1ffa8ede68fdde408e3036e401e2c3c3cda89a9f21ba822834"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "f1ae6b4a197fcdcd82b5effc58929ee413de43b76ebe6593efe3769ccdb3fe1f"
+    ],
+    "privilege_escalation": [
+     "78994fef3bcb56cb21a4cc0e63babeca9e3d68d0f7c3a209012b60fa67f007c7"
+    ],
+    "prompt": [
+     "b37e5014da264851c8304cff6a4c7f3488387317c007d778dea077288dd2d5a1"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "03e44d9355a4c1006f808f57a552a25310f1abef8df6056ed2d70fad599e1e82"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Juniper",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "juniper",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show configuration",
+     "show_interfaces": "show interfaces terse",
+     "show_log": "show log messages | last 50",
+     "show_routing": "show route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh",
+      "telnet"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {
+     "global": [],
+     "show_config": [
+      {
+       "flags": "i",
+       "pattern": "^##?\\s*Last (changed|commit).*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^##?\\s*commit-time:.*$"
+      }
+     ]
+    },
+    "display_name": "Juniper JunOS",
+    "error_patterns": {
+     "patterns": [
+      "error:",
+      "syntax error",
+      "unknown command"
+     ]
+    },
+    "os_type": "junos",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "---\\(more( \\d+%)?\\)---"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "set cli screen-length 0"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": {
+     "command": "configure",
+     "password_prompt": "",
+     "success_pattern": "\\S+@\\S+#"
+    },
+    "prompt": {
+     "login_pattern": "login:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+@\\S+>\\s*$",
+      "\\S+@\\S+#\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "juniper/junos",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "2d26458b8db1aea060c2620637b0e0f870153ade3a838a393a4e13fcab06ff4e"
+    ],
+    "config_mode": [
+     "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    ],
+    "connection": [
+     "b2dfc86f5bc794c04c78d3286f34c84c4bd38ae941d9fa2b0c640bc19a3d9406"
+    ],
+    "diff_exclusions": [
+     "dc921581fb9a027add167761d7dffca9e929e5a162901d94e73cd35a824fcbee"
+    ],
+    "error_patterns": [
+     "aa41612ee7f4ed730b9675bd321f7987f7edf5abfbab8a90736c739d250cbaa0"
+    ],
+    "pagination": [
+     "de49415efbdaaf1632c540fd945df15503d551d83f1e92312ea05816048420d1"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "b30a1ebdcd142e53be3eab224eaed008fb5e1a5c6571bc564fd938c5b0fbc0e6"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "ac6a7531fc41d6436331f8399292704e78f9a4349374b65b1a04cf1d2e0bbf11"
+    ],
+    "privilege_escalation": [
+     "e5ffe2451bbb0c5ebe074b03cd11ee58927957c9d7580dddbc82fe7d15276dbe"
+    ],
+    "prompt": [
+     "39fe243d552d0e1df01a0c1890cbb218277f39682767197da4bd8432760e4e3a"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "81776fe549bbc9ab13c457fec3516858381d0f6c00845620fe4ce91b6f48b3ca"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Juniper",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "juniper",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show configuration",
+     "show_interfaces": "show interfaces terse",
+     "show_log": "show log messages | last 50",
+     "show_routing": "show route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 60
+    },
+    "diff_exclusions": {
+     "global": [],
+     "show_config": [
+      {
+       "flags": "i",
+       "pattern": "^##?\\s*Last (changed|commit).*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^##?\\s*commit-time:.*$"
+      }
+     ]
+    },
+    "display_name": "Juniper JunOS - SSH",
+    "error_patterns": {
+     "patterns": [
+      "error:",
+      "syntax error",
+      "unknown command"
+     ]
+    },
+    "os_type": "junos-ssh",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "---\\(more( \\d+%)?\\)---"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "set cli screen-length 0"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "login:",
+     "password_pattern": "password:",
+     "patterns": [
+      "\\S+@\\S+>\\s*$",
+      "\\S+@\\S+#\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "juniper/junos-ssh",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Linux",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "linux",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {},
+    "display_name": "Linux CentOS - SSH",
+    "error_patterns": {
+     "patterns": [
+      "Error",
+      "Invalid",
+      "Unrecognized"
+     ]
+    },
+    "os_type": "centos-ssh",
+    "pagination": {
+     "enabled": false
+    },
+    "post_disconnect": [],
+    "post_login_commands": [],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": {
+     "command": "sudo -i",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "#\\s*$"
+    },
+    "prompt": {
+     "login_pattern": "login:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\$\\s*$",
+      "#\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "linux/centos-ssh",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "b29c39164b92b990a5feefeea1239ec7876ae9240563b19b046685a3855450a3"
+    ],
+    "config_mode": [
+     "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    ],
+    "connection": [
+     "cd3beded5040a841c9e9e1a5e0091c17fe5d0be89e71f23e6bcfbb1b46f8abb2"
+    ],
+    "diff_exclusions": [
+     "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    ],
+    "error_patterns": [
+     "2b40f8bfb09ac2e23915b13cb31b163ad4a7155ce0e768d14b73a89e8acace7d"
+    ],
+    "pagination": [
+     "5acf3ff77b4420677b5923071f303facaba7a9273a346284a667a275df325146"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "ac6a7531fc41d6436331f8399292704e78f9a4349374b65b1a04cf1d2e0bbf11"
+    ],
+    "privilege_escalation": [
+     "6bcb9ab07d0f4d42dc33b12d317d309d1a922e54553926f2b5cdd32c0b25ba8b"
+    ],
+    "prompt": [
+     "4aa261ce63e241b2f9a52725a4efeb82d1609876768fdae40e6b4ca309587a81"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "e77d0917087d3e465a4ccd5e5dbbeed9a4423d6ad82a19033514abcaa761d7da"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Linux",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "linux",
+    "commands": {
+     "show_arp": "arp -n",
+     "show_config": "cat /etc/network/interfaces 2>/dev/null || cat /etc/networks 2>/dev/null || echo no-config",
+     "show_interfaces": "ip addr show",
+     "show_log": "journalctl -n 50 --no-pager 2>/dev/null || dmesg | tail -50",
+     "show_routing": "ip route show",
+     "show_version": "uname -a"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {},
+    "display_name": "Linux (Generic)",
+    "error_patterns": {
+     "patterns": [
+      "command not found",
+      "No such file"
+     ]
+    },
+    "os_type": "generic",
+    "pagination": {
+     "enabled": false
+    },
+    "post_disconnect": [],
+    "post_login_commands": [],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": {
+     "command": "sudo -i",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "#\\s*$"
+    },
+    "prompt": {
+     "login_pattern": "login:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\$\\s*$",
+      "#\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "linux/generic",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "e6bc561f33657eee6d28447620dd93af94783fa7d81a543f8c72300db7c4e6ef"
+    ],
+    "config_mode": [
+     "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    ],
+    "connection": [
+     "4059e80ba15e42809223c9fd60ad8bd35cd371531151c69ec542e7ccff757c3e"
+    ],
+    "diff_exclusions": [
+     "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    ],
+    "error_patterns": [
+     "e6877991f718167ed2319ffa4c60f4bd9bbdba3a2184b4f1305b58cb4abcf948"
+    ],
+    "pagination": [
+     "5acf3ff77b4420677b5923071f303facaba7a9273a346284a667a275df325146"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "ac6a7531fc41d6436331f8399292704e78f9a4349374b65b1a04cf1d2e0bbf11"
+    ],
+    "privilege_escalation": [
+     "6bcb9ab07d0f4d42dc33b12d317d309d1a922e54553926f2b5cdd32c0b25ba8b"
+    ],
+    "prompt": [
+     "4aa261ce63e241b2f9a52725a4efeb82d1609876768fdae40e6b4ca309587a81"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "8eef64e3e7b8aee0fcdd22b27ffd443194c94d286fdf0bd54240665d80399162"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Mellanox",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "mellanox",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {},
+    "display_name": "Mellanox - SSH - Enable",
+    "error_patterns": {
+     "patterns": [
+      "Error",
+      "Invalid",
+      "Unrecognized"
+     ]
+    },
+    "os_type": "ssh",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "terminal length 0"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": {
+     "command": "enable",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "\\S+#"
+    },
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "mellanox/ssh",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "b29c39164b92b990a5feefeea1239ec7876ae9240563b19b046685a3855450a3"
+    ],
+    "config_mode": [
+     "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    ],
+    "connection": [
+     "cd3beded5040a841c9e9e1a5e0091c17fe5d0be89e71f23e6bcfbb1b46f8abb2"
+    ],
+    "diff_exclusions": [
+     "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    ],
+    "error_patterns": [
+     "2b40f8bfb09ac2e23915b13cb31b163ad4a7155ce0e768d14b73a89e8acace7d"
+    ],
+    "pagination": [
+     "4ebb2d95b6a7e32a3d978483949cd6d9e550253b986a909c2268e6273031a058"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "496cf96c4a5ab9c866957fb3d63ad10886f0ca5b4c1d90fac5253256eca513a4"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "744f3a466d8f8ec11ba15fd717e9ce576413824666796b232c1f599e5cae0755"
+    ],
+    "privilege_escalation": [
+     "0795d5e2eb9cb9e3ac0c866b2c438efff92837cd5ee798399c9bb23a38f41205"
+    ],
+    "prompt": [
+     "df7cde2036ddf178fe32d0cbb891bf54f36ae6b4e1ec0a49f35918862d9b9d65"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "988c8845d3bb3fd7a7bd639004bae5ecb315eddb65b301fe65a6f51af64539f2"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "MikroTik",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "mikrotik",
+    "commands": {
+     "show_arp": "/ip arp print",
+     "show_config": "/export terse{export_flags}",
+     "show_interfaces": "/interface print",
+     "show_log": "/log print",
+     "show_routing": "/ip route print",
+     "show_version": ":put [/system resource get version]"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh",
+      "telnet",
+      "webfig"
+     ],
+     "timeout": 60
+    },
+    "diff_exclusions": {
+     "global": [],
+     "show_config": [
+      {
+       "flags": "",
+       "pattern": "^#\\s+.*?\\s+by\\s+RouterOS.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^#\\s*(software|system)\\s*id\\s*=.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^#\\s*model\\s*=.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^#\\s*serial\\s*number\\s*=.*$"
+      },
+      {
+       "flags": "",
+       "pattern": "^#\\s*$"
+      }
+     ]
+    },
+    "display_name": "MikroTik RouterOS",
+    "error_patterns": {
+     "patterns": [
+      "bad command",
+      "no such item",
+      "syntax error"
+     ]
+    },
+    "os_type": "routeros",
+    "pagination": {
+     "enabled": false
+    },
+    "post_disconnect": [
+     {
+      "action": "restore",
+      "filter": {
+       "name": "ssh"
+      },
+      "path": "/ip/service",
+      "state_key": "ssh_was_disabled",
+      "type": "routeros_api"
+     }
+    ],
+    "post_login_commands": [],
+    "pre_connect": [
+     {
+      "action": "enable",
+      "capture_export_flags": true,
+      "capture_field": "port",
+      "filter": {
+       "name": "ssh"
+      },
+      "path": "/ip/service",
+      "save_state_key": "ssh_was_disabled",
+      "type": "routeros_api"
+     }
+    ],
+    "pre_logout_commands": [
+     "/quit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Login:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\[[^\\]\\r\\n]+@[^\\]\\r\\n]+\\][^\\r\\n]*?[>#]\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "mikrotik/routeros",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "MikroTik",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "mikrotik",
+    "commands": {
+     "show_arp": "/ip arp print",
+     "show_config": "/export terse{export_flags}",
+     "show_interfaces": "/interface print",
+     "show_log": "/log print",
+     "show_routing": "/ip route print",
+     "show_version": ":put [/system resource get version]"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 60
+    },
+    "diff_exclusions": {
+     "global": [],
+     "show_config": [
+      {
+       "flags": "",
+       "pattern": "^#\\s+.*?\\s+by\\s+RouterOS.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^#\\s*(software|system)\\s*id\\s*=.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^#\\s*model\\s*=.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^#\\s*serial\\s*number\\s*=.*$"
+      },
+      {
+       "flags": "",
+       "pattern": "^#\\s*$"
+      }
+     ]
+    },
+    "display_name": "MikroTik RouterOS - SSH - Banner",
+    "error_patterns": {
+     "patterns": [
+      "bad command",
+      "no such item",
+      "syntax error"
+     ]
+    },
+    "os_type": "routeros-banner",
+    "pagination": {
+     "enabled": false
+    },
+    "post_disconnect": [],
+    "post_login_commands": [],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "/quit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Login:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\[[^\\]\\r\\n]+@[^\\]\\r\\n]+\\][^\\r\\n]*?[>#]\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "mikrotik/routeros-banner",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "MikroTik",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "mikrotik",
+    "commands": {
+     "show_arp": "/ip arp print",
+     "show_config": "/export terse{export_flags}",
+     "show_interfaces": "/interface print",
+     "show_log": "/log print",
+     "show_routing": "/ip route print",
+     "show_version": ":put [/system resource get version]"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "is_non_interactive": true,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 60
+    },
+    "diff_exclusions": {
+     "global": [],
+     "show_config": [
+      {
+       "flags": "",
+       "pattern": "^#\\s+.*?\\s+by\\s+RouterOS.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^#\\s*(software|system)\\s*id\\s*=.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^#\\s*model\\s*=.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^#\\s*serial\\s*number\\s*=.*$"
+      },
+      {
+       "flags": "",
+       "pattern": "^#\\s*$"
+      }
+     ]
+    },
+    "display_name": "MikroTik RouterOS - SSH - NonInteractive",
+    "error_patterns": {
+     "patterns": [
+      "bad command",
+      "no such item",
+      "syntax error"
+     ]
+    },
+    "os_type": "routeros-noninteractive",
+    "pagination": {
+     "enabled": false
+    },
+    "post_disconnect": [],
+    "post_login_commands": [],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "/quit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Login:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\[[^\\]\\r\\n]+@[^\\]\\r\\n]+\\][^\\r\\n]*?[>#]\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "mikrotik/routeros-noninteractive",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "MikroTik",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "mikrotik",
+    "commands": {
+     "show_arp": "/ip arp print",
+     "show_config": "/export terse{export_flags}",
+     "show_interfaces": "/interface print",
+     "show_log": "/log print",
+     "show_routing": "/ip route print",
+     "show_version": ":put [/system resource get version]"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 60
+    },
+    "diff_exclusions": {
+     "global": [],
+     "show_config": [
+      {
+       "flags": "",
+       "pattern": "^#\\s+.*?\\s+by\\s+RouterOS.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^#\\s*(software|system)\\s*id\\s*=.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^#\\s*model\\s*=.*$"
+      },
+      {
+       "flags": "i",
+       "pattern": "^#\\s*serial\\s*number\\s*=.*$"
+      },
+      {
+       "flags": "",
+       "pattern": "^#\\s*$"
+      }
+     ]
+    },
+    "display_name": "MikroTik RouterOS - SSH v2",
+    "error_patterns": {
+     "patterns": [
+      "bad command",
+      "no such item",
+      "syntax error"
+     ]
+    },
+    "os_type": "routeros-v2",
+    "pagination": {
+     "enabled": false
+    },
+    "post_disconnect": [],
+    "post_login_commands": [],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "/quit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Login:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\[[^\\]\\r\\n]+@[^\\]\\r\\n]+\\][^\\r\\n]*?[>#]\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "mikrotik/routeros-v2",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "NVIDIA Networking",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "nvidia",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {},
+    "display_name": "NVIDIA InfiniBand - SSH",
+    "error_patterns": {
+     "patterns": [
+      "Error",
+      "Invalid",
+      "Unrecognized"
+     ]
+    },
+    "os_type": "ib-ssh",
+    "pagination": {
+     "enabled": false
+    },
+    "post_disconnect": [],
+    "post_login_commands": [],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "nvidia/ib-ssh",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Palo Alto Networks",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "paloalto",
+    "commands": {
+     "show_arp": "show arp all",
+     "show_config": "show config running",
+     "show_interfaces": "show interfaces all",
+     "show_log": "show log system",
+     "show_routing": "show route",
+     "show_version": "show system info"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 60
+    },
+    "diff_exclusions": {},
+    "display_name": "Palo Alto v9.x - SSH",
+    "error_patterns": {
+     "patterns": [
+      "Syntax error",
+      "Invalid command",
+      "Error"
+     ]
+    },
+    "os_type": "panos-9x",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "set cli pager off"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "login as:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+@\\S+>\\s*$",
+      "\\S+@\\S+#\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "paloalto/panos-9x",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Palo Alto Networks",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "paloalto",
+    "commands": {
+     "show_arp": "show arp all",
+     "show_config": "show config running",
+     "show_interfaces": "show interfaces all",
+     "show_log": "show log system",
+     "show_routing": "show route",
+     "show_version": "show system info"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 60
+    },
+    "diff_exclusions": {},
+    "display_name": "Palo Alto - SSH",
+    "error_patterns": {
+     "patterns": [
+      "Syntax error",
+      "Invalid command",
+      "Error"
+     ]
+    },
+    "os_type": "panos-ssh",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "set cli pager off"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "login as:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+@\\S+>\\s*$",
+      "\\S+@\\S+#\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "paloalto/panos-ssh",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Palo Alto Networks",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "paloalto",
+    "commands": {
+     "show_arp": "show arp all",
+     "show_config": "show config running",
+     "show_interfaces": "show interfaces all",
+     "show_log": "show log system",
+     "show_routing": "show route",
+     "show_version": "show system info"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 60
+    },
+    "diff_exclusions": {},
+    "display_name": "Palo Alto - SSH v2",
+    "error_patterns": {
+     "patterns": [
+      "Syntax error",
+      "Invalid command",
+      "Error"
+     ]
+    },
+    "os_type": "panos-v2",
+    "pagination": {
+     "enabled": false
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "set cli scripting-mode on\nset cli pager off"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": {
+     "command": "set cli scripting-mode on",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "\\S+#"
+    },
+    "prompt": {
+     "login_pattern": "login as:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+@\\S+>\\s*$",
+      "\\S+@\\S+#\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "paloalto/panos-v2",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "92643308d9c7560450f25eeb9401c68712c99157d86b0d0a2db081860bd90e41"
+    ],
+    "config_mode": [
+     "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    ],
+    "connection": [
+     "d35b18f91ca23016c0a0972df0bde2b73ed674d1011062893af9489d2dd4bff6"
+    ],
+    "diff_exclusions": [
+     "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    ],
+    "error_patterns": [
+     "5ff835c0921c06d36ff8f3c2e6c5108abb3e9fe954ac7095239d1963ae75716b"
+    ],
+    "pagination": [
+     "5acf3ff77b4420677b5923071f303facaba7a9273a346284a667a275df325146"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "ad4ec34e46557e1433bf8cf97bb7db5b70fcbe7ee256290439a77c763959bf88"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "744f3a466d8f8ec11ba15fd717e9ce576413824666796b232c1f599e5cae0755"
+    ],
+    "privilege_escalation": [
+     "fc025873f9e3a06a368d5cdaf214d42acc8cf647eafc2a80b962dfdd4de5a1f7"
+    ],
+    "prompt": [
+     "f3cce154ffad03cfa2cfea336402de32ecd5a09677c78deba3ce9dbddb226d46"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "300268aea3cc7ae815a6003d76cbeabdea578a4a8f7c609287785964454ee163"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Palo Alto Networks",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "paloalto",
+    "commands": {
+     "show_arp": "show arp all",
+     "show_config": "show config running",
+     "show_interfaces": "show interfaces all",
+     "show_log": "show log system",
+     "show_routing": "show route",
+     "show_version": "show system info"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 60
+    },
+    "diff_exclusions": {},
+    "display_name": "Palo Alto - SSH - Config (Vector)",
+    "error_patterns": {
+     "patterns": [
+      "Syntax error",
+      "Invalid command",
+      "Error"
+     ]
+    },
+    "os_type": "panos-vector",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "configure"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "quit"
+    ],
+    "privilege_escalation": {
+     "command": "set cli pager off\n set cli config-output-format set\n",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "\\S+#"
+    },
+    "prompt": {
+     "login_pattern": "login as:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+@\\S+>\\s*$",
+      "\\S+@\\S+#\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "paloalto/panos-vector",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "92643308d9c7560450f25eeb9401c68712c99157d86b0d0a2db081860bd90e41"
+    ],
+    "config_mode": [
+     "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    ],
+    "connection": [
+     "d35b18f91ca23016c0a0972df0bde2b73ed674d1011062893af9489d2dd4bff6"
+    ],
+    "diff_exclusions": [
+     "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    ],
+    "error_patterns": [
+     "5ff835c0921c06d36ff8f3c2e6c5108abb3e9fe954ac7095239d1963ae75716b"
+    ],
+    "pagination": [
+     "4ebb2d95b6a7e32a3d978483949cd6d9e550253b986a909c2268e6273031a058"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "82919815a9aa5762b789059dd8b1d77991fd20f8b817fb60c1a9fd471ab10268"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "744f3a466d8f8ec11ba15fd717e9ce576413824666796b232c1f599e5cae0755"
+    ],
+    "privilege_escalation": [
+     "f1d22ac383b7583ad3a0f841bfd37d8df328dd84e175fec933eaa18829a4f5e0"
+    ],
+    "prompt": [
+     "f3cce154ffad03cfa2cfea336402de32ecd5a09677c78deba3ce9dbddb226d46"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "5a7d231b0093fd71ab3ea166bd5a4f3e2d7cd225a96e767ce15a455a51b008d0"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "pfSense",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "pfsense",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {},
+    "display_name": "pfSense - SSH",
+    "error_patterns": {
+     "patterns": [
+      "Error",
+      "Invalid",
+      "Unrecognized"
+     ]
+    },
+    "os_type": "ssh",
+    "pagination": {
+     "enabled": false
+    },
+    "post_disconnect": [],
+    "post_login_commands": [],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": {
+     "command": "su",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "\\S+#"
+    },
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "pfsense/ssh",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "b29c39164b92b990a5feefeea1239ec7876ae9240563b19b046685a3855450a3"
+    ],
+    "config_mode": [
+     "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    ],
+    "connection": [
+     "cd3beded5040a841c9e9e1a5e0091c17fe5d0be89e71f23e6bcfbb1b46f8abb2"
+    ],
+    "diff_exclusions": [
+     "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    ],
+    "error_patterns": [
+     "2b40f8bfb09ac2e23915b13cb31b163ad4a7155ce0e768d14b73a89e8acace7d"
+    ],
+    "pagination": [
+     "5acf3ff77b4420677b5923071f303facaba7a9273a346284a667a275df325146"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "ac6a7531fc41d6436331f8399292704e78f9a4349374b65b1a04cf1d2e0bbf11"
+    ],
+    "privilege_escalation": [
+     "8c9b4fe1bef4f7e585f619d2c0ba2d300da61639e2ac68b241560a15d383e0ce"
+    ],
+    "prompt": [
+     "df7cde2036ddf178fe32d0cbb891bf54f36ae6b4e1ec0a49f35918862d9b9d65"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "3a0cca97991e0e0e54bb1a4b2aed9c6e23312b1ebffe380cafedf1d77c60e08f"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "RAD",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "rad",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {},
+    "display_name": "RAD - SSH",
+    "error_patterns": {
+     "patterns": [
+      "Error",
+      "Invalid",
+      "Unrecognized"
+     ]
+    },
+    "os_type": "ssh",
+    "pagination": {
+     "enabled": false
+    },
+    "post_disconnect": [],
+    "post_login_commands": [],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "rad/ssh",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Ruckus",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "ruckus",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {},
+    "display_name": "Ruckus - SSH - Enable",
+    "error_patterns": {
+     "patterns": [
+      "Invalid",
+      "Error"
+     ]
+    },
+    "os_type": "ssh-enable",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": {
+     "command": "enable",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "\\S+#"
+    },
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "ruckus/ssh-enable",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "b29c39164b92b990a5feefeea1239ec7876ae9240563b19b046685a3855450a3"
+    ],
+    "config_mode": [
+     "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    ],
+    "connection": [
+     "cd3beded5040a841c9e9e1a5e0091c17fe5d0be89e71f23e6bcfbb1b46f8abb2"
+    ],
+    "diff_exclusions": [
+     "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    ],
+    "error_patterns": [
+     "7f24b28be63175cac3917754b40aa215d6f69eed4233b8aa01590ea03a893716"
+    ],
+    "pagination": [
+     "4ebb2d95b6a7e32a3d978483949cd6d9e550253b986a909c2268e6273031a058"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "ac6a7531fc41d6436331f8399292704e78f9a4349374b65b1a04cf1d2e0bbf11"
+    ],
+    "privilege_escalation": [
+     "0795d5e2eb9cb9e3ac0c866b2c438efff92837cd5ee798399c9bb23a38f41205"
+    ],
+    "prompt": [
+     "df7cde2036ddf178fe32d0cbb891bf54f36ae6b4e1ec0a49f35918862d9b9d65"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "6f4c965f63f987f745a1ddaceae1a537549da15062a6d26f1c920d85409cfc1e"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Ruckus",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "ruckus",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {},
+    "display_name": "Ruckus - SSH - No Enable",
+    "error_patterns": {
+     "patterns": [
+      "Invalid",
+      "Error"
+     ]
+    },
+    "os_type": "ssh-noenable",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": null,
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "ruckus/ssh-noenable",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Siemens",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "siemens",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {},
+    "display_name": "Siemens RuggedCom ROS - SSH",
+    "error_patterns": {
+     "patterns": [
+      "Error",
+      "Invalid",
+      "Unrecognized"
+     ]
+    },
+    "os_type": "ruggedcom-ssh",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "terminal length 0"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": {
+     "command": "enable",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "\\S+#"
+    },
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "siemens/ruggedcom-ssh",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "b29c39164b92b990a5feefeea1239ec7876ae9240563b19b046685a3855450a3"
+    ],
+    "config_mode": [
+     "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    ],
+    "connection": [
+     "cd3beded5040a841c9e9e1a5e0091c17fe5d0be89e71f23e6bcfbb1b46f8abb2"
+    ],
+    "diff_exclusions": [
+     "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    ],
+    "error_patterns": [
+     "2b40f8bfb09ac2e23915b13cb31b163ad4a7155ce0e768d14b73a89e8acace7d"
+    ],
+    "pagination": [
+     "4ebb2d95b6a7e32a3d978483949cd6d9e550253b986a909c2268e6273031a058"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "496cf96c4a5ab9c866957fb3d63ad10886f0ca5b4c1d90fac5253256eca513a4"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "ac6a7531fc41d6436331f8399292704e78f9a4349374b65b1a04cf1d2e0bbf11"
+    ],
+    "privilege_escalation": [
+     "0795d5e2eb9cb9e3ac0c866b2c438efff92837cd5ee798399c9bb23a38f41205"
+    ],
+    "prompt": [
+     "df7cde2036ddf178fe32d0cbb891bf54f36ae6b4e1ec0a49f35918862d9b9d65"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "2fb50a44a82ab6da20158ec372cfdb7f90202b00f1917d25233c7a9508f9b4b2"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "SonicWall",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "sonicwall",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show config running",
+     "show_interfaces": "show interfaces",
+     "show_log": "show log",
+     "show_routing": "show route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {
+     "global": [],
+     "show_config": [
+      {
+       "flags": "i",
+       "pattern": "^Time:\\s*.*$"
+      }
+     ]
+    },
+    "display_name": "SonicWall - SSH",
+    "error_patterns": {
+     "patterns": [
+      "Error",
+      "Invalid"
+     ]
+    },
+    "os_type": "ssh",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "terminal pager disable"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": {
+     "command": "enable",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "\\S+#"
+    },
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "sonicwall/ssh",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "20ef69b11e74b1712bd95c45f129f8c0a42505ad015685598c081703b5ef8e7a"
+    ],
+    "config_mode": [
+     "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    ],
+    "connection": [
+     "cd3beded5040a841c9e9e1a5e0091c17fe5d0be89e71f23e6bcfbb1b46f8abb2"
+    ],
+    "diff_exclusions": [
+     "c98758fd7fe1724a451f9151a9d7bfeab48e6f2f865135b8b54c7efec128ab4e"
+    ],
+    "error_patterns": [
+     "ffd919e852cbb98b500f662b6c704db6dc284c4897c7639de931d5c585c8a017"
+    ],
+    "pagination": [
+     "4ebb2d95b6a7e32a3d978483949cd6d9e550253b986a909c2268e6273031a058"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "9a6333fc74faaa719aa2a826678d4eb62d7085cd59bd0ebbe9af5a4606def671"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "ac6a7531fc41d6436331f8399292704e78f9a4349374b65b1a04cf1d2e0bbf11"
+    ],
+    "privilege_escalation": [
+     "0795d5e2eb9cb9e3ac0c866b2c438efff92837cd5ee798399c9bb23a38f41205"
+    ],
+    "prompt": [
+     "df7cde2036ddf178fe32d0cbb891bf54f36ae6b4e1ec0a49f35918862d9b9d65"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "450cebe79f5a4d870705b510d61b83bbb77c9a0ff45bae5e1b33d6b8265d8cfd"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "SonicWall",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "sonicwall",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show config running",
+     "show_interfaces": "show interfaces",
+     "show_log": "show log",
+     "show_routing": "show route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {
+     "global": [],
+     "show_config": [
+      {
+       "flags": "i",
+       "pattern": "^Time:\\s*.*$"
+      }
+     ]
+    },
+    "display_name": "SonicWall - SSH - Confirm Banner",
+    "error_patterns": {
+     "patterns": [
+      "Error",
+      "Invalid"
+     ]
+    },
+    "os_type": "ssh-confirm",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "terminal pager disable"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": {
+     "command": "enable",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "\\S+#"
+    },
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "sonicwall/ssh-confirm",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "20ef69b11e74b1712bd95c45f129f8c0a42505ad015685598c081703b5ef8e7a"
+    ],
+    "config_mode": [
+     "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    ],
+    "connection": [
+     "cd3beded5040a841c9e9e1a5e0091c17fe5d0be89e71f23e6bcfbb1b46f8abb2"
+    ],
+    "diff_exclusions": [
+     "c98758fd7fe1724a451f9151a9d7bfeab48e6f2f865135b8b54c7efec128ab4e"
+    ],
+    "error_patterns": [
+     "ffd919e852cbb98b500f662b6c704db6dc284c4897c7639de931d5c585c8a017"
+    ],
+    "pagination": [
+     "4ebb2d95b6a7e32a3d978483949cd6d9e550253b986a909c2268e6273031a058"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "9a6333fc74faaa719aa2a826678d4eb62d7085cd59bd0ebbe9af5a4606def671"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "ac6a7531fc41d6436331f8399292704e78f9a4349374b65b1a04cf1d2e0bbf11"
+    ],
+    "privilege_escalation": [
+     "0795d5e2eb9cb9e3ac0c866b2c438efff92837cd5ee798399c9bb23a38f41205"
+    ],
+    "prompt": [
+     "df7cde2036ddf178fe32d0cbb891bf54f36ae6b4e1ec0a49f35918862d9b9d65"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "450cebe79f5a4d870705b510d61b83bbb77c9a0ff45bae5e1b33d6b8265d8cfd"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Ubiquiti",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "ubiquiti",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {
+     "global": [],
+     "show_config": [
+      {
+       "flags": "i",
+       "pattern": "^#\\s*(Last (modified|changed|saved)|Configuration generated).*$"
+      }
+     ]
+    },
+    "display_name": "Ubiquiti UniFi - SSH",
+    "error_patterns": {
+     "patterns": [
+      "Error",
+      "Invalid",
+      "Unrecognized"
+     ]
+    },
+    "os_type": "unifi-ssh",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "terminal length 0"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": {
+     "command": "enable",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "\\S+#"
+    },
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "ubiquiti/unifi-ssh",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "b29c39164b92b990a5feefeea1239ec7876ae9240563b19b046685a3855450a3"
+    ],
+    "config_mode": [
+     "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    ],
+    "connection": [
+     "cd3beded5040a841c9e9e1a5e0091c17fe5d0be89e71f23e6bcfbb1b46f8abb2"
+    ],
+    "diff_exclusions": [
+     "2d5cd559faff4f17f9a25e08ecc7f451333c60e632289dded7ce54c06ab2a9bc"
+    ],
+    "error_patterns": [
+     "2b40f8bfb09ac2e23915b13cb31b163ad4a7155ce0e768d14b73a89e8acace7d"
+    ],
+    "pagination": [
+     "4ebb2d95b6a7e32a3d978483949cd6d9e550253b986a909c2268e6273031a058"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "496cf96c4a5ab9c866957fb3d63ad10886f0ca5b4c1d90fac5253256eca513a4"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "ac6a7531fc41d6436331f8399292704e78f9a4349374b65b1a04cf1d2e0bbf11"
+    ],
+    "privilege_escalation": [
+     "0795d5e2eb9cb9e3ac0c866b2c438efff92837cd5ee798399c9bb23a38f41205"
+    ],
+    "prompt": [
+     "df7cde2036ddf178fe32d0cbb891bf54f36ae6b4e1ec0a49f35918862d9b9d65"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "62728cf3f03d6a0ff5216c8432a1b1eca83360a6ea9f3611e31c92037b80d71d"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "VyOS",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "vyos",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interfaces",
+     "show_log": "show logging",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {
+     "global": [],
+     "show_config": [
+      {
+       "flags": "i",
+       "pattern": "^#\\s*(Last (modified|changed|saved)|Configuration generated).*$"
+      }
+     ]
+    },
+    "display_name": "VyOS - SSH",
+    "error_patterns": {
+     "patterns": [
+      "Error",
+      "Invalid",
+      "Unrecognized"
+     ]
+    },
+    "os_type": "ssh",
+    "pagination": {
+     "enabled": false
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "set terminal length 0"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": {
+     "command": "configure",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "\\S+#"
+    },
+    "prompt": {
+     "login_pattern": "login:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$",
+      "\\S+>\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "vyos/ssh",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "b29c39164b92b990a5feefeea1239ec7876ae9240563b19b046685a3855450a3"
+    ],
+    "config_mode": [
+     "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    ],
+    "connection": [
+     "cd3beded5040a841c9e9e1a5e0091c17fe5d0be89e71f23e6bcfbb1b46f8abb2"
+    ],
+    "diff_exclusions": [
+     "2d5cd559faff4f17f9a25e08ecc7f451333c60e632289dded7ce54c06ab2a9bc"
+    ],
+    "error_patterns": [
+     "2b40f8bfb09ac2e23915b13cb31b163ad4a7155ce0e768d14b73a89e8acace7d"
+    ],
+    "pagination": [
+     "5acf3ff77b4420677b5923071f303facaba7a9273a346284a667a275df325146"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "3f581d4982a91bd44732579396d4f7a887d61c2ed4d5c80907489a98169aa0ba"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "ac6a7531fc41d6436331f8399292704e78f9a4349374b65b1a04cf1d2e0bbf11"
+    ],
+    "privilege_escalation": [
+     "f60bbb951535fe07dc27b5f0543e8edd6e149de5e6d69b593df7736f0c6d2625"
+    ],
+    "prompt": [
+     "cc7cdb593de8c82fc5f26c22222b85fac2fca12cc17ade4992aed6f38fb08342"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "303970da08d468a71e3d403eba5cc2ad5cc6301912db2b141bb34f1dbd25b375"
+   ],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Windows",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "windows",
+    "commands": null,
+    "config_mode": null,
+    "connection": {
+     "color_depth": 32,
+     "disable_audio": false,
+     "dpi": 96,
+     "enable_audio_input": false,
+     "enable_desktop_composition": true,
+     "enable_font_smoothing": true,
+     "enable_full_window_drag": true,
+     "enable_menu_animations": true,
+     "enable_theming": true,
+     "enable_wallpaper": true,
+     "force_lossless": true,
+     "ignore_cert": true,
+     "port": 3389,
+     "protocol": "rdp",
+     "protocols": [
+      "rdp"
+     ],
+     "security": "any",
+     "server_layout": "en-us-qwerty",
+     "timezone": "UTC"
+    },
+    "diff_exclusions": {},
+    "display_name": "High-Performance / CAD RDP",
+    "error_patterns": null,
+    "os_type": "rdp-cad",
+    "pagination": null,
+    "post_disconnect": [],
+    "post_login_commands": null,
+    "pre_connect": [],
+    "pre_logout_commands": null,
+    "privilege_escalation": null,
+    "prompt": null,
+    "protocol": "rdp"
+   },
+   "edition": "pro",
+   "key": "windows/rdp-cad",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Windows",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "windows",
+    "commands": null,
+    "config_mode": null,
+    "connection": {
+     "color_depth": 16,
+     "disable_audio": true,
+     "dpi": 96,
+     "enable_desktop_composition": false,
+     "enable_font_smoothing": false,
+     "enable_full_window_drag": false,
+     "enable_menu_animations": false,
+     "enable_theming": false,
+     "enable_wallpaper": false,
+     "ignore_cert": true,
+     "port": 3389,
+     "protocol": "rdp",
+     "protocols": [
+      "rdp"
+     ],
+     "security": "any",
+     "server_layout": "en-us-qwerty"
+    },
+    "diff_exclusions": {},
+    "display_name": "Low-Bandwidth / WAN RDP",
+    "error_patterns": null,
+    "os_type": "rdp-low-bandwidth",
+    "pagination": null,
+    "post_disconnect": [],
+    "post_login_commands": null,
+    "pre_connect": [],
+    "pre_logout_commands": null,
+    "privilege_escalation": null,
+    "prompt": null,
+    "protocol": "rdp"
+   },
+   "edition": "pro",
+   "key": "windows/rdp-low-bandwidth",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Windows",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "windows",
+    "commands": null,
+    "config_mode": null,
+    "connection": {
+     "color_depth": 32,
+     "disable_audio": false,
+     "dpi": 96,
+     "enable_font_smoothing": true,
+     "enable_theming": true,
+     "ignore_cert": true,
+     "port": 3389,
+     "protocol": "rdp",
+     "protocols": [
+      "rdp"
+     ],
+     "security": "any",
+     "server_layout": "en-us-qwerty"
+    },
+    "diff_exclusions": {},
+    "display_name": "RemoteApp Baseline (Seamless)",
+    "error_patterns": null,
+    "os_type": "rdp-remoteapp",
+    "pagination": null,
+    "post_disconnect": [],
+    "post_login_commands": null,
+    "pre_connect": [],
+    "pre_logout_commands": null,
+    "privilege_escalation": null,
+    "prompt": null,
+    "protocol": "rdp"
+   },
+   "edition": "pro",
+   "key": "windows/rdp-remoteapp",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "Windows",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x)"
+   ],
+   "content": {
+    "brand": "windows",
+    "commands": null,
+    "config_mode": null,
+    "connection": {
+     "color_depth": 32,
+     "disable_audio": false,
+     "dpi": 96,
+     "enable_audio_input": false,
+     "enable_desktop_composition": true,
+     "enable_font_smoothing": true,
+     "enable_full_window_drag": true,
+     "enable_menu_animations": false,
+     "enable_printing": false,
+     "enable_theming": true,
+     "enable_wallpaper": true,
+     "ignore_cert": true,
+     "port": 3389,
+     "protocol": "rdp",
+     "protocols": [
+      "rdp"
+     ],
+     "security": "any",
+     "server_layout": "en-us-qwerty",
+     "timezone": "UTC"
+    },
+    "diff_exclusions": {},
+    "display_name": "Standard Office RDP (Full Desktop)",
+    "error_patterns": null,
+    "os_type": "rdp-standard",
+    "pagination": null,
+    "post_disconnect": [],
+    "post_login_commands": null,
+    "pre_connect": [],
+    "pre_logout_commands": null,
+    "privilege_escalation": null,
+    "prompt": null,
+    "protocol": "rdp"
+   },
+   "edition": "pro",
+   "key": "windows/rdp-standard",
+   "min_app_version": "2.1.2",
+   "previous_hashes": [],
+   "revision": 1
+  },
+  {
+   "brand_display_name": "ZTE",
+   "changelog": [
+    "Initial catalog revision (as installed by MikroWizard 2.1.x); privilege escalation in the current format"
+   ],
+   "content": {
+    "brand": "zte",
+    "commands": {
+     "show_arp": "show arp",
+     "show_config": "show running-config",
+     "show_interfaces": "show interface brief",
+     "show_log": "show log",
+     "show_routing": "show ip route",
+     "show_version": "show version"
+    },
+    "config_mode": null,
+    "connection": {
+     "default_port_ssh": 22,
+     "default_port_telnet": 23,
+     "protocols": [
+      "ssh",
+      "telnet"
+     ],
+     "timeout": 30
+    },
+    "diff_exclusions": {},
+    "display_name": "ZTE ZXR10",
+    "error_patterns": {
+     "patterns": [
+      "% Invalid",
+      "% Unrecognized"
+     ]
+    },
+    "os_type": "zxr10",
+    "pagination": {
+     "enabled": true,
+     "key": "space",
+     "pattern": "--More--"
+    },
+    "post_disconnect": [],
+    "post_login_commands": [
+     "terminal length 0"
+    ],
+    "pre_connect": [],
+    "pre_logout_commands": [
+     "exit"
+    ],
+    "privilege_escalation": {
+     "command": "enable",
+     "password_prompt": "[Pp]assword:?",
+     "success_pattern": "\\S+#"
+    },
+    "prompt": {
+     "login_pattern": "Username:",
+     "password_pattern": "Password:",
+     "patterns": [
+      "\\S+#\\s*$"
+     ]
+    },
+    "protocol": "ssh"
+   },
+   "edition": "free",
+   "key": "zte/zxr10",
+   "min_app_version": "2.1.2",
+   "previous_field_hashes": {
+    "commands": [
+     "56b767fa1ef24481a133ac790393b89e28f7f8b598da21abf70a97cb8ff85105"
+    ],
+    "config_mode": [
+     "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    ],
+    "connection": [
+     "b2dfc86f5bc794c04c78d3286f34c84c4bd38ae941d9fa2b0c640bc19a3d9406"
+    ],
+    "diff_exclusions": [
+     "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    ],
+    "error_patterns": [
+     "ab6ee7d6b9797561a07c6b77e68ae88dd9118a2be089acbc032bf90e1e13ddb0"
+    ],
+    "pagination": [
+     "4ebb2d95b6a7e32a3d978483949cd6d9e550253b986a909c2268e6273031a058"
+    ],
+    "post_disconnect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "post_login_commands": [
+     "496cf96c4a5ab9c866957fb3d63ad10886f0ca5b4c1d90fac5253256eca513a4"
+    ],
+    "pre_connect": [
+     "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    ],
+    "pre_logout_commands": [
+     "ac6a7531fc41d6436331f8399292704e78f9a4349374b65b1a04cf1d2e0bbf11"
+    ],
+    "privilege_escalation": [
+     "0795d5e2eb9cb9e3ac0c866b2c438efff92837cd5ee798399c9bb23a38f41205"
+    ],
+    "prompt": [
+     "8c7903fe41b00da27e77ebcf75f03344bca65c0365ec2723d52ee35940665fce"
+    ],
+    "protocol": [
+     "ee8e7f87a8e52166ff96301f1aa67c06980a22f9d1e295a7ed8cb0a1e1c76e22"
+    ]
+   },
+   "previous_hashes": [
+    "b7ff59952937f990c7e4191aa7d765c167bdd3e463e69bfa370f0852057bae28"
+   ],
+   "revision": 1
+  }
+ ]
+}

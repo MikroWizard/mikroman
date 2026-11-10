@@ -5,6 +5,7 @@ import datetime
 import logging
 from peewee import fn
 from libs.db.db_pam import DeviceTemplates
+from libs import template_catalog
 from libs.db.db_device import Devices
 from playhouse.shortcuts import model_to_dict
 
@@ -137,6 +138,9 @@ class TemplateService:
             return False
 
         is_sys = getattr(template, 'is_system', False)
+        if is_sys:
+            # history entry first (revert from the Template Manager; no-op without migration 067)
+            template_catalog.record_manual_edit(template, data.get('_changed_by') or 'admin')
 
         # For user-created templates only, allow changing brand, os_type, display_name
         if not is_sys:

@@ -13,7 +13,7 @@ from libs.db import db,db_permissions,db_user_group_perm,db_groups,db_sysconfig,
 import json
 import uuid
 import datetime
-from libs import webutil,account
+from libs import webutil,account,user_guard,login_throttle
 from libs.webutil import app, login_required, get_myself , buildResponse
 from libs.mschap3.mschap import nt_password_hash
 try:
@@ -40,11 +40,24 @@ def login():
     if not username or not password:
         return buildResponse({"status":"failed", "err":"Wrong user/pass"}, 200)
 
+    # failed-login throttling (per IP + username and per IP); fail-open without Redis
+    client_ip = webutil.get_ip()
+    rds = app.config.get("SESSION_REDIS")
+    wait = login_throttle.blocked_for(rds, client_ip, username)
+    if wait:
+        mins = max(1, (wait + 59) // 60)
+        return buildResponse({"status":"failed",
+                              "err":"Too many failed login attempts. Try again in {} minute(s).".format(mins)}, 200)
+
     u = db.get_user_by_username(username)
-    if not u or not account.check_password(u.password, password) or u.role in ['disabled', 'customer_inactive']:
+    # unknown user: still run one password hash check, so the reply time does not reveal
+    # whether the username exists
+    password_ok = account.check_password(u.password, password) if u else account.check_password(account.DUMMY_HASH, password)
+    if not u or not password_ok or u.role in ['disabled', 'customer_inactive']:
         # error
+        login_throttle.failure(rds, client_ip, username)
         try:
-            db_syslog.add_syslog_event(u.id, "User login","Failed login",webutil.get_ip(),webutil.get_agent(),json.dumps({"username":username,'reason':'wrong password'}))
+            db_syslog.add_syslog_event(u.id if u else None, "User login","Failed login",webutil.get_ip(),webutil.get_agent(),json.dumps({"username":username,'reason':'wrong password' if u else 'unknown user'}))
         except:
             pass
         return buildResponse({"status":"failed", "err":"Wrong user/pass"}, 200)
@@ -67,8 +80,13 @@ def login():
         if ISPRO:
             prores=utilpro.do_login(res,input)
             if prores:
+                if isinstance(prores, dict) and prores.get("status") == "failed":
+                    login_throttle.failure(rds, client_ip, username)     # wrong OTP
+                elif isinstance(prores, dict) and prores.get("uid"):
+                    login_throttle.success(rds, client_ip, username)     # logged in (OTP ok / no OTP)
                 return buildResponse(prores, 200)
         account.build_session(u, is_permanent=input.get('remember', True))
+        login_throttle.success(rds, client_ip, username)
         db_syslog.add_syslog_event(u.id, "User login","Successful login",webutil.get_ip(),webutil.get_agent(),json.dumps({"username":username}))
         return buildResponse(res, 200)
 
@@ -97,6 +115,15 @@ def create_user():
         msg = "User Name already Taken: {}".format(username)
         resp={"status":"failed","err":msg}
         return buildResponse(resp, 200)
+
+    # no role / permission above the creator's own (superuser and the default admin: no limit)
+    me = get_myself()
+    guard_err = user_guard.check_assign_role(me, role, webutil.GUARDED_ADMIN_ID)
+    if guard_err:
+        return buildResponse({"status":"failed","err":guard_err}, 200)
+    adminperms, capped = user_guard.cap_perms(me, adminperms, webutil.GUARDED_ADMIN_ID)
+    if capped:
+        log.warning("create_user: permissions capped to the creator's level: {}".format(capped))
 
     err = account.check_password_validity(passwd)
     if err:
@@ -156,6 +183,9 @@ def user_delete():
         msg = "User not found: {}".format(uid)
         resp={"status":"failed","err":msg}
         return buildResponse(resp, 200)
+    guard_err = user_guard.check_target(get_myself(), u, webutil.GUARDED_ADMIN_ID)
+    if guard_err:
+        return buildResponse({"status":"failed","err":guard_err}, 200)
 
     u.delete_instance(recursive=True)
     if ISPRO:
@@ -198,6 +228,7 @@ def user_change_password():
     
     u.hash = nthashhex
     u.save()
+    webutil.session_password_changed(u)   # this session stays, other sessions of the user end
     db_syslog.add_syslog_event(webutil.get_myself(), "User Managment", "Change Password", webutil.get_ip(), webutil.get_agent(), json.dumps(input))
     resp={"status":"success"}
     return buildResponse(resp, 200)
@@ -296,6 +327,20 @@ def user_edit():
         msg = "User Name already Taken: {}".format(username)
         resp={"status":"failed","err":msg}
         return buildResponse(resp, 200)
+
+    # no escalation (superuser and the default admin: no limit). The guarded default admin's
+    # role / permissions stay untouchable as before (checked below).
+    me = get_myself()
+    if user_guard.keeps_own_role(me, u, webutil.GUARDED_ADMIN_ID):
+        role, adminperms = None, None       # own role / permissions are not changed
+    guard_err = (user_guard.check_target(me, u, webutil.GUARDED_ADMIN_ID)
+                 or (str(u.id) != webutil.GUARDED_ADMIN_ID
+                     and user_guard.check_assign_role(me, role, webutil.GUARDED_ADMIN_ID)))
+    if guard_err:
+        return buildResponse({"status":"failed","err":guard_err}, 200)
+    adminperms, capped = user_guard.cap_perms(me, adminperms, webutil.GUARDED_ADMIN_ID)
+    if capped:
+        log.warning("user_edit: permissions capped to the editor's level: {}".format(capped))
     if username:
         u.username = username
     if fname:
@@ -327,6 +372,8 @@ def user_edit():
         u.password = newpass
         u.hash = nthashhex
     u.save()
+    if passwd and passwd!="":
+        webutil.session_password_changed(u)   # editing yourself keeps your own session
 
     # Deactivation revokes PAM access (free the seat + kill active terminal sessions)
     if ISPRO and u.role == 'disabled':
@@ -352,6 +399,36 @@ def user_edit():
     db_syslog.add_syslog_event(webutil.get_myself(), "User Managment","Edit", webutil.get_ip(),webutil.get_agent(),json.dumps(input))
     return buildResponse(resp, 200)
     
+
+@app.route('/api/user/login_locks', methods=['POST'])
+@login_required(role='admin', perm={'users':'read'})
+def user_login_locks():
+    """Current panel login lockouts (failed-login throttling)."""
+    locks = login_throttle.list_locks(app.config.get("SESSION_REDIS"))
+    return buildResponse({"status":"success", "locks": locks}, 200)
+
+
+@app.route('/api/user/unlock_login', methods=['POST'])
+@login_required(role='admin', perm={'users':'write'})
+def user_unlock_login():
+    """Unlock failed-login throttling for a username (all IPs) and/or an IP, for the panel
+    and RADIUS (router / terminal logins). {"username": "...", "ip": "..."} or {"all": true}"""
+    input = request.json or {}
+    username = (input.get('username') or '').strip()
+    ip = (input.get('ip') or '').strip()
+    everything = input.get('all') is True
+    if not username and not ip and not everything:
+        return buildResponse({"status":"failed", "err":"username or ip required"}, 200)
+    try:
+        removed = login_throttle.unlock(app.config.get("SESSION_REDIS"), username=username or None,
+                                        ip=ip or None, everything=everything)
+    except Exception as e:
+        log.error("unlock_login failed: {}".format(e))
+        return buildResponse({"status":"failed", "err":"Unlock failed"}, 200)
+    db_syslog.add_syslog_event(webutil.get_myself(), "User Managment", "Unlock Login", webutil.get_ip(),
+                               webutil.get_agent(), json.dumps({"username": username, "ip": ip, "all": everything}))
+    return buildResponse({"status":"success", "removed": removed}, 200)
+
 
 @app.route('/api/users/list' ,methods=['POST'])
 @login_required(role='admin',perm={'users':'read'})

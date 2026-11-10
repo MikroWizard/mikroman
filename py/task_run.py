@@ -126,8 +126,14 @@ def run_snippets(devices, snippet, template_key=None, user_task_id=None, snippet
         })
         ok = r.get("status") == "ok"
         result = (r.get("output_raw") or r.get("output_normalized") or "executed successfully") if ok else False
-        return {"id": dev_id, "devid": dev_id, "devip": devip, "devname": devname, "status": ok, "state": ok,
-                "result": result, "error": None if ok else r.get("error")}
+        res = {"id": dev_id, "devid": dev_id, "devip": devip, "devname": devname, "status": ok, "state": ok,
+               "result": result, "error": None if ok else r.get("error")}
+        errors = (r.get("command_errors") or []) if ok else []
+        if errors:
+            # the commands ran, but the device reported errors for some of them
+            res.update({"status": False, "state": False,
+                        "error": "Completed with errors ({}): {}".format(len(errors), " | ".join(errors))})
+        return res
 
     def skipped(dev_id, reason, message):
         return {"id": dev_id, "devid": dev_id, "status": False, "state": False, "result": False,
@@ -138,6 +144,8 @@ def run_snippets(devices, snippet, template_key=None, user_task_id=None, snippet
         for qres in res:
             if "result" in qres and not qres["result"] and not qres.get("skipped"):
                 util.log_alert("run_snippet", qres.get("id", 0), "Run Snippet failed")
+            elif qres.get("result") and not qres.get("state"):
+                util.log_alert("run_snippet", qres.get("id", 0), "Run Snippet completed with errors")
     return res
 
 

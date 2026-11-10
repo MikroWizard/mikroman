@@ -7,8 +7,14 @@
 # Author: Tomi.Mickelsson@iki.fi & Edited by sepehr.ha@gmail.com
 
 import os
+import datetime
+import subprocess
 import config
 from urllib.parse import quote
+
+# Migration output is kept here: during an update the restart patch below kills the
+# updater before it can log what the migration printed (applied migrations / errors).
+MIGRATE_LOG = "/conf/logs/migrate.log"
 
 
 if config.DATABASE_HOST.startswith("/"):
@@ -27,11 +33,27 @@ else:
 
 # print(cmd)
 
-ret = os.system(cmd)
+res = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+ret = res.returncode
+output = res.stdout or ""
+if getattr(config, "DATABASE_PASSWORD", ""):
+    # never write the DB password to a log, even if a tool echoes the connection string
+    output = output.replace(config.DATABASE_PASSWORD, "***").replace(quote(config.DATABASE_PASSWORD), "***")
+print(output, end="")
 if ret:
     print("migrate ERROR", ret)
 else:
     print("migrate OK")
+try:
+    os.makedirs(os.path.dirname(MIGRATE_LOG), exist_ok=True)
+    with open(MIGRATE_LOG, "a") as f:
+        f.write("==== {} migrate {} (exit {})\n".format(
+            datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "ERROR" if ret else "OK", ret))
+        f.write(output)
+        if output and not output.endswith("\n"):
+            f.write("\n")
+except Exception as e:
+    print("Could not write {}: {}".format(MIGRATE_LOG, e))
 
 # Install updated requirements before any restart — this ensures
 # packages (e.g. netmiko) are available when the server comes back up,

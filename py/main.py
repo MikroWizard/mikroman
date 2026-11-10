@@ -19,6 +19,7 @@ from api import api_executions
 from api import api_pam
 from api import api_non_mikrotik
 from api import api_ssl
+from api import api_template_catalog
 try:
     from api import api_pro_api
     from api import api_pro_api2

@@ -12,6 +12,7 @@ from libs import compat_runner
 from libs import task_tracker
 from libs import job_control
 from libs import config_runner as cfg_runner
+from libs import device_edit
 import config
 import time
 import os
@@ -57,6 +58,45 @@ SOCKET_TIMEOUT = getattr(config, "SOCKET_SCAN_TIMEOUT", 0.2)
 # only where mac is non-empty.  ON CONFLICT must repeat that predicate to target
 # the partial index instead of a full column constraint.
 MAC_CONFLICT_WHERE = (Devices.mac.is_null(False) & (Devices.mac != ''))
+
+
+def _guard_mac_moves(mikrotiks, scan_results, scan_user, scan_pass):
+    """The scan upserts devices by MAC and moves a known MAC to the scanned IP/port/ssl while
+    keeping its stored credentials. A host that reports another device's MAC could then
+    receive that device's credentials from the pollers. Move a known device to a different
+    IP only when its stored credentials are the ones used for this scan (the host has seen
+    them anyway); otherwise keep the device unchanged and say so in the scan result.
+    New devices and rescans at the same IP are unchanged. A DB error keeps the old behaviour."""
+    try:
+        macs = [d['mac'] for d in mikrotiks if d.get('mac')]
+        if not macs:
+            return mikrotiks
+        existing = {d.mac: d for d in Devices.select().where((Devices.mac << macs) & MAC_CONFLICT_WHERE)}
+    except Exception as e:
+        log.warning(f"Scan MAC check skipped: {e}")
+        return mikrotiks
+    keep = []
+    for d in mikrotiks:
+        ex = existing.get(d.get('mac'))
+        if ex is None or (ex.ip or '') == d.get('ip'):
+            keep.append(d)
+            continue
+        try:
+            opts = util.build_api_options(ex)
+            same = opts.get('username') == scan_user and opts.get('password') == scan_pass
+        except Exception:
+            same = False
+        if same:
+            keep.append(d)
+            continue
+        log.warning(f"Scan: {d.get('ip')} reports MAC {d.get('mac')} of device {ex.id} ({ex.ip}); "
+                    f"not moved because the stored credentials differ")
+        for r in scan_results:
+            if r.get('ip') == d.get('ip'):
+                r['added'] = False
+                r['faileres'] = ("MAC already registered to device '{}' at {}; not moved because its "
+                                 "stored credentials differ. Edit that device to change its IP.").format(ex.name, ex.ip)
+    return keep
 
 import logging
 log = logging.getLogger("bgtasks")
@@ -361,7 +401,9 @@ def _backup_skipped(dev_id, reason, message):
     return {"id": dev_id, "devid": dev_id, "devip": "", "status": False, "state": False, "skipped": reason,
             "cancelled": reason == job_control.SKIP_CANCELLED, "reason": message}
 
-def _create_default_connections(mikrotiks):
+def _create_default_connections(mikrotiks, cli=None):
+    """api / ssh (or telnet) / webfig connection rows of added MikroTik devices that have none.
+    cli: {mac: (protocol, port)} terminal protocol chosen in the add form (default ssh, 22)."""
     try:
         macs = [d['mac'] for d in mikrotiks]
         inserted_devices = list(Devices.select().where(Devices.mac.in_(macs)))
@@ -375,14 +417,50 @@ def _create_default_connections(mikrotiks):
             # API connection (MikroTik default)
             if not DeviceConnections.select().where(DeviceConnections.device_id == dev.id, DeviceConnections.protocol == 'api').exists():
                 DeviceConnections.create(device_id=dev.id, protocol='api', port=api_port, auth_mode='credential', is_default=True, created=now, modified=now)
-            # Default SSH
-            if not DeviceConnections.select().where(DeviceConnections.device_id == dev.id, DeviceConnections.protocol == 'ssh').exists():
-                DeviceConnections.create(device_id=dev.id, protocol='ssh', port=22, auth_mode='credential', is_default=False, created=now, modified=now)
+            # Default terminal: SSH unless Telnet was chosen (one of them; an existing one is kept)
+            cli_proto, cli_port = (cli or {}).get(dev.mac) or ('ssh', 22)
+            if not DeviceConnections.select().where(DeviceConnections.device_id == dev.id, DeviceConnections.protocol << ['ssh', 'telnet']).exists():
+                DeviceConnections.create(device_id=dev.id, protocol=cli_proto, port=cli_port, auth_mode='credential', is_default=False, created=now, modified=now)
             # Default WebFig
             if not DeviceConnections.select().where(DeviceConnections.device_id == dev.id, DeviceConnections.protocol == 'webfig').exists():
                 DeviceConnections.create(device_id=dev.id, protocol='webfig', port=80, auth_mode='credential', is_default=False, created=now, modified=now)
     except Exception as e:
         log.error(f"Error creating DeviceConnections for bulk added devices: {e}")
+
+
+def _finish_added_devices(mikrotiks, extras=None):
+    """Every MikroTik added (or found again) by the IP scan or the single / CSV add: connection
+    rows (API, SSH or Telnet, WebFig), default PAM credentials when it has none, and the groups
+    chosen in the form. Adds only: nothing an admin set is changed.
+    extras: {mac: {'group_ids', 'protocol', 'connection_port'}}."""
+    if not mikrotiks:
+        return
+    extras = extras or {}
+    cli = {}
+    for mac, ex in extras.items():
+        proto = ex.get('protocol') if ex.get('protocol') in ('ssh', 'telnet') else 'ssh'
+        try:
+            port = int(ex.get('connection_port') or 0)
+        except (TypeError, ValueError):
+            port = 0
+        cli[mac] = (proto, port if 0 < port < 65536 else (23 if proto == 'telnet' else 22))
+    _create_default_connections(mikrotiks, cli)
+    try:
+        macs = [d['mac'] for d in mikrotiks if d.get('mac')]
+        devs = list(Devices.select().where(Devices.mac << macs)) if macs else []
+    except Exception as e:
+        log.error(f"Added devices not completed: {e}")
+        return
+    by_groups = {}
+    for dev in devs:
+        try:
+            device_edit.ensure_device_credentials(dev)
+        except Exception as e:
+            log.error(f"Default credentials of device {dev.id} not created: {e}")
+        key = tuple(device_edit.parse_group_ids((extras.get(dev.mac) or {}).get('group_ids')))
+        by_groups.setdefault(key, []).append(dev.id)
+    for gids, ids in by_groups.items():
+        device_edit.assign_groups(ids, list(gids))
 
 
 def extract_device_from_macdiscovery(line):
@@ -472,6 +550,7 @@ def scan_with_ip(*args, **kwargs):
         end_ip=kwargs.get('end',False)
         username=kwargs.get('username',False)
         password=kwargs.get('password',False)
+        scan_group_ids=device_edit.parse_group_ids(kwargs.get('group_ids'))
         if not start_ip or not end_ip:
             task.status=0
             task.save()
@@ -678,6 +757,10 @@ def scan_with_ip(*args, **kwargs):
         database.execute_sql("SELECT setval('devices_id_seq', MAX(id), true) FROM devices")
         
         if mikrotiks:
+            mikrotiks = _guard_mac_moves(mikrotiks, scan_results,
+                                         username if username else default_user,
+                                         password if password else default_pass)
+        if mikrotiks:
             try:
                 log.info(f"Inserting/Updating {len(mikrotiks)} devices in database")
                 # Using on_conflict to update existing devices if they have the same MAC
@@ -691,7 +774,9 @@ def scan_with_ip(*args, **kwargs):
                                                                 Devices.ssl:EXCLUDED.ssl,
                                                                 Devices.port:EXCLUDED.port,
                                                                 Devices.device_type:EXCLUDED.device_type}).execute()
+                scan_saved=True
             except Exception as e:
+                scan_saved=False
                 if "ON CONFLICT DO UPDATE command cannot affect row a second time" in str(e):
                     log.warning("Duplicate MACs found in the same scan batch. This usually means multiple IPs for the same device. Retrying with deduplication...")
                     unique_mikrotiks = {dev['mac']: dev for dev in mikrotiks}
@@ -705,10 +790,14 @@ def scan_with_ip(*args, **kwargs):
                                                                 Devices.ssl:EXCLUDED.ssl,
                                                                 Devices.port:EXCLUDED.port,
                                                                 Devices.device_type:EXCLUDED.device_type}).execute()
+                    scan_saved=True
                 else:
                     log.error(f"Database insertion failed: {e}")
                     task.status=0
                     task.save()
+            if scan_saved:
+                # connections, default credentials and the groups chosen in the form
+                _finish_added_devices(mikrotiks, {d['mac']: {'group_ids': scan_group_ids} for d in mikrotiks if d.get('mac')})
         task.status=0
         task.save()
         return True
@@ -795,8 +884,20 @@ def _snippet_one(dev_id, code, utask_id, snippet_id, store_in_backup):
         result = r.get("output_raw") or r.get("output_normalized") or "executed successfully"
     else:
         result = "Exec Failed: {}".format(r.get("error") or "unknown error")
-    return {"id": dev_id, "devid": dev_id, "devip": devip, "devname": devname, "status": ok, "state": ok,
-            "result": result}
+    res = {"id": dev_id, "devid": dev_id, "devip": devip, "devname": devname, "status": ok, "state": ok,
+           "result": result}
+    return _with_command_errors(res, r)
+
+
+def _with_command_errors(res, r):
+    """Snippet result of a run whose commands reported errors (RouterOS 'failure: ...', 'bad
+    parameter ...'): the commands ran, but not all of them worked - state / status false and
+    the error lines in 'errors'."""
+    errors = (r.get("command_errors") or []) if r.get("status") == "ok" else []
+    if errors:
+        res.update({"status": False, "state": False,
+                    "errors": "Completed with errors ({}): {}".format(len(errors), " | ".join(errors))})
+    return res
 
 
 def _snippet_skipped(dev_id, reason, message):
@@ -954,6 +1055,7 @@ def bulk_add_devices(*args, **kwargs):
         }
         
         mikrotiks=[]
+        extras={}
         scan_results=[]
         default_template_id = None
         try:
@@ -1139,6 +1241,9 @@ def bulk_add_devices(*args, **kwargs):
                     device['template_id'] = default_template_id
                 device['peer_ip']=src_ip 
                 mikrotiks.append(device)
+                extras[device['mac']] = {'group_ids': device_info.get('group_ids'),
+                                         'protocol': device_info.get('protocol'),
+                                         'connection_port': device_info.get('connection_port')}
 
                 scan_results[idx]['added']=True
                 
@@ -1181,8 +1286,9 @@ def bulk_add_devices(*args, **kwargs):
                     Devices.insert_many(list(unique_mikrotiks.values())).on_conflict(conflict_target=Devices.mac,
                                                                                      conflict_where=MAC_CONFLICT_WHERE,
                                                                                      update=update_fields).execute()
-                # Task 18.3 & 18.1: default DeviceConnections (api / ssh / webfig) of the added devices
-                _create_default_connections(mikrotiks)
+                # Task 18.3 & 18.1: default DeviceConnections (api / ssh or telnet / webfig),
+                # default credentials and groups of the added devices
+                _finish_added_devices(mikrotiks, extras)
         except Exception as e:
             log.error(e)
             

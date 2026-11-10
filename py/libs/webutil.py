@@ -13,7 +13,9 @@ from flask_session import Session
 from flask.json.provider import DefaultJSONProvider
 
 from libs.db import db
+from libs import account
 import config
+import json
 import datetime
 
 import logging
@@ -48,6 +50,57 @@ def login_required(func=None, role=None , perm={}):
 
 # --------------------------------------------------------------------------
 # get data about me, return error replys
+
+def _sync_session_with_db():
+    """Sessions used to keep the role / permissions copied at login for up to 30 days, so
+    demoting, disabling, deleting a user or changing the password did not affect sessions
+    that were already open. Now, on every logged-in request (one primary-key lookup, reused
+    by get_myself()):
+      - user deleted -> session cleared (the request continues as a visitor)
+      - password changed elsewhere -> session cleared (other logins end)
+      - role / adminperms changed -> copied into the session (disabled is then refused by
+        the existing "account disabled" check)
+    Sessions from before this version have no fingerprint yet: it is added, nobody is
+    logged out by the update. Any unexpected error keeps the session as it is (fail-open)."""
+    uid = session.get("userid")
+    if not uid:
+        return
+    try:
+        u = db.get_object_or_none(db.User, id=uid)
+        if u is None:
+            log.warning("Session of deleted user %s ended" % uid)
+            session.clear()
+            return
+        fp = account.password_fingerprint(u.password)
+        stored = session.get('pwfp')
+        if stored is None:
+            session['pwfp'] = fp
+        elif stored != fp:
+            log.warning("Session of user %s ended after a password change" % uid)
+            session.clear()
+            return
+        if session.get('role') != u.role:
+            session['role'] = u.role
+        try:
+            perms = json.loads(u.adminperms) if u.adminperms else []
+        except Exception:
+            perms = []
+        if session.get('perms') != perms:
+            session['perms'] = perms
+        g.MYSELF = u          # get_myself() reuses this row
+    except Exception as e:
+        log.warning("Session check skipped: %s" % e)
+
+
+def session_password_changed(user_obj):
+    """Call after the CURRENT user changed their own password, so this session stays valid
+    (other sessions of the user end on their next request)."""
+    try:
+        if str(session.get('userid')) == str(user_obj.id):
+            session['pwfp'] = account.password_fingerprint(user_obj.password)
+    except Exception:
+        pass
+
 
 def get_myself():
     """Return the user object of the caller or None if he is a visitor.
@@ -120,6 +173,9 @@ def before_request():
     # connect to db
     g.db = db.database
     g.db.connection()
+
+    # keep the session in sync with the user row (role, permissions, deleted, password)
+    _sync_session_with_db()
 
     # have common data available in global g
     # but do not pollute g, store only the most relevant data

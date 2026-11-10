@@ -242,6 +242,10 @@ def backup_get():
     id = input.get('id')
     try:
         back = db_backups.get_backup(id)
+        # same device-group scope as /api/backup/list
+        devid = back.devid_id if hasattr(back, 'devid_id') else (back.devid.id if back.devid else None)
+        if not db_user_group_perm.DevUserGroupPermRel.can_access_device(get_myself().id, devid):
+            return buildResponse({"status": "failed", "error": "Access denied"}, 200)
         path = back.dir
         with open(path, 'r') as file:
             file_content = file.read()

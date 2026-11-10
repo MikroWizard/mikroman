@@ -10,6 +10,7 @@ import datetime
 from libs import util
 from pathlib import Path
 from libs.db import db_sysconfig
+from libs import template_catalog
 import requests
 import logging
 import os
@@ -221,6 +222,11 @@ def main():
             "version": __version__,
             "ISPRO": is_pro
         }
+        # signed device-template updates (own schedule and settings; never stops the update check)
+        try:
+            log.info("Template catalog: {}".format(template_catalog.periodic(dict(params))))
+        except Exception as e:
+            log.warning("Template catalog check failed: {}".format(e))
         url="https://mikrowizard.com/wp-json/mikrowizard/v1/get_update"
         log.info("Checking for updates at {} with params: {}".format(url, params))
         # send post request to server mikrowizard.com with params in json

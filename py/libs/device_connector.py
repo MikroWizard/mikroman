@@ -28,7 +28,7 @@ from playhouse.shortcuts import model_to_dict as _peewee_dict
 
 from libs.db.db_pam import DeviceTemplates, DeviceConnections, Credentials, get_template_for_brand
 from libs.db.db_device import Devices
-from libs import kek_provider, envelope_crypto
+from libs import kek_provider, envelope_crypto, device_trust
 
 log = logging.getLogger("device_connector")
 _DEVMODE = os.environ.get("DEV_MODE") == "true"
@@ -48,6 +48,11 @@ class DeviceAuthError(DeviceConnectionError):
 
 class DeviceTimeoutError(DeviceConnectionError):
     pass
+
+
+class DeviceShortenedPrompt(DeviceAuthError):
+    """RouterOS showed a shortened prompt ('<...] >'): its console is narrower than the prompt
+    (login name without the console options). connect_device logs in again with them."""
 
 
 class DeviceCommandError(DeviceConnectionError):
@@ -73,13 +78,70 @@ class TemplateDrivenSSH(_NoAutoLogin, TerminalServerSSH):
     pass
 
 
-class TemplateDrivenMikrotikSSH(_NoAutoLogin, TerminalServerSSH):
+# RouterOS console options after '+' in the login name: c = no colors, t = no terminal
+# detection, <n>w / <n>h = terminal width / height. RouterOS ignores the SSH / Telnet window
+# size. Some RouterOS builds (seen on 7.25 over SSH) run the terminal detection even with 't'
+# (see _RouterOSTerminalProbe); when nobody answers it they assume 80 columns, shorten a prompt
+# longer than about 40 characters (long identity) to '<...] >' and redraw long command lines.
+MIKROTIK_LOGIN_OPTIONS = (("c", ""), ("t", ""), ("w", "511"), ("h", "4098"))
+ROS_CONSOLE_WIDTH = 511
+ROS_CONSOLE_HEIGHT = 4098
+
+# RouterOS terminal detection: it moves the cursor ('\x1b[9999B'), sends DECID ('\x1bZ') and a
+# cursor position request ('\x1b[6n') and waits for the answers. A real terminal emulator
+# answers on its own; paramiko / telnetlib do not.
+_ROS_PROBE_RE = re.compile(r"\x1b\[6n|\x1bZ")
+_ROS_PROBE_PARTIAL = ("\x1b", "\x1b[", "\x1b[6")
+_ROS_CURSOR_REPORT = "\x1b[{};{}R".format(ROS_CONSOLE_HEIGHT, ROS_CONSOLE_WIDTH)
+_ROS_DECID_REPORT = "\x1b[?6c"      # VT102
+
+
+class _RouterOSTerminalProbe:
+    """Answers RouterOS's terminal detection like a terminal emulator of
+    ROS_CONSOLE_WIDTH x ROS_CONSOLE_HEIGHT, so RouterOS uses that size even when it ignores the
+    login options. Works below netmiko's read_channel (which strips the escape codes), only
+    answers what RouterOS asked, and removes the requests from the output."""
+
+    def establish_connection(self, *args, **kwargs):
+        super().establish_connection(*args, **kwargs)
+        channel = getattr(self, "channel", None)
+        if channel is None or getattr(channel, "_mw_ros_probe", False):
+            return
+        raw_read = channel.read_channel
+        state = {"held": ""}
+
+        def read_channel():
+            data = state["held"] + raw_read()
+            state["held"] = ""
+            # a request split over two reads: keep its start for the next read
+            for part in _ROS_PROBE_PARTIAL[::-1]:
+                if data.endswith(part):
+                    data, state["held"] = data[:-len(part)], part
+                    break
+            if "\x1b" not in data:
+                return data
+            answers = []
+            for m in _ROS_PROBE_RE.finditer(data):
+                answers.append(_ROS_CURSOR_REPORT if m.group(0) == "\x1b[6n" else _ROS_DECID_REPORT)
+            if answers:
+                try:
+                    channel.write_channel("".join(answers))
+                except Exception as e:
+                    log.warning("RouterOS terminal detection not answered: %s", e)
+                data = _ROS_PROBE_RE.sub("", data)
+            return data
+
+        channel.read_channel = read_channel
+        channel._mw_ros_probe = True
+
+
+class TemplateDrivenMikrotikSSH(_RouterOSTerminalProbe, _NoAutoLogin, TerminalServerSSH):
     """SSH driver for MikroTik RouterOS.
 
     RouterOS's SSH console requires the login options appended to the username
     (c=no colors, t=disable terminal auto-detection, 511w/4098h=term size) and
-    CRLF line endings; otherwise it emits a terminal-init handshake and never
-    shows the prompt.
+    CRLF line endings. RouterOS builds that still run the terminal detection get it
+    answered (_RouterOSTerminalProbe).
     """
 
     def __init__(self, *args, **kwargs):
@@ -87,9 +149,28 @@ class TemplateDrivenMikrotikSSH(_NoAutoLogin, TerminalServerSSH):
         super().__init__(*args, **kwargs)
 
     def _modify_connection_params(self):
-        if "+" not in self.username:
-            self.username += "+ct511w4098h"
+        self.username = mikrotik_login_name(self.username)
         self.ansi_escape_codes = True
+
+
+class TemplateDrivenMikrotikTelnet(_RouterOSTerminalProbe, _NoAutoLogin, TerminalServerTelnet):
+    """Telnet to MikroTik RouterOS: the template login types the name with the console
+    options (connect_device); the terminal detection is answered as over SSH."""
+_ROS_OPTION_RE = re.compile(r"(\d*)([a-z])")
+
+
+def mikrotik_login_name(username):
+    """RouterOS login name with the console options MikroWizard needs. Options the admin set
+    already (e.g. '+ct80w') are kept, only the missing ones are added. RouterOS removes the
+    options before it checks the user (local or RADIUS)."""
+    if not username:
+        return username
+    name, _, opts = username.partition("+")
+    present = {letter for _, letter in _ROS_OPTION_RE.findall(opts)}
+    extra = "".join(num + letter for letter, num in MIKROTIK_LOGIN_OPTIONS if letter not in present)
+    if not opts and not extra:
+        return name
+    return "{}+{}{}".format(name, opts, extra)
 
 
 # ---------------------------------------------------------------------------
@@ -439,6 +520,20 @@ def _mikrotik_login_screens(conn, output, prompt_end, timeout=10):
     return output
 
 
+# RouterOS prompt redrawn for a console narrower than the prompt: '<...@host] >' or
+# '<...host >' (optionally after CRs / cursor codes when ANSI codes are not stripped)
+_SHORTENED_ROS_PROMPT = re.compile(r"(?m)^\r*(?:\x1b\[[0-9;?]*[A-Za-z]\r*)*<[^\r\n]*[\]\s][>#][ \t]*\r?$")
+
+
+_SHORTENED_ROS_END = re.compile(r"(?:^|\n)\r*(?:\x1b\[[0-9;?]*[A-Za-z]\r*)*<[^\r\n]*[\]\s][>#][ \t]*$")
+
+
+def _shortened_ros_prompt(conn, template, output):
+    output = output or ""
+    routeros = _is_mikrotik_session(conn, template) or "MikroTik RouterOS" in output
+    return routeros and bool(_SHORTENED_ROS_PROMPT.search(_tail(output)))
+
+
 def _template_driven_login(conn, template, username, password, timeout=30):
     """Handle login using the template's prompt.login_pattern and
     prompt.password_pattern.
@@ -466,7 +561,7 @@ def _template_driven_login(conn, template, username, password, timeout=30):
     output = ""
     try:
         if prompt_end is not None and is_ssh:
-            screens = [r for r, _, _ in _MT_SCREENS] if _is_mikrotik_session(conn, template) else []
+            screens = [r for r, _, _ in _MT_SCREENS] + [_SHORTENED_ROS_END] if _is_mikrotik_session(conn, template) else []
             output, _ = _wait_for(conn, [prompt_end, login_end, pass_end] + screens, min(timeout or 10, 10))
         elif prompt_end is not None:
             # telnet: a banner line can look like a prompt ('#####' vs '\S+#') - a prompt
@@ -553,8 +648,15 @@ def _template_driven_login(conn, template, username, password, timeout=30):
                 except Exception:
                     pass
                 return
+            if _shortened_ros_prompt(conn, template, output):
+                break               # an Enter shows the same shortened prompt again
 
         # the end of the output tells why (the start is only the banner)
+        if _shortened_ros_prompt(conn, template, output):
+            raise DeviceShortenedPrompt(
+                "Login failed: RouterOS shortened the prompt - its console is narrower than "
+                "'[user@identity] >' (long identity; console options or terminal detection "
+                "not applied). Last output: {!r}".format(output.strip()[-300:]))
         raise DeviceAuthError(
             "Login failed: no template prompt found. Last output: {!r}".format(output.strip()[-300:])
         )
@@ -571,18 +673,21 @@ def connect_device(device_id, template, connection, hook_context=None, legacy_cr
         session = resolve_session(device, connection or get_cli_connection(device_id), legacy_creds)
     params = build_netmiko_params(None, None, template, hook_context, legacy_creds, session=session)
     protocol = params["device_type"]
-    brand = session.brand or (template.get("brand") if isinstance(template, dict) else getattr(template, "brand", None)) or "mikrotik"
+    template_brand = template.get("brand") if isinstance(template, dict) else getattr(template, "brand", None)
+    brand = session.brand or template_brand or "mikrotik"
+    # a device whose brand is stored differently ('MikroTik', 'generic', ...) but that uses a
+    # MikroTik template is a RouterOS console too
+    is_mikrotik = "mikrotik" in (str(brand).lower(), str(template_brand or "").lower())
     if protocol == "generic":
-        conn_class = (
-            TemplateDrivenMikrotikSSH
-            if brand == "mikrotik"
-            else TemplateDrivenSSH
-        )
+        conn_class = TemplateDrivenMikrotikSSH if is_mikrotik else TemplateDrivenSSH
     else:
-        conn_class = TemplateDrivenTelnet
+        conn_class = TemplateDrivenMikrotikTelnet if is_mikrotik else TemplateDrivenTelnet
     # Keep device_type — BaseConnection.__init__ uses it to determine self.protocol
     # (telnet vs SSH transport layer)
     kwargs = dict(params)
+    if is_mikrotik and protocol != "generic":
+        # telnet: the template login types this name, so the console options go in here
+        kwargs["username"] = mikrotik_login_name(kwargs.get("username", ""))
 
     if _DEVMODE:
         log.info("[DEV] connecting: host=%s port=%s type=%s class=%s timeout=%s",
@@ -590,28 +695,59 @@ def connect_device(device_id, template, connection, hook_context=None, legacy_cr
                  params.get("timeout"))
 
     try:
+        return _open_and_login(conn_class, kwargs, template, params, session, is_mikrotik)
+    except DeviceShortenedPrompt:
+        # A MikroTik reached without the console options (brand stored as something else than
+        # 'mikrotik', ...): log in once more with them
+        retry_name = mikrotik_login_name(kwargs.get("username", ""))
+        if retry_name == kwargs.get("username", ""):
+            raise
+        log.warning("%s: RouterOS shortened the prompt - logging in again with the console options",
+                    session.ip)
+        kwargs = dict(kwargs, username=retry_name)
+        conn_class = TemplateDrivenMikrotikSSH if protocol == "generic" else TemplateDrivenMikrotikTelnet
+        return _open_and_login(conn_class, kwargs, template, params, session, True)
+
+
+def _open_and_login(conn_class, kwargs, template, params, session, is_mikrotik):
+    """Open the netmiko session and run the template login. Returns (conn, session)."""
+    try:
         conn = conn_class(**kwargs)
     except NetmikoAuthenticationException as e:
         raise DeviceAuthError("Auth failed for {}: {}".format(session.ip, e))
     except NetmikoTimeoutException as e:
         raise DeviceTimeoutError("Timeout connecting to {}:{}/{}: {}".format(
-            session.ip, params["port"], protocol, e))
+            session.ip, params["port"], params["device_type"], e))
     except (socket.error, EOFError, paramiko.SSHException) as e:
         raise DeviceConnectionError("Connection error for {}:{}: {}".format(
             session.ip, params["port"], e))
+    if is_mikrotik:
+        conn.ansi_escape_codes = True      # RouterOS cursor codes ('\x1b[9999B') out of the output
 
     # Template-driven login — reads banner, detects login/password prompts
     # from template, sends credentials, verifies prompt matches template patterns
     try:
         _template_driven_login(
             conn, template,
-            params.get("username", ""), params.get("password", ""),
+            kwargs.get("username", ""), params.get("password", ""),
             timeout=params.get("timeout", 30)
         )
     except BaseException:
         _close_quietly(conn)
         raise
 
+    # optional SSH host-key pinning (Settings, default off)
+    if params.get("device_type") == "generic":
+        try:
+            device_trust.check_ssh_transport(session.device_id, conn.remote_conn_pre.get_transport())
+        except device_trust.TrustError as e:
+            _close_quietly(conn)
+            raise DeviceAuthError(str(e))
+        except Exception as e:
+            log.warning("host key check skipped for %s: %s", session.ip, e)
+
+    # RouterOS console behaviour (multi-line blocks, error lines) for the commands
+    conn.mw_mikrotik = is_mikrotik or _is_mikrotik_session(conn, template)
     return conn, session
 
 
@@ -714,19 +850,59 @@ def _send_single_line(conn, command, prompt_re, read_timeout):
     return _send_command_watch(conn, command, prompt_re, read_timeout)
 
 
+# RouterOS continuation prompt: the line ended inside an open '{', '(', '[' or '"' and the
+# console waits for the rest of the block ('{... ', nested '{{... ').
+ROS_CONTINUATION = r'[{\(\["]+\.\.\.'
+_ROS_CONTINUATION_LINE = re.compile(r"^\s*" + ROS_CONTINUATION + r"\s*$")
+
+
 def _send_multiline_exec(conn, command, prompt_re, read_timeout):
     lines = [l.strip() for l in command.splitlines() if l.strip()]
     if not lines:
         return ""
+    # RouterOS: a line inside a multi-line block (':foreach ... do={') ends at the continuation
+    # prompt, never at the normal one
+    mikrotik = bool(prompt_re) and getattr(conn, "mw_mikrotik", False) is True
+    line_re = prompt_re
+    if mikrotik:
+        line_re = "(?:{})|(?:(?:^|(?<=\n)){}[ \t]*$)".format(_noncapturing(prompt_re), ROS_CONTINUATION)
     output_parts = []
     for i, line in enumerate(lines):
         if prompt_re:
             # a question (e.g. '[y/N]:') is answered by the next line of the snippet
-            out = _send_command_watch(conn, line, prompt_re, read_timeout, answer_follows=i + 1 < len(lines))
+            out = _send_command_watch(conn, line, line_re, read_timeout, answer_follows=i + 1 < len(lines))
         else:
             out = conn.send_command_timing(line, read_timeout=read_timeout)
         output_parts.append(out)
-    return "\n".join(output_parts)
+    if not mikrotik:
+        return "\n".join(output_parts)
+    last = (output_parts[-1] or "").rstrip().rsplit("\n", 1)[-1]
+    if _ROS_CONTINUATION_LINE.match(last):
+        try:
+            conn.write_channel("\x03")                    # leave the open block
+            _wait_for(conn, [_end_re(prompt_re, line_start=True)], 5)
+        except Exception:
+            pass
+        raise DeviceCommandError("The snippet ends inside an unclosed '{', '(', '[' or '\"' block: "
+                                 "the block was not run")
+    return _clean_ros_multiline("\n".join(output_parts), prompt_re)
+
+
+def _clean_ros_multiline(output, prompt_re):
+    """RouterOS multi-line output without the prompts and continuation prompts shown between
+    the lines, and without runs of empty lines."""
+    try:
+        prompt_line = re.compile(r"^\s*(?:{})\s*$".format(_prompt_part(prompt_re)))
+    except re.error:
+        prompt_line = None
+    kept = []
+    for line in output.splitlines():
+        if _ROS_CONTINUATION_LINE.match(line) or (prompt_line is not None and prompt_line.match(line)):
+            continue
+        if not line.strip() and (not kept or not kept[-1].strip()):
+            continue
+        kept.append(line)
+    return "\n".join(kept).strip("\n")
 
 
 def _send_config_mode(conn, command, template, prompt_re, enable_password, read_timeout):
@@ -778,6 +954,10 @@ INPUT_WAIT = (r"(?:[Pp]ass(?:word|phrase)[^\n]{0,20}:|\[(?:[yY]/[nN]|[yY]es/[nN]
               r"|\((?:[yY]/[nN]|[yY]es/[nN]o)\)[^\n]{0,5}|\[[^\]\n]{1,60}\]\?)")
 INPUT_END = re.compile(r"(?:{})[ \t]*$".format(INPUT_WAIT))
 INPUT_CONFIRM = 3.0        # seconds of silence that confirm the device really waits for input
+# RouterOS asks for a required argument that the command line left out ('interface: ' after
+# '/ip address add address=...'). Over SSH the CRLF line ending answers it at once (empty answer:
+# 'Script Error: action cancelled'); over Telnet it waited until the read timeout.
+_ROS_ARG_PROMPT = re.compile(r"(?:^|\n)[a-z][a-z0-9-]{0,40}:[ \t]*$")
 
 
 class DeviceInputRequired(DeviceCommandError):
@@ -832,6 +1012,8 @@ def _send_command_watch(conn, command, prompt_re, read_timeout, answer_follows=F
     command_string = conn.normalize_cmd(command)
     conn.write_channel(command_string)
     output, first_done = "", False
+    mikrotik = getattr(conn, "mw_mikrotik", False) is True
+    arg_answers = 0
     start = time.time()
     while time.time() - start < read_timeout:
         new = conn.read_channel()
@@ -854,6 +1036,20 @@ def _send_command_watch(conn, command, prompt_re, read_timeout, answer_follows=F
             output += extra
             if prompt_tail.search(_tail(output)):
                 break
+        elif mikrotik and arg_answers < 3 and _ROS_ARG_PROMPT.search(tail):
+            time.sleep(INPUT_CONFIRM)
+            extra = conn.read_channel()
+            if extra:
+                output += extra             # an output line ending in 'name:': keep reading
+                if prompt_tail.search(_tail(output)):
+                    break
+                continue
+            # RouterOS waits for a missing argument: an empty answer cancels the command, as
+            # over SSH ('Script Error: action cancelled' - reported as a command error), and
+            # the snippet goes on with its next line
+            log.warning("RouterOS asks for a missing argument after %r: cancelled", command.strip()[:80])
+            arg_answers += 1
+            conn.write_channel(conn.RETURN)
     else:
         raise ReadTimeout("Pattern not detected: {!r} in output (command '{}', {} s)".format(
             prompt_part, command.strip()[:80], read_timeout))
@@ -1009,9 +1205,17 @@ def _strip_trailing_prompt(output, prompt_re=None):
     return output
 
 
-def _scan_errors(output, template):
-    if not output or not template:
-        return
+# RouterOS error lines (7.x / 6.x), whatever the template lists: a failed line does not stop
+# the next lines of a snippet, so the run is reported as completed with errors.
+ROS_ERROR_LINE = re.compile(
+    r"^\s*(?:failure:|bad command name\b|bad parameter\b|expected end of command\b|"
+    r"expected command name\b|syntax error\b|no such item\b|no such command\b|invalid value\b|"
+    r"input does not match any value\b|ambiguous value\b|script error:|not enough permissions\b|"
+    r"already have\b)", re.IGNORECASE)
+MAX_ERROR_LINES = 50
+
+
+def _template_error_patterns(template):
     err_cfg = template.get("error_patterns") if isinstance(template, dict) else None
     if isinstance(err_cfg, dict):
         patterns = err_cfg.get("patterns") or []
@@ -1019,9 +1223,43 @@ def _scan_errors(output, template):
         patterns = err_cfg
     else:
         patterns = []
+    compiled = []
     for pattern in patterns:
-        if pattern and re.search(pattern, output, re.IGNORECASE):
-            log.warning("Error pattern '%s' matched in output", pattern)
+        if not pattern:
+            continue
+        try:
+            compiled.append(re.compile(pattern, re.IGNORECASE))
+        except re.error as e:
+            log.warning("template error pattern %r not usable: %s", pattern, e)
+    return compiled
+
+
+def find_errors(output, template, mikrotik=False):
+    """Output lines that report an error: the template's error_patterns and, for RouterOS,
+    the RouterOS error lines. Each line once, at most MAX_ERROR_LINES."""
+    if not output:
+        return []
+    patterns = _template_error_patterns(template) if template else []
+    if mikrotik:
+        patterns.append(ROS_ERROR_LINE)
+    if not patterns:
+        return []
+    found = []
+    for line in output.splitlines():
+        text = line.strip()
+        if text and text not in found and any(p.search(line) for p in patterns):
+            found.append(text[:300])
+            if len(found) >= MAX_ERROR_LINES:
+                break
+    return found
+
+
+def _scan_errors(output, template):
+    if not output or not template:
+        return
+    for pattern in _template_error_patterns(template):
+        if pattern.search(output):
+            log.warning("Error pattern '%s' matched in output", pattern.pattern)
 
 
 def export_flags_for_version(version):
@@ -1152,6 +1390,10 @@ def exec_channel_command(session, command, port, connect_timeout, read_timeout):
         except (socket.error, EOFError, paramiko.SSHException) as e:
             raise DeviceConnectionError("Connection error for {}:{}: {}".format(session.ip, port, e))
         try:
+            device_trust.check_ssh_transport(session.device_id, client.get_transport())
+        except device_trust.TrustError as e:
+            raise DeviceAuthError(str(e))
+        try:
             chan = client.get_transport().open_session(timeout=connect_timeout)
             chan.settimeout(read_timeout)
             chan.exec_command(command)
@@ -1257,7 +1499,8 @@ def connect_and_execute(device_id, command, template_id=None, template=None,
                 output = exec_channel_command(session, exec_command, port, connect_timeout, timeout)
                 _scan_errors(output, template)
                 return {"output": output, "duration_ms": int((time.time() - start) * 1000), "error": None,
-                        "error_type": None, "session_conn": None}
+                        "error_type": None, "session_conn": None,
+                        "command_errors": find_errors(output, template, mikrotik=True)}
             except ExecChannelUnavailable as e:
                 log.warning("%s - using the interactive session", e)
 
@@ -1277,14 +1520,15 @@ def connect_and_execute(device_id, command, template_id=None, template=None,
             conn_obj, command, template, prompt_re, is_config_mode, enable_password, timeout,
             exact_prompt=exact_prompt,
         )
+        command_errors = find_errors(output, template, mikrotik=getattr(conn_obj, "mw_mikrotik", False) is True)
         if keep_session:
             return {"output": output, "duration_ms": duration_ms, "error": None, "error_type": None,
-                    "session_conn": conn_obj}
+                    "session_conn": conn_obj, "command_errors": command_errors}
         if opened_here:
             disconnect_device(conn_obj, template)
             opened_here = False
         return {"output": output, "duration_ms": duration_ms, "error": None, "error_type": None,
-                "session_conn": session_conn}
+                "session_conn": session_conn, "command_errors": command_errors}
 
     except DeviceAuthError as e:
         return _failed(conn_obj, opened_here, str(e), "auth")

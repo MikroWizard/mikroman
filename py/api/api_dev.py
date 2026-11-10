@@ -5,6 +5,7 @@
 # MikroWizard.com , Mikrotik router management solution
 # Author: sepehr.ha@gmail.com
 
+import concurrent.futures
 import datetime
 import html
 import json
@@ -13,7 +14,8 @@ import re
 
 import config
 from flask import redirect, request, session
-from libs import ping, util, device_state
+from libs import device_edit, device_trust, ping, util, device_state
+from libs.db.db import database
 from libs.db import (
     db_device,
     db_groups,
@@ -171,6 +173,9 @@ def get_editform():
     devid = int(input.get("devid", False))
     res = {}
     try:
+        # same device-group scope as the device list
+        if not db_user_group_perm.DevUserGroupPermRel.can_access_device(get_myself().id, devid):
+            return buildResponse({"status": "failed"}, 200, error="Access denied")
         dev = db_device.get_device(devid)
         if not dev:
             return buildResponse({"status": "failed"}, 200, error="Wrong Data")
@@ -197,6 +202,117 @@ def get_editform():
         log.error(e)
         return buildResponse({"status": "failed"}, 200, error="Wrong Data")
     return buildResponse(res, 200)
+
+
+BULK_EDIT_MAX = 50          # devices per request (the UI sends the selection in chunks)
+BULK_EDIT_WORKERS = 10
+
+
+def _bulk_edit_changes(raw):
+    """Validated changes of a bulk edit request: only the fields that are given."""
+    changes = {}
+    if raw.get("ssl") is not None:
+        changes["ssl"] = bool(raw["ssl"])
+    for key in ("api_port", "ssh_port"):
+        if raw.get(key) not in (None, ""):
+            port = int(raw[key])
+            if not 1 <= port <= 65535:
+                raise ValueError("{} must be 1-65535".format(key))
+            changes[key] = port
+    if raw.get("user_name") not in (None, ""):
+        changes["user_name"] = str(raw["user_name"])
+    if raw.get("password") not in (None, ""):
+        changes["password"] = str(raw["password"])
+    return changes
+
+
+@app.route("/api/dev/bulk_edit", methods=["POST"])
+@login_required(role="admin", perm={"device": "full"})
+def bulk_edit():
+    """Same settings for many MikroTik devices: SSL / API port / SSH port / user / password.
+    apply_on_router: also change the router's /ip service ports first (the record changes only
+    where the router answered with the new settings)."""
+    input = request.json or {}
+    try:
+        dev_ids = [int(d) for d in (input.get("devices") or [])]
+        changes = _bulk_edit_changes(input.get("changes") or {})
+    except (TypeError, ValueError) as e:
+        return buildResponse({"status": "failed", "err": "Wrong data: {}".format(e)}, 200)
+    if not dev_ids or not changes:
+        return buildResponse({"status": "failed", "err": "Select devices and at least one setting"}, 200)
+    if len(dev_ids) > BULK_EDIT_MAX:
+        return buildResponse({"status": "failed", "err": "At most {} devices per request".format(BULK_EDIT_MAX)}, 200)
+    apply_router = bool(input.get("apply_on_router"))
+    me = get_myself()
+
+    def one(devid):
+        with database.connection_context():         # worker thread: its own pooled connection
+            return _one(devid)
+
+    def _one(devid):
+        res = {"id": devid, "name": "", "ip": "", "status": "failed", "message": ""}
+        try:
+            if not db_user_group_perm.DevUserGroupPermRel.can_access_device(me.id, devid):
+                res["message"] = "no access to this device"
+                return res
+            dev = db_device.Devices.get_or_none(db_device.Devices.id == devid)
+            if dev is None:
+                res["message"] = "device not found"
+                return res
+            res.update(name=dev.name or "", ip=dev.ip or "")
+            if not device_edit.is_mikrotik(dev):
+                res.update(status="skipped", message="not a MikroTik device")
+                return res
+            plan = device_edit.plan_changes(dev, changes)
+            if apply_router:
+                ok, msg = device_edit.apply_on_router(dev, plan)
+                if not ok:
+                    res["message"] = msg
+                    return res
+                res["message"] = msg
+            device_edit.save_record(dev, plan)
+            res["status"] = "success"
+            res["message"] = (res["message"] + "; " if res["message"] else "") + "record saved"
+        except Exception as e:
+            log.exception("bulk edit device %s", devid)
+            res["message"] = str(e)
+        return res
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(BULK_EDIT_WORKERS, len(dev_ids))) as pool:
+        results = list(pool.map(one, dev_ids))
+    db_syslog.add_syslog_event(me, "Device", "Bulk Edit", get_ip(), get_agent(), json.dumps({
+        "devices": dev_ids, "changes": changes, "apply_on_router": apply_router,
+        "success": sum(1 for r in results if r["status"] == "success")}))
+    return buildResponse({"status": "success", "results": results}, 200)
+
+
+@app.route("/api/dev/trust", methods=["POST"])
+@login_required(role="admin", perm={"device": "read"})
+def device_trust_status():
+    """Trusted API-SSL certificate / SSH host key of a device and the verification modes."""
+    devid = int((request.json or {}).get("devid", 0))
+    if not db_user_group_perm.DevUserGroupPermRel.can_access_device(get_myself().id, devid):
+        return buildResponse({"status": "failed", "err": "Not allowed"}, 200)
+    return buildResponse({"status": "success", "tls_mode": device_trust.tls_mode(), "ssh_mode": device_trust.ssh_mode(),
+                          "available": device_trust.status(devid) is not None,
+                          "trust": device_trust.status(devid) or {}}, 200)
+
+
+@app.route("/api/dev/trust/reset", methods=["POST"])
+@login_required(role="admin", perm={"device": "full"})
+def device_trust_reset():
+    """Forget the trusted certificate / host key (kind 'tls', 'ssh' or both): the next
+    connection is trusted again. For an expected change (new certificate, reinstalled router)."""
+    data = request.json or {}
+    devid = int(data.get("devid", 0))
+    kind = data.get("kind") if data.get("kind") in ("tls", "ssh") else None
+    if not db_user_group_perm.DevUserGroupPermRel.can_access_device(get_myself().id, devid):
+        return buildResponse({"status": "failed", "err": "Not allowed"}, 200)
+    if not device_trust.reset(devid, kind):
+        return buildResponse({"status": "failed", "err": "Router identity verification is not installed (migration 066)"}, 200)
+    db_syslog.add_syslog_event(get_myself(), "Device", "Trust Reset", get_ip(), get_agent(),
+                               json.dumps({"devid": devid, "kind": kind or "all"}))
+    return buildResponse({"status": "success"}, 200)
 
 
 @app.route("/api/dev/save_editform", methods=["POST"])
@@ -230,62 +346,14 @@ def save_editform():
             try:
                 dev = db_device.Devices.get_or_none(db_device.Devices.id == devid)
                 if dev:
-                    dec_user = util.decrypt_data(dev.user_name) if dev.user_name else ""
-                    dec_pass = ""
-                    if dev.password:
-                        dec_pass = util.decrypt_data(dev.password)
-
-                    # Find all device-scoped credentials for this device
-                    creds = list(Credentials.select().where(
-                        Credentials.device_id == dev.id,
-                        Credentials.scope == 'device'
-                    ))
-
-                    kek = kek_provider.get_kek()
-                    enc_bundle = envelope_crypto.full_encrypt(dec_pass, kek)
-
-                    if creds:
-                        # Update all existing device-scoped credentials
-                        for cred in creds:
-                            cred.username = dec_user
-                            cred.encrypted_password = enc_bundle['encrypted_payload']
-                            cred.dek_encrypted = enc_bundle['dek_encrypted']
-                            cred.modified = datetime.datetime.now(datetime.timezone.utc)
-                            cred.save()
-                    else:
-                        # Create new default credentials
-                        is_mikrotik = getattr(dev, 'device_type', 'mikrotik') == 'mikrotik'
-                        types_to_create = ["webfig", "ssh"] if is_mikrotik else ["ssh"]
-                        for t in types_to_create:
-                            Credentials.create(
-                                name=f"Device {dev.id} {t.upper()} Credential",
-                                credential_type=t,
-                                username=dec_user,
-                                encrypted_password=enc_bundle['encrypted_payload'],
-                                dek_encrypted=enc_bundle['dek_encrypted'],
-                                auth_method="password",
-                                scope="device",
-                                device_id=dev.id,
-                                owner_id=dev.owner,
-                                created=datetime.datetime.now(datetime.timezone.utc),
-                                modified=datetime.datetime.now(datetime.timezone.utc)
-                            )
+                    device_edit.sync_device_credentials(dev)
             except Exception as sync_err:
                 log.error(f"Failed to sync credential to credentials table: {sync_err}")
 
             # Sync the api connection row (port + ssl) so device_connections stays
             # consistent with the device row — backup/API read these values.
             try:
-                resolved_port = int(port) if port else (8729 if ssl else 8728)
-                api_conn = DeviceConnections.get_or_none(
-                    DeviceConnections.device_id == devid,
-                    DeviceConnections.protocol == 'api',
-                )
-                if api_conn:
-                    api_conn.port = resolved_port
-                    api_conn.ssl = bool(ssl)
-                    api_conn.modified = datetime.datetime.now(datetime.timezone.utc)
-                    api_conn.save()
+                device_edit.sync_api_connection(devid, port, ssl)
             except Exception as conn_sync_err:
                 log.error(f"Failed to sync api connection: {conn_sync_err}")
 
@@ -616,6 +684,9 @@ def dev_info():
     devid = input.get("devid", False)
     if not devid or not isinstance(devid, int):
         return buildResponse({"status": "failed"}, 200, error="Wrong Data")
+    # same device-group scope as the device list
+    if not db_user_group_perm.DevUserGroupPermRel.can_access_device(get_myself().id, devid):
+        return buildResponse({"status": "failed"}, 200, error="Access denied")
     res = db_device.get_device(devid)
     device_type = res.get("device_type") or "mikrotik"
     is_mikrotik = device_type == "mikrotik"
