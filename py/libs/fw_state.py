@@ -29,6 +29,8 @@ log = logging.getLogger("fw_state")
 LEASE_KEY = "mw:fw:lease:{}"
 RECORD_KEY = "mw:fw:rec:{}"
 QUEUE_SEQ_KEY = "mw:fw:queue_seq"
+EXPECTED_REBOOT_KEY = "mw:fw:expreboot:{}"   # a reboot MikroWizard sent itself (firmware / RouterBOOT)
+EXPECTED_REBOOT_TTL = 1800
 LEASE_TTL = 300                 # seconds without heartbeat before a lease is free again
 HEARTBEAT_INTERVAL = 60
 RECORD_TTL = 30 * 24 * 3600
@@ -168,6 +170,34 @@ def expect_offline(dev_id):
         return json.loads(_decode(raw)).get("state") in ("rebooting", "transferring")
     except Exception:
         return True
+
+
+def mark_expected_reboot(dev_id, ttl=EXPECTED_REBOOT_TTL):
+    """Remember that the firmware engine is rebooting this router, so the poller does not
+    report the uptime reset as an unexpected reboot (the firmware mule often marks the device
+    'updated' before the poller sees the reboot)."""
+    try:
+        _redis().set(EXPECTED_REBOOT_KEY.format(dev_id), str(time.time()), ex=max(60, int(ttl)))
+        return True
+    except Exception as e:
+        log.warning("Could not store expected reboot of device %s: %s", dev_id, e)
+        return False
+
+
+def clear_expected_reboot(dev_id):
+    try:
+        _redis().delete(EXPECTED_REBOOT_KEY.format(dev_id))
+    except Exception as e:
+        log.warning("Could not clear expected reboot of device %s: %s", dev_id, e)
+
+
+def consume_expected_reboot(dev_id):
+    """True (once) when a reboot of this device was sent by the firmware engine recently.
+    The marker is removed, so a later reboot is reported normally. False on Redis errors."""
+    try:
+        return bool(_redis().delete(EXPECTED_REBOOT_KEY.format(dev_id)))
+    except Exception:
+        return False
 
 
 class Lease(object):

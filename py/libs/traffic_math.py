@@ -309,6 +309,10 @@ def parse_routeros_uptime(val):
 
 REBOOT_KEYWORDS = ("reboot", "shutdown", "power failure", "power outage", "kernel failure",
                    "overtemperature", "watchdog")
+# RouterOS lines that ASK for a reboot (RouterBOOT auto-upgrade / upgrade, package changes).
+# They are written after the boot and are not the cause of the reboot.
+REBOOT_REQUEST_HINTS = ("please reboot", "reboot for changes", "reboot required", "reboot is required",
+                        "reboot to apply", "reboot router to")
 
 
 def pick_reboot_reason(log_entries, default):
@@ -323,6 +327,9 @@ def pick_reboot_reason(log_entries, default):
         if "system" not in topics:
             continue
         msg = str(entry.get("message", ""))
-        if any(w in msg.lower() for w in REBOOT_KEYWORDS):
+        low = msg.lower()
+        if any(h in low for h in REBOOT_REQUEST_HINTS):
+            continue
+        if any(w in low for w in REBOOT_KEYWORDS):
             return msg
     return default

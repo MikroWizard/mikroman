@@ -22,6 +22,7 @@ import json
 import logging
 from libs.red import RedisDB
 from libs import traffic_math
+from libs import fw_state
 from libs.ssh_helper import SSH_Helper
 from libs import device_trust
 import os
@@ -816,7 +817,9 @@ def grab_device_data(dev, q, sysconfig_flags=None, events_map=None):
 
             if is_reboot:
                 invalidate_static_info(dev.id)  # re-read routerboard/identity/wireless next poll
-                was_expected = dev.status in ('updating', 'rebooting', 'upgrading')
+                # consume the marker first, so it is always removed after one reboot
+                sent_by_engine = fw_state.consume_expected_reboot(dev.id)
+                was_expected = sent_by_engine or dev.status in ('updating', 'rebooting', 'upgrading')
                 old_uptime_str = dev.uptime
                 dev.uptime = new_uptime
 

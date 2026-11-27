@@ -1338,7 +1338,8 @@ def apply_firmware(dev, router, api, state, step, final, firms, extras, q, auto_
         rec = fw_state.get_record(dev_id) or {}
         rec.update(state="rebooting", kind="os", step=step.canonical(), final=final.canonical(),
                    from_version=fw_plan.vstr(state["version"]), reboot_at=time.time(), uptime_before=state["uptime"],
-                   packages_before=pkgs_before, expected_extras=list(extras), uploaded=uploaded)
+                   packages_before=pkgs_before, expected_extras=list(extras), uploaded=uploaded,
+                   auto_upgrade_rb=bool(auto_upgrade_rb))
         if not fw_state.put_record(dev_id, rec):
             raise RuntimeError("update record could not be stored (redis)")
     except Exception as e:
@@ -1355,11 +1356,13 @@ def apply_firmware(dev, router, api, state, step, final, firms, extras, q, auto_
         cleaned = _cleanup_own_files(dev)
         return _fail(dev, "Router not reachable for the reboot after the transfer: {}{}".format(
             e, "" if cleaned else " - WARNING: uploaded packages could not be removed from the router"), q)
+    fw_state.mark_expected_reboot(dev_id, _expected_reboot_ttl())
     try:
         refused = _send_reboot(reboot_api)
     finally:
         _close(reboot_router)
     if refused:
+        fw_state.clear_expected_reboot(dev_id)
         cleaned = _cleanup_own_files(dev)
         reason = f"Router refused the reboot: {refused}"
         if not cleaned:
@@ -1426,6 +1429,8 @@ def _verify_locked(dev_id, now=None):
         rb_rows = []
         if rec.get("kind") == "routerboot":
             rb_rows = _print(api, "/system/routerboard")
+        else:
+            rb_rows = _routerboard_rows_optional(api)
     except Exception as e:
         _close(router)
         if elapsed > _reboot_timeout():
@@ -1459,7 +1464,7 @@ def _verify_locked(dev_id, now=None):
         final = fw_plan.ver(rec.get("final") or dev.firmware_to_install or live)
         step = fw_plan.ver(rec.get("step") or final)
         if live >= final:
-            _finish_os_update(dev, rec, rows, live)
+            _finish_os_update(dev, rec, rows, live, rb_rows[0] if rb_rows else {})
             return "done"
         if live >= step:
             _dev_update(dev_id, status="updating", failed_attempt=0)
@@ -1491,7 +1496,48 @@ def _install_log_hint(api):
     return ""
 
 
-def _finish_os_update(dev, rec, rows, live):
+def _expected_reboot_ttl():
+    """How long the poller treats an uptime reset as a reboot sent by the engine."""
+    return max(_reboot_timeout(), 900) + 900
+
+
+def _routerboard_rows_optional(api):
+    """/system/routerboard rows for the check after an OS update; [] when the menu is missing
+    (CHR / x86) or cannot be read - this read must never fail the OS update verification."""
+    try:
+        return _print(api, "/system/routerboard")
+    except Exception as e:
+        if not (isinstance(e, RouterTrap) and _no_such_command(e)):
+            log.warning(f"Could not read RouterBOOT state after the update: {e}")
+        return []
+
+
+def _routerboot_follow_up_wanted(rec, rb):
+    """True when the OS update asked for the RouterBOOT upgrade (auto_upgrade_rb) and the
+    router reports a newer RouterBOOT that is not running yet. RouterOS 'auto-upgrade' only
+    writes the new RouterBOOT during the boot after the OS update; it runs after one more
+    reboot. Records written before this check (no auto_upgrade_rb) never get the extra reboot."""
+    if rec.get("legacy") or rec.get("kind", "os") not in ("os", "native"):
+        return False
+    wanted = rec.get("auto_upgrade_rb")
+    if wanted is None:
+        req = rec.get("request")
+        wanted = req.get("auto_upgrade_rb") if isinstance(req, dict) else None
+    if not fw_plan._truthy(wanted):
+        return False
+    if _sysconf('firmware_routerboot_reboot_after_update', 'True') == "False":
+        return False
+    return _routerboot_upgrade_available(rb)
+
+
+def _queue_routerboot_after_update(dev_id, rb=None):
+    rb = rb or {}
+    fw_state.put_record(dev_id, {"state": "queued", "seq": fw_state.next_queue_seq(), "queued_at": time.time(),
+                                 "request": {"kind": "routerboot"}, "origin": "after-update", "next_try_at": 0,
+                                 "rb_from": rb.get("current-firmware"), "rb_to": rb.get("upgrade-firmware")})
+
+
+def _finish_os_update(dev, rec, rows, live, rb=None):
     dev_id = dev.id
     after = {n for n, p in fw_plan.installed_packages(rows, live).items() if not p["disabled"]}
     expected = set(rec.get("expected_extras") or [])
@@ -1508,8 +1554,11 @@ def _finish_os_update(dev, rec, rows, live):
     fw_state.clear_record(dev_id)
     log.info(f"Device {dev.name} ({dev.ip}) successfully updated to {live.canonical()}")
     if dev.upgrade_device:
-        fw_state.put_record(dev_id, {"state": "queued", "seq": fw_state.next_queue_seq(), "queued_at": time.time(),
-                                     "request": {"kind": "routerboot"}, "origin": "after-update"})
+        _queue_routerboot_after_update(dev_id, rb)
+    elif _routerboot_follow_up_wanted(rec, rb):
+        log.info(f"Device {dev.name} ({dev.ip}): RouterBOOT {(rb or {}).get('upgrade-firmware')} written by auto-upgrade, "
+                 f"running {(rb or {}).get('current-firmware')} - one more reboot queued")
+        _queue_routerboot_after_update(dev_id, rb)
 
 
 # ---------------------------------------------------------------------------
@@ -1537,8 +1586,10 @@ def _start_routerboot(dev, api, rb, q):
                      permanent=_no_such_command(e))
     fw_state.put_record(dev_id, {"state": "rebooting", "kind": "routerboot", "reboot_at": time.time(),
                                  "rb_from": rb.get("current-firmware"), "rb_to": rb.get("upgrade-firmware")})
+    fw_state.mark_expected_reboot(dev_id, _expected_reboot_ttl())
     refused = _send_reboot(api)
     if refused:
+        fw_state.clear_expected_reboot(dev_id)
         return _fail(dev, f"Router refused the reboot: {refused}", q, event="Firmware Upgrade", severity="Error", permanent=True)
     _dev_update(dev_id, status="upgrading")
     _report(q, dev_id, True, message="RouterBOOT upgrade, rebooting")
@@ -1698,12 +1749,15 @@ def update_device_native(dev, q=None, channel=None, auto_upgrade_rb=True, ofa=No
         fw_state.put_record(dev_id, {"request": prev_req, "state": "rebooting", "kind": "native", "step": latest_v.canonical(),
                                      "final": latest_v.canonical(), "from_version": live.canonical(),
                                      "reboot_at": time.time(), "reboot_grace": 1800, "uptime_before": state["uptime"],
-                                     "packages_before": pkgs_before, "expected_extras": []})
+                                     "packages_before": pkgs_before, "expected_extras": [],
+                                     "auto_upgrade_rb": bool(auto_upgrade_rb)})
         _dev_update(dev_id, status="updating", firmware_to_install=latest_v.canonical())
+        fw_state.mark_expected_reboot(dev_id, max(_expected_reboot_ttl(), 1800 + 900))
         try:
             _call(api, "/system/package/update/install")
         except RouterTrap as e:
             if not isinstance(e, FatalError):
+                fw_state.clear_expected_reboot(dev_id)
                 raise PlanError("install_refused", f"Router refused the update: {e}", permanent=False)
         except (FatalError, ConnectionClosed, OSError, socket.timeout):
             pass                       # router downloads, then reboots and drops the session
