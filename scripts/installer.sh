@@ -893,7 +893,7 @@ print_summary_and_security_guide() {
     echo -e "${WHITE}${BOLD}Access Details:${RESET}"
     echo -e "  * Web Interface URL : ${CYAN}http://${serverip}${RESET}"
     echo -e "  * Default Admin User: ${CYAN}mikrowizard${RESET}"
-    echo -e "  * Default Admin Pass: ${CYAN}admin${RESET}"
+    echo -e "  * Default Admin Pass: ${CYAN}mikrowizard${RESET}"
     echo -e "  * Database Name     : ${CYAN}${dbname}${RESET}"
     echo -e "  * Firmware Directory: ${CYAN}${firmpath}${RESET}"
     echo -e "  * Backup Directory  : ${CYAN}${backuppath}${RESET}"
